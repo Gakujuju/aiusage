@@ -275,6 +275,78 @@ describe('runParseCursor', () => {
     expect(result.nextCursor).toBeNull()
     expect(result.errors).toHaveLength(0)
   })
+
+  it('skips gracefully when cursorDiskKV table is missing', () => {
+    // Residual dbs from old/uninstalled Cursor versions may lack the table;
+    // the parser must degrade gracefully instead of throwing.
+    const emptyDb = new Database(':memory:')
+    try {
+      const result = runParseCursor(emptyDb, BASE_OPTIONS)
+
+      expect(result.records).toHaveLength(0)
+      expect(result.toolCalls).toHaveLength(0)
+      expect(result.nextCursor).toBeNull()
+      expect(result.errors).toHaveLength(0)
+    } finally {
+      emptyDb.close()
+    }
+  })
+
+  it('ignores unrelated key prefixes', () => {
+    // Large dbs contain many other prefixes (agentKv, checkpointId, ...);
+    // none of them may leak into the stats.
+    db.prepare(`INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)`).run(
+      'agentKv:some-agent-key',
+      JSON.stringify({ type: 2, tokenCount: { inputTokens: 999999, outputTokens: 999999 } }),
+    )
+    db.prepare(`INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)`).run(
+      'checkpointId:cp-1',
+      JSON.stringify({ type: 2, tokenCount: { inputTokens: 888888, outputTokens: 888888 } }),
+    )
+    insertComposer(db, 'conv-1', 1779400000000, {})
+    insertBubble(db, 'conv-1', 'b-1', 2, 1000, 100)
+
+    const result = runParseCursor(db, BASE_OPTIONS)
+
+    expect(result.records).toHaveLength(1)
+    expect(result.records[0].inputTokens).toBe(1000)
+    expect(result.records[0].outputTokens).toBe(100)
+  })
+
+  it('reports progress per processed conversation', () => {
+    insertComposer(db, 'conv-1', 1779400000000, {})
+    insertBubble(db, 'conv-1', 'b-1', 2, 1000, 100)
+    insertComposer(db, 'conv-2', 1779410000000, {})
+    insertBubble(db, 'conv-2', 'b-2', 2, 2000, 200)
+    insertComposer(db, 'conv-3', 1779420000000, {})
+    insertBubble(db, 'conv-3', 'b-3', 2, 3000, 300)
+
+    const calls: [number, number, number][] = []
+    const result = runParseCursor(db, {
+      ...BASE_OPTIONS,
+      onProgress: (current, total, recordsFound) => calls.push([current, total, recordsFound]),
+    })
+
+    expect(result.records).toHaveLength(3)
+    expect(calls.length).toBe(3)
+    expect(calls.map(([current]) => current)).toEqual([1, 2, 3])
+    expect(calls.every(([, total]) => total === 3)).toBe(true)
+  })
+
+  it('does not report progress when there is nothing new to process', () => {
+    insertComposer(db, 'conv-old', 1779400000000, {})
+    insertBubble(db, 'conv-old', 'b-1', 2, 1000, 100)
+
+    const calls: [number, number, number][] = []
+    const result = runParseCursor(db, {
+      ...BASE_OPTIONS,
+      cursor: { lastCreatedAt: 1779400000000, lastId: 'conv-old' },
+      onProgress: (current, total, recordsFound) => calls.push([current, total, recordsFound]),
+    })
+
+    expect(result.records).toHaveLength(0)
+    expect(calls).toHaveLength(0)
+  })
 })
 
 describe('runParse with cursor', () => {

@@ -11,6 +11,7 @@ export interface CursorImportOptions {
   platform?: string
   now: number
   cursor: CursorCursor | null
+  onProgress?: (current: number, total: number, recordsFound: number) => void
 }
 
 export interface CursorImportResult {
@@ -102,15 +103,30 @@ export function runParseCursor(
   db: Database.Database,
   options: CursorImportOptions,
 ): CursorImportResult {
-  const { dbPath, device, deviceInstanceId, platform, now, cursor } = options
+  const { dbPath, device, deviceInstanceId, platform, now, cursor, onProgress } = options
   const records: StatsRecord[] = []
   const toolCalls: ToolCallRecord[] = []
   const errors: string[] = []
   let lastCursor: CursorCursor | null = null
 
-  // Fetch all composerData entries with content
+  // Gracefully skip databases without the expected table (e.g. residual dbs
+  // left behind by old/uninstalled Cursor versions)
+  const hasTable = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cursorDiskKV'`)
+    .get()
+  if (!hasTable) {
+    return { records, toolCalls, nextCursor: lastCursor, errors }
+  }
+
+  // Fetch all composerData entries with content.
+  // Use an index-friendly range scan instead of LIKE: SQLite's LIKE is
+  // case-insensitive by default and cannot use the `key TEXT UNIQUE` index,
+  // so every LIKE prefix query degenerates into a full-table scan, which is
+  // fatal on multi-GB state.vscdb files. Cursor writes keys with exact
+  // lowercase prefixes, so binary range comparison matches the same rows.
+  // (';' is the ASCII character right after ':')
   const composerRows = db
-    .prepare(`SELECT key, CAST(value AS TEXT) as value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND length(value) > 100`)
+    .prepare(`SELECT key, CAST(value AS TEXT) as value FROM cursorDiskKV WHERE key >= 'composerData:' AND key < 'composerData;' AND length(value) > 100`)
     .all() as ComposerRow[]
 
   // Parse and filter composerData entries
@@ -152,17 +168,25 @@ export function runParseCursor(
     return { records, toolCalls, nextCursor: lastCursor, errors }
   }
 
-  // Prepare statement to fetch all bubbles for a composer
+  // Prepare statement to fetch all bubbles for a composer.
+  // Range bounds instead of LIKE so the key index is used (see above);
+  // otherwise each composer triggers a full-table scan.
   const bubbleStmt = db.prepare(
-    `SELECT CAST(value AS TEXT) as value FROM cursorDiskKV WHERE key LIKE ?`,
+    `SELECT CAST(value AS TEXT) as value FROM cursorDiskKV WHERE key >= ? AND key < ?`,
   )
 
+  let processed = 0
   for (const composer of filtered) {
     lastCursor = { lastCreatedAt: composer.createdAt, lastId: composer.composerId }
+    processed += 1
+    onProgress?.(processed, filtered.length, records.length)
 
     try {
       // Fetch all bubble entries for this conversation
-      const bubbleRows = bubbleStmt.all(`bubbleId:${composer.composerId}:%`) as { value: string }[]
+      const bubbleRows = bubbleStmt.all(
+        `bubbleId:${composer.composerId}:`,
+        `bubbleId:${composer.composerId};`,
+      ) as { value: string }[]
 
       let totalInputTokens = 0
       let totalOutputTokens = 0
