@@ -948,6 +948,7 @@ export async function runParse(db: Database.Database, filterTool?: string, optio
     try {
       const cursorDb = new Database(cursorDbPath, { readonly: true })
       try {
+        let cursorProgressFired = false
         const result = runParseCursor(cursorDb, {
           dbPath: cursorDbPath,
           device,
@@ -955,6 +956,10 @@ export async function runParse(db: Database.Database, filterTool?: string, optio
           platform: devicePlatform,
           now: Date.now(),
           cursor: wm.getCursorCursor(),
+          onProgress: (current, total, recordsFound) => {
+            cursorProgressFired = true
+            onProgress({ phase: 'Parsing SQLite', tool: 'cursor', current, total, records: parsedCount + recordsFound, toolCalls: toolCallCount })
+          },
         })
 
         for (const record of result.records) insertRecord(db, record)
@@ -966,7 +971,9 @@ export async function runParse(db: Database.Database, filterTool?: string, optio
         parsedCount += result.records.length
         toolCallCount += result.toolCalls.length
         errors.push(...result.errors)
-        onProgress({ phase: 'Parsing SQLite', tool: 'cursor', current: 1, total: 1, records: parsedCount, toolCalls: toolCallCount })
+        if (!cursorProgressFired) {
+          onProgress({ phase: 'Parsing SQLite', tool: 'cursor', current: 1, total: 1, records: parsedCount, toolCalls: toolCallCount })
+        }
       } finally {
         cursorDb.close()
       }
