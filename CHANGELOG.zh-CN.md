@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本控制](https://semver.org/lang/zh-CN/)。
 
+## [1.5.12] - 2026-08-18
+
+### 修复
+- **大型 Cursor 数据库解析**（[#47](https://github.com/juliantanx/aiusage/pull/47)，[@chomoe327](https://github.com/chomoe327) 贡献）— 用索引范围查询替代重复的全表扫描，跳过缺少 `cursorDiskKV` 表的不兼容数据库，并按 composer 报告解析进度。2.75 GB 数据库的解析时间从超过 10 分钟仍无法完成缩短到约 10 秒，无新增数据的增量解析约一秒即可完成。
+
+---
+
 ## [1.5.11] - 2026-07-16
 
 ### 修复
@@ -425,6 +432,7 @@
 
 ---
 
+[1.5.12]: https://github.com/juliantanx/aiusage/compare/v1.5.11...v1.5.12
 [1.5.11]: https://github.com/juliantanx/aiusage/compare/v1.5.10...v1.5.11
 [1.5.10]: https://github.com/juliantanx/aiusage/compare/v1.5.9...v1.5.10
 [1.5.9]: https://github.com/juliantanx/aiusage/compare/v1.5.8...v1.5.9

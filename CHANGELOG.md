@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.12] - 2026-08-18
+
+### Fixed
+- **Large Cursor database parsing** ([#47](https://github.com/juliantanx/aiusage/pull/47) by [@chomoe327](https://github.com/chomoe327)) — replace repeated full-table scans with indexed range queries, skip incompatible databases without a `cursorDiskKV` table, and report per-composer progress. Parsing a 2.75 GB database now completes in about 10 seconds instead of stalling for more than 10 minutes, while no-op incremental runs finish in about one second.
+
+---
+
 ## [1.5.11] - 2026-07-16
 
 ### Fixed
@@ -425,6 +432,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[1.5.12]: https://github.com/juliantanx/aiusage/compare/v1.5.11...v1.5.12
 [1.5.11]: https://github.com/juliantanx/aiusage/compare/v1.5.10...v1.5.11
 [1.5.10]: https://github.com/juliantanx/aiusage/compare/v1.5.9...v1.5.10
 [1.5.9]: https://github.com/juliantanx/aiusage/compare/v1.5.8...v1.5.9
