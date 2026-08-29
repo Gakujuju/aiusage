@@ -8,12 +8,13 @@ import { runParse } from './parse.js'
 import { runSync } from './sync.js'
 import { cleanOldData } from './clean.js'
 import { uploadLeaderboardData } from './leaderboard-upload.js'
-import { getState } from '../init.js'
+import { ensureAiusageDir, getState } from '../init.js'
 import { AIUSAGE_DIR, loadConfig, saveConfig } from '../config.js'
 import { SyncRuntimeController } from '../sync/runtime.js'
 import { getSyncTarget } from '../sync/target.js'
 import { RuntimeSettingsController } from '../runtime/settings-controller.js'
 import { AsyncTaskQueue } from '../db/write-queue.js'
+import { findPredominantDeviceInstanceId } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import { AgentSessionEmitter, decayStaleSessions } from '../db/agent-sessions.js'
 import { NotificationSender } from '../notify/discord.js'
@@ -48,6 +49,23 @@ const MIME_TYPES: Record<string, string> = {
 }
 
 export function serve(options: ServeOptions): void {
+  // First, before anything reads state.json. Nothing was calling this, so
+  // state.json was never created — which left getIngestToken() returning null
+  // and every hook POST answered with 401. The events were not lost, because
+  // agent-event spools what it cannot send, but nothing was being applied.
+  //
+  // Deriving the device id needs the records table, so this has to run after
+  // the migrations rather than before them. Everything that consumes
+  // state.json comes later in this function, which is what actually matters.
+  const stateResult = ensureAiusageDir(AIUSAGE_DIR, () => findPredominantDeviceInstanceId(options.db))
+  if (stateResult.created) {
+    console.log(
+      `[serve] created state.json (device instance id from ${stateResult.deviceInstanceIdSource})`
+    )
+  } else if (stateResult.ingestTokenAdded) {
+    console.log('[serve] added an ingest token to the existing state.json')
+  }
+
   const config = loadConfig()
   const dbWriteQueue = new AsyncTaskQueue()
   const runDbWrite = <T>(task: () => T | Promise<T>) => dbWriteQueue.run(task)

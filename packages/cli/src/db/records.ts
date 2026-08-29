@@ -124,3 +124,23 @@ function mapRowToRecord(row: Record<string, unknown>): StatsRecord {
     platform: (row.platform as string) || undefined,
   }
 }
+
+/**
+ * The device_instance_id the stored records already use, or null when there
+ * are none.
+ *
+ * Used when state.json is missing, to adopt the id the data was written with
+ * rather than inventing a new one — see ensureAiusageDir for why that
+ * distinction matters. Ties are broken by row count, so a database that has
+ * somehow accumulated two ids follows the majority.
+ */
+export function findPredominantDeviceInstanceId(db: Database.Database): string | null {
+  const row = db.prepare(`
+    SELECT device_instance_id AS id, COUNT(*) AS n
+    FROM records
+    GROUP BY device_instance_id
+    ORDER BY n DESC
+    LIMIT 1
+  `).get() as { id: string; n: number } | undefined
+  return row?.id ?? null
+}
