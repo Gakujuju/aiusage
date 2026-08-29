@@ -87,6 +87,13 @@ export interface QuotaRecordContext {
 }
 
 export interface RecordSummary {
+  /**
+   * Tools we actually tried to reach. A tool with no credentials on this
+   * machine is not counted — it is not set up, not failing.
+   */
+  attempted: number
+  /** Tools that answered */
+  succeeded: number
   /** Rows appended to quota_snapshots */
   inserted: number
   /** (tool, tier) pairs whose current row was refreshed, including no-change ones */
@@ -95,6 +102,11 @@ export interface RecordSummary {
   windowsClosed: number
   /** Tools whose poll failed and fell back to the stored value */
   failedTools: string[]
+  /**
+   * Distinct classifyQuotaError kinds seen this round, '' excluded. Safe to
+   * log: these are category names, never the error text, a URL or a token.
+   */
+  errorKinds: string[]
 }
 
 interface CurrentRow {
@@ -182,8 +194,12 @@ export function recordQuotaSnapshot(
   results: QuotaResult[],
   ctx: QuotaRecordContext,
 ): RecordSummary {
-  const summary: RecordSummary = { inserted: 0, updated: 0, windowsClosed: 0, failedTools: [] }
+  const summary: RecordSummary = {
+    attempted: 0, succeeded: 0, inserted: 0, updated: 0,
+    windowsClosed: 0, failedTools: [], errorKinds: [],
+  }
   if (!Array.isArray(results) || results.length === 0) return summary
+  const errorKinds = new Set<string>()
 
   const now = Number.isFinite(ctx.now) ? ctx.now : Date.now()
   const deviceInstanceId = ctx.deviceInstanceId || ''
@@ -270,6 +286,12 @@ export function recordQuotaSnapshot(
         // the reader calls both 'valid'. Phase 7 needs the distinction to say
         // "re-login" versus "you're offline", so classify it here.
         const lastErrorKind = classifyQuotaError(result)
+        // An empty kind means the tool simply is not set up here, which is not
+        // an attempt and must not read as a failure to the caller's logging.
+        if (lastErrorKind) {
+          summary.attempted++
+          errorKinds.add(lastErrorKind)
+        }
         for (const row of rows) {
           markFailure.run({
             tool: row.tool,
@@ -284,6 +306,9 @@ export function recordQuotaSnapshot(
         }
         continue
       }
+
+      summary.attempted++
+      summary.succeeded++
 
       for (const tier of result.tiers ?? []) {
         if (!tier || typeof tier.name !== 'string') continue
@@ -368,5 +393,6 @@ export function recordQuotaSnapshot(
   })
 
   apply()
+  summary.errorKinds = [...errorKinds].sort()
   return summary
 }

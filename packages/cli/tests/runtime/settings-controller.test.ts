@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { RuntimeSettingsController, DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS } from '../../src/runtime/settings-controller.js'
+import {
+  RuntimeSettingsController,
+  DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS,
+  QUOTA_SNAPSHOT_RETRY_DELAY_MS,
+} from '../../src/runtime/settings-controller.js'
 
 describe('RuntimeSettingsController', () => {
   beforeEach(() => {
@@ -237,6 +241,146 @@ describe('RuntimeSettingsController', () => {
       controller.stop()
       await vi.advanceTimersByTimeAsync(500)
       expect(runQuotaSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('exposes whether a parse is in flight', async () => {
+      let release!: () => void
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ refreshInterval: 25, quotaSnapshotInterval: 0 })),
+        runParse: vi.fn(() => new Promise<void>((resolve) => { release = resolve })),
+      })
+
+      controller.start()
+      expect(controller.isParseInFlight()).toBe(false)
+      await vi.advanceTimersByTimeAsync(25)
+      expect(controller.isParseInFlight()).toBe(true)
+
+      release()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(controller.isParseInFlight()).toBe(false)
+      controller.stop()
+    })
+
+    it('skips a snapshot while a parse holds the event loop', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      let release!: () => void
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        // Parse fires first and is still running when the snapshot is due.
+        loadConfig: vi.fn(() => ({ refreshInterval: 10, quotaSnapshotInterval: 20 })),
+        runParse: vi.fn(() => new Promise<void>((resolve) => { release = resolve })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(20)
+
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+      expect(String(warn.mock.calls[0][0])).toContain('parse in flight')
+
+      release()
+      controller.stop()
+    })
+
+    it('retries a skipped snapshot once, 30 seconds later', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      let release!: () => void
+      let refreshInterval = 10
+      let quotaSnapshotInterval = 20
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ refreshInterval, quotaSnapshotInterval })),
+        runParse: vi.fn(() => new Promise<void>((resolve) => { release = resolve })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(20) // parse at 10 blocks; snapshot at 20 is skipped
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+
+      // Quiet both intervals so nothing but the pending retry can fire, then
+      // let the parse finish. A reload must not cancel the armed retry.
+      refreshInterval = 0
+      quotaSnapshotInterval = 1_000_000
+      controller.reload()
+      release()
+      await vi.advanceTimersByTimeAsync(0)
+
+      await vi.advanceTimersByTimeAsync(QUOTA_SNAPSHOT_RETRY_DELAY_MS - 1)
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(1)
+
+      controller.stop()
+    })
+
+    it('gives up rather than stacking retries when the parse is still running', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      let release!: () => void
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        // Only the snapshot is scheduled after the first parse, so nothing else
+        // can re-arm the retry during this window.
+        loadConfig: vi.fn(() => ({ refreshInterval: 10, quotaSnapshotInterval: 20_000 })),
+        runParse: vi.fn(() => new Promise<void>((resolve) => { release = resolve })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(10) // parse starts and never finishes
+      await vi.advanceTimersByTimeAsync(20_000) // snapshot due → skipped, retry armed
+      await vi.advanceTimersByTimeAsync(QUOTA_SNAPSHOT_RETRY_DELAY_MS) // retry → still blocked
+
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+      expect(String(warn.mock.calls.at(-1)?.[0])).toContain('parse still in flight')
+
+      // No third attempt is queued behind the retry.
+      await vi.advanceTimersByTimeAsync(QUOTA_SNAPSHOT_RETRY_DELAY_MS * 5)
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+
+      release()
+      controller.stop()
+    })
+
+    it('does not fire a pending retry after stop()', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      let release!: () => void
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ refreshInterval: 10, quotaSnapshotInterval: 20 })),
+        runParse: vi.fn(() => new Promise<void>((resolve) => { release = resolve })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(20) // skipped, retry armed
+      controller.stop()
+      release()
+
+      await vi.advanceTimersByTimeAsync(QUOTA_SNAPSHOT_RETRY_DELAY_MS * 3)
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('runs normally when no parse is in flight', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ refreshInterval: 0, quotaSnapshotInterval: 20 })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(20)
+
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(1)
+      expect(warn).not.toHaveBeenCalled()
+      controller.stop()
     })
 
     it('does not schedule without a runQuotaSnapshot callback', async () => {

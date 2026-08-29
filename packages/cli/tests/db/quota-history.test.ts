@@ -537,7 +537,63 @@ describe('recordQuotaSnapshot', () => {
   })
 
   it('returns an empty summary for an empty round', () => {
-    expect(record(db, [], t0)).toEqual({ inserted: 0, updated: 0, windowsClosed: 0, failedTools: [] })
+    expect(record(db, [], t0)).toEqual({
+      attempted: 0, succeeded: 0, inserted: 0, updated: 0,
+      windowsClosed: 0, failedTools: [], errorKinds: [],
+    })
+  })
+
+  it('counts a tool that is not installed as neither attempted nor failed', () => {
+    // not_found carries no error: the tool simply is not set up here. Counting
+    // it would make an all-not_found machine look like a total outage.
+    const summary = record(db, [
+      failure('claude-code', 'not_found', null),
+      failure('copilot', 'not_found', null),
+    ], t0)
+
+    expect(summary.attempted).toBe(0)
+    expect(summary.succeeded).toBe(0)
+    expect(summary.errorKinds).toEqual([])
+    expect(summary.failedTools).toEqual(['claude-code', 'copilot'])
+  })
+
+  it('counts attempts and successes across a mixed round', () => {
+    const summary = record(db, [
+      failure('claude-code', 'not_found', null),
+      success('codex', [
+        { name: 'five_hour', utilization: 66, resetsAt: RESET_A },
+        { name: 'weekly_limit', utilization: 54, resetsAt: RESET_B },
+      ]),
+      failure('copilot', 'expired', 'Authentication failed (HTTP 401).'),
+    ], t0)
+
+    expect(summary.attempted).toBe(2) // codex + copilot; claude-code is not set up
+    expect(summary.succeeded).toBe(1)
+    expect(summary.inserted).toBe(2)
+    expect(summary.errorKinds).toEqual(['auth'])
+  })
+
+  it('reports every distinct error kind once, sorted, with no error text', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 10, resetsAt: RESET_A }])], t0)
+    const summary = record(db, [
+      {
+        tool: 'codex', credentialStatus: 'valid', credentialMessage: null, success: false,
+        tiers: [], error: 'Network error: TypeError: fetch failed', queriedAt: t0,
+      },
+      failure('copilot', 'expired', 'Authentication failed (HTTP 401).'),
+      {
+        tool: 'claude-code', credentialStatus: 'valid', credentialMessage: null, success: false,
+        tiers: [], error: 'API error (HTTP 503): upstream unavailable', queriedAt: t0,
+      },
+    ], t0 + 60_000)
+
+    expect(summary.attempted).toBe(3)
+    expect(summary.succeeded).toBe(0)
+    expect(summary.errorKinds).toEqual(['api', 'auth', 'network'])
+    // Category names only — nothing here can carry a token, URL or message.
+    for (const kind of summary.errorKinds) {
+      expect(kind).toMatch(/^(auth|network|api|parse)$/)
+    }
   })
 
   it('stores the device label alongside the instance id', () => {

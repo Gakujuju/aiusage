@@ -92,13 +92,33 @@ export function serve(options: ServeOptions): void {
   // Poll the subscription usage APIs and fold the result into quota history.
   // queryAllQuotas never rejects — it reports failures per tool — but the
   // caller still guards, because a locked database can throw here.
+  // A round that reaches nothing writes no rows and raises no error, which is
+  // correct but silent — silent enough that a startup snapshot failing on every
+  // large install went unnoticed until it was run against real data. Report the
+  // shape of each round instead. Only the classified kinds are logged, never the
+  // error text or the URL, so no token can reach a log line this way.
+  let loggedQuotaSuccess = false
   const runQuotaSnapshot = async () => {
     const results = await queryAllQuotas()
-    return runDbWrite(() => recordQuotaSnapshot(options.db, results, {
+    const summary = await runDbWrite(() => recordQuotaSnapshot(options.db, results, {
       device: loadConfig()?.device || hostname() || 'unknown',
       deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? '',
       now: Date.now(),
     }))
+
+    if (summary.attempted > 0 && summary.succeeded === 0) {
+      const kinds = summary.errorKinds.length > 0 ? summary.errorKinds.join(', ') : 'unknown'
+      console.warn(`[serve] quota snapshot: all ${summary.attempted} tool(s) failed (kinds: ${kinds})`)
+    } else if (summary.succeeded > 0 && !loggedQuotaSuccess) {
+      // Once, so the operator sees it working; after that a five-minute poll
+      // logging every round would be noise.
+      loggedQuotaSuccess = true
+      console.log(
+        `[serve] quota snapshot: ${summary.succeeded}/${summary.attempted} ok, ` +
+        `${summary.inserted} row(s) inserted`
+      )
+    }
+    return summary
   }
 
   const runtimeSettings = new RuntimeSettingsController({

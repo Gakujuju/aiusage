@@ -17,6 +17,9 @@ const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000
 const DEFAULT_LEADERBOARD_UPLOAD_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 export const DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000
 
+/** How long to wait before the single retry of a parse-blocked snapshot. */
+export const QUOTA_SNAPSHOT_RETRY_DELAY_MS = 30 * 1000
+
 export class RuntimeSettingsController {
   private readonly db: Database.Database
   private readonly loadConfigFn: RuntimeSettingsControllerOptions['loadConfig']
@@ -32,10 +35,12 @@ export class RuntimeSettingsController {
   private leaderboardUploadTimer: ReturnType<typeof setInterval> | null = null
   private syncTimer: ReturnType<typeof setInterval> | null = null
   private quotaSnapshotTimer: ReturnType<typeof setInterval> | null = null
+  private quotaSnapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
   private parseInFlight = false
   private cleanupInFlight = false
   private leaderboardUploadInFlight = false
   private quotaSnapshotInFlight = false
+  private quotaSnapshotRetrying = false
   private started = false
 
   constructor(options: RuntimeSettingsControllerOptions) {
@@ -56,6 +61,15 @@ export class RuntimeSettingsController {
     this.applyConfig()
   }
 
+  /**
+   * Whether a parse is running right now. better-sqlite3 is synchronous, so a
+   * parse holds the event loop for its whole duration — anything with a
+   * network timeout has to stay out of its way.
+   */
+  isParseInFlight(): boolean {
+    return this.parseInFlight
+  }
+
   reload(): void {
     if (!this.started) return
     this.applyConfig()
@@ -68,11 +82,18 @@ export class RuntimeSettingsController {
     if (this.leaderboardUploadTimer) clearInterval(this.leaderboardUploadTimer)
     if (this.syncTimer) clearInterval(this.syncTimer)
     if (this.quotaSnapshotTimer) clearInterval(this.quotaSnapshotTimer)
+    this.clearQuotaSnapshotRetry()
     this.parseTimer = null
     this.cleanupTimer = null
     this.leaderboardUploadTimer = null
     this.syncTimer = null
     this.quotaSnapshotTimer = null
+  }
+
+  private clearQuotaSnapshotRetry(): void {
+    if (this.quotaSnapshotRetryTimer) clearTimeout(this.quotaSnapshotRetryTimer)
+    this.quotaSnapshotRetryTimer = null
+    this.quotaSnapshotRetrying = false
   }
 
   private applyConfig(): void {
@@ -162,6 +183,29 @@ export class RuntimeSettingsController {
 
   private async runQuotaSnapshotSafely(): Promise<void> {
     if (this.quotaSnapshotInFlight) return
+
+    // A parse holds the event loop (better-sqlite3 is synchronous), so the
+    // usage APIs' 10-second fetch timeout would expire unserviced and every
+    // tool would be recorded as failed. Stay out of its way instead.
+    if (this.parseInFlight) {
+      const retrying = this.quotaSnapshotRetrying
+      this.clearQuotaSnapshotRetry()
+      if (retrying) {
+        // Already the retry — give up and let the next interval have a go,
+        // rather than stacking timers behind a parse that is still running.
+        console.warn('[settings-controller] quota snapshot skipped again: parse still in flight')
+        return
+      }
+      console.warn('[settings-controller] quota snapshot skipped: parse in flight')
+      this.quotaSnapshotRetrying = true
+      this.quotaSnapshotRetryTimer = setTimeout(() => {
+        this.quotaSnapshotRetryTimer = null
+        void this.runQuotaSnapshotSafely()
+      }, QUOTA_SNAPSHOT_RETRY_DELAY_MS)
+      return
+    }
+
+    this.clearQuotaSnapshotRetry()
     this.quotaSnapshotInFlight = true
     try {
       await this.runQuotaSnapshotFn?.()
