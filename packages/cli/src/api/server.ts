@@ -4,7 +4,7 @@ import { hostname, platform, tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
-import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, TOOLS, type PriceEntry } from '@aiusage/core'
+import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
 import { AIUSAGE_DIR, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent } from '../init.js'
@@ -447,6 +447,7 @@ interface QuotaCurrentRow {
   cred_status: string
   last_success_at: number | null
   last_error: string | null
+  last_error_kind: string
   consecutive_errors: number
 }
 
@@ -508,18 +509,23 @@ function withStaleQuotaFallback(
 
   return results.map((result) => {
     const tool = String(result.tool ?? '')
+    // Why the query failed, for a caller that wants to say "re-login" rather
+    // than "check your connection". cred_status reports 'valid' for both.
+    const lastErrorKind = classifyQuotaError(result as QuotaErrorInput)
+
     if (result.success === true) {
       return {
         ...result,
         stale: false,
         lastSuccessAt: typeof result.queriedAt === 'number' ? result.queriedAt : null,
         consecutiveErrors: 0,
+        lastErrorKind: '',
       }
     }
 
     const rows = storedFor(tool)
     if (rows.length === 0) {
-      return { ...result, stale: false, lastSuccessAt: null, consecutiveErrors: 0 }
+      return { ...result, stale: false, lastSuccessAt: null, consecutiveErrors: 0, lastErrorKind }
     }
 
     return {
@@ -530,6 +536,7 @@ function withStaleQuotaFallback(
         resetsAt: row.resets_at == null ? null : new Date(row.resets_at).toISOString(),
       })),
       stale: true,
+      lastErrorKind,
       lastSuccessAt: rows.reduce<number | null>(
         (acc, row) => (row.last_success_at == null ? acc : Math.max(acc ?? 0, row.last_success_at)),
         null,
@@ -1731,10 +1738,14 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           WHERE tool = @tool AND tier = @tier AND device_instance_id = @device AND window_id = @windowId
           ORDER BY ts
         `)
+        // gap_detected windows are excluded: their final_utilization is the
+        // last value we happened to see before polling stopped, not the value
+        // the window ended on, so it would drag the p90 down.
         const finalsStmt = db.prepare(`
           SELECT final_utilization FROM quota_windows
           WHERE tool = @tool AND tier = @tier AND device_instance_id = @device
             AND closed_at IS NOT NULL AND final_utilization IS NOT NULL
+            AND gap_detected = 0
           ORDER BY closed_at DESC
           LIMIT @limit
         `)
@@ -1746,7 +1757,12 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             device: row.device_instance_id,
             windowId: row.window_id,
           }) as Array<{ ts: number; utilization: number }>
-          const forecast = forecastQuota(samples, row.resets_at, now)
+          const forecast = forecastQuota({
+            samples,
+            tier: row.tier,
+            resetsAt: row.resets_at,
+            now,
+          })
           const finals = (finalsStmt.all({
             tool: row.tool,
             tier: row.tier,
@@ -1761,6 +1777,8 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             // quota_current is newer than the last snapshot when nothing moved.
             current: row.utilization,
             resetsAt: forecast.resetsAt,
+            windowStartedAt: forecast.windowStartedAt,
+            windowStartInferred: forecast.windowStartInferred,
             elapsedRatio: forecast.elapsedRatio,
             paceRatio: forecast.paceRatio,
             burnRatePerHour: forecast.burnRatePerHour,

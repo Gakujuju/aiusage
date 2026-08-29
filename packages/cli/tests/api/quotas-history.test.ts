@@ -73,15 +73,16 @@ function insertCurrent(db: Database.Database, row: {
   credStatus?: string
   lastSuccessAt?: number | null
   lastError?: string | null
+  lastErrorKind?: string
   consecutiveErrors?: number
 }) {
   db.prepare(`
     INSERT INTO quota_current (
       tool, tier, device_instance_id, utilization, resets_at, window_id, ts,
-      cred_status, last_success_at, last_error, consecutive_errors, updated_at
+      cred_status, last_success_at, last_error, last_error_kind, consecutive_errors, updated_at
     ) VALUES (
       @tool, @tier, @deviceInstanceId, @utilization, @resetsAt, @windowId, @ts,
-      @credStatus, @lastSuccessAt, @lastError, @consecutiveErrors, @ts
+      @credStatus, @lastSuccessAt, @lastError, @lastErrorKind, @consecutiveErrors, @ts
     )
   `).run({
     resetsAt: null,
@@ -91,6 +92,7 @@ function insertCurrent(db: Database.Database, row: {
     credStatus: 'valid',
     lastSuccessAt: 1_700_000_000_000,
     lastError: null,
+    lastErrorKind: '',
     consecutiveErrors: 0,
     ...row,
   })
@@ -160,6 +162,34 @@ describe('quota history API', () => {
     ])
     expect(data.quotas[0].lastSuccessAt).toBe(1_700_000_000_000)
     expect(data.quotas[0].consecutiveErrors).toBe(3)
+    expect(data.quotas[0].lastErrorKind).toBe('auth')
+  })
+
+  it('reports lastErrorKind=network for a failed fetch', () => {
+    // The reader calls this credentialStatus 'valid', so only the error text
+    // separates "offline" from "re-login".
+    mockQuotaResults = [{
+      tool: 'codex',
+      credentialStatus: 'valid',
+      credentialMessage: null,
+      success: false,
+      tiers: [],
+      error: 'Network error: TypeError: fetch failed',
+      queriedAt: 1_700_000_500_000,
+    }]
+
+    return fetch(`${baseUrl}/api/quotas`)
+      .then((r) => r.json())
+      .then((data) => {
+        expect(data.quotas[0].credentialStatus).toBe('valid')
+        expect(data.quotas[0].lastErrorKind).toBe('network')
+      })
+  })
+
+  it('reports an empty lastErrorKind on success', async () => {
+    mockQuotaResults = [liveSuccess('codex', [{ name: 'five_hour', utilization: 10, resetsAt: null }])]
+    const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
+    expect(data.quotas[0].lastErrorKind).toBe('')
   })
 
   it('reports stale=false for a failed tool with nothing stored', async () => {
@@ -318,7 +348,11 @@ describe('quota history API', () => {
     expect(f.tool).toBe('codex')
     expect(f.tier).toBe('five_hour')
     expect(f.current).toBe(80)
-    expect(f.paceRatio).toBeCloseTo(1.6, 1)
+    // The window is derived from the reset, not from when we started looking:
+    // a five_hour window resetting in 2h began 3h ago, so we are 60 % through.
+    expect(f.windowStartInferred).toBe(true)
+    expect(f.elapsedRatio).toBeCloseTo(0.6, 2)
+    expect(f.paceRatio).toBeCloseTo(0.8 / 0.6, 2)
     expect(f.burnRatePerHour).toBeCloseTo(20, 1)
     // 80 % with 20 %/h left to burn exhausts in an hour; the window resets in two.
     expect(f.exhaustBeforeReset).toBe(true)
@@ -352,6 +386,55 @@ describe('quota history API', () => {
 
     const data = await (await fetch(`${baseUrl}/api/quotas/forecast`)).json()
     expect(data.forecasts[0].p90FinalUtilization).toBeCloseTo(93.5, 6)
+  })
+
+  it('reports no pace for a weekly window observed for the first time', async () => {
+    // The live shape from 2026-08-29: Codex reports the reset a full week out
+    // while nothing is consumed, which used to yield paceRatio 41760.
+    const now = Date.now()
+    const resetsAt = now + 7 * 86400000
+    insertSnapshot(db, { id: 's1', ts: now - 6000, tool: 'codex', tier: 'weekly_limit', utilization: 54, resetsAt })
+    insertSnapshot(db, { id: 's2', ts: now, tool: 'codex', tier: 'weekly_limit', utilization: 54, resetsAt })
+    insertCurrent(db, { tool: 'codex', tier: 'weekly_limit', utilization: 54, resetsAt, ts: now })
+
+    const data = await (await fetch(`${baseUrl}/api/quotas/forecast`)).json()
+    expect(data.forecasts[0].paceRatio).toBeNull()
+    expect(data.forecasts[0].risk).toBe('ok')
+  })
+
+  it('excludes gapped windows from the p90', async () => {
+    const now = Date.now()
+    insertCurrent(db, { tool: 'codex', tier: 'five_hour', utilization: 10, ts: now })
+    const insert = db.prepare(`
+      INSERT INTO quota_windows (window_id, tool, tier, device_instance_id, started_at, resets_at, closed_at, peak_utilization, final_utilization, sample_count, gap_detected)
+      VALUES (?, 'codex', 'five_hour', ?, ?, NULL, ?, ?, ?, 3, ?)
+    `)
+    const finals = [70, 80, 90, 95]
+    finals.forEach((final, i) => {
+      insert.run(`old${i}`, DEVICE_ID, now - (i + 1) * 86400000, now - (i + 1) * 86400000 + 3600_000, final, final, 0)
+    })
+    // A gapped window's final value is the last one seen, not the real end.
+    insert.run('gapped', DEVICE_ID, now - 10 * 86400000, now - 10 * 86400000 + 3600_000, 5, 5, 1)
+
+    const data = await (await fetch(`${baseUrl}/api/quotas/forecast`)).json()
+    // Unchanged by the 5 % outlier: still the p90 of [70, 80, 90, 95].
+    expect(data.forecasts[0].p90FinalUtilization).toBeCloseTo(93.5, 6)
+  })
+
+  it('returns null p90 when gapped windows leave fewer than four usable ones', async () => {
+    const now = Date.now()
+    insertCurrent(db, { tool: 'codex', tier: 'five_hour', utilization: 10, ts: now })
+    const insert = db.prepare(`
+      INSERT INTO quota_windows (window_id, tool, tier, device_instance_id, started_at, resets_at, closed_at, peak_utilization, final_utilization, sample_count, gap_detected)
+      VALUES (?, 'codex', 'five_hour', ?, ?, NULL, ?, ?, ?, 3, ?)
+    `)
+    ;[70, 80, 90].forEach((final, i) => {
+      insert.run(`ok${i}`, DEVICE_ID, now - (i + 1) * 86400000, now - (i + 1) * 86400000 + 3600_000, final, final, 0)
+    })
+    insert.run('gapped', DEVICE_ID, now - 10 * 86400000, now - 10 * 86400000 + 3600_000, 95, 95, 1)
+
+    const data = await (await fetch(`${baseUrl}/api/quotas/forecast`)).json()
+    expect(data.forecasts[0].p90FinalUtilization).toBeNull()
   })
 
   it('marks a forecast stale when the last polls failed', async () => {
