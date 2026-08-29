@@ -47,3 +47,18 @@ export function generateSessionKey(device: string, sessionId: string): string {
     .digest('hex')
   return hash.slice(0, 24)
 }
+
+/**
+ * Primary key for an agent session. The external session id is only unique
+ * within a tool on one device, so all three go into the hash.
+ */
+export function generateAgentSessionId(
+  deviceInstanceId: string,
+  tool: string,
+  agentSessionId: string
+): string {
+  const hash = createHash('sha256')
+    .update(deviceInstanceId + '\0' + tool + '\0' + agentSessionId)
+    .digest('hex')
+  return hash.slice(0, 16)
+}
