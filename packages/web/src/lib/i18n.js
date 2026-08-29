@@ -38,6 +38,21 @@ const translations = {
       page: 'Page',
       of: 'of',
     },
+    lang: {
+      switchTo: 'Switch to {lang}',
+      // Language names stay in their own language on purpose: a reader
+      // looking for their language recognises the endonym, not a translation.
+      name: {
+        en: 'English',
+        ja: '日本語',
+        zh: '中文',
+      },
+      short: {
+        en: 'EN',
+        ja: '日',
+        zh: '中',
+      },
+    },
     range: {
       today: 'Today',
       week: 'This Week',
@@ -545,6 +560,21 @@ const translations = {
       next: '次へ',
       page: 'ページ',
       of: '/',
+    },
+    lang: {
+      switchTo: '{lang}に切り替え',
+      // Language names stay in their own language on purpose: a reader
+      // looking for their language recognises the endonym, not a translation.
+      name: {
+        en: 'English',
+        ja: '日本語',
+        zh: '中文',
+      },
+      short: {
+        en: 'EN',
+        ja: '日',
+        zh: '中',
+      },
     },
     range: {
       today: '今日',
@@ -1054,6 +1084,21 @@ const translations = {
       page: '第',
       of: '页，共',
     },
+    lang: {
+      switchTo: '切换到{lang}',
+      // Language names stay in their own language on purpose: a reader
+      // looking for their language recognises the endonym, not a translation.
+      name: {
+        en: 'English',
+        ja: '日本語',
+        zh: '中文',
+      },
+      short: {
+        en: 'EN',
+        ja: '日',
+        zh: '中',
+      },
+    },
     range: {
       today: '今天',
       week: '本周',
@@ -1547,10 +1592,16 @@ export function setLang(next) {
   if (typeof window !== 'undefined') localStorage.setItem('aiusage-lang', next)
 }
 
+// The button label shows the current language, so the tooltip has to name the
+// next one. Both read this, so the hint cannot drift from what a click does.
+export function getNextLang(current) {
+  const idx = availableLangs.indexOf(current)
+  return availableLangs[(idx + 1) % availableLangs.length]
+}
+
 export function toggleLang() {
   lang.update(current => {
-    const idx = availableLangs.indexOf(current)
-    const next = availableLangs[(idx + 1) % availableLangs.length]
+    const next = getNextLang(current)
     if (typeof window !== 'undefined') localStorage.setItem('aiusage-lang', next)
     return next
   })
