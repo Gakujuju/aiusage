@@ -13,6 +13,8 @@ export interface CleanResult {
   deletedOrphanToolCalls: number
   deletedQuotaSnapshots: number
   deletedQuotaWindows: number
+  deletedAgentSessions: number
+  deletedAgentEvents: number
 }
 
 export interface CleanAllResult {
@@ -24,6 +26,9 @@ export interface CleanAllResult {
   deletedQuotaSnapshots: number
   deletedQuotaWindows: number
   deletedQuotaCurrent: number
+  deletedAgentSessions: number
+  deletedAgentEvents: number
+  deletedAgentSpans: number
   watermarkRemoved: boolean
 }
 
@@ -61,12 +66,21 @@ export function cleanOldData(db: Database.Database, days: number): CleanResult {
     'DELETE FROM quota_windows WHERE closed_at IS NOT NULL AND closed_at < ?'
   ).run(quotaCutoff)
 
+  // Agent history follows the record horizon: it describes the same work.
+  // Events first — deleting a session cascades, so counting after would be 0.
+  const agentEventResult = db.prepare('DELETE FROM agent_session_events WHERE ts < ?').run(cutoff)
+  const agentSessionResult = db.prepare(
+    'DELETE FROM agent_sessions WHERE ended_at IS NOT NULL AND ended_at < ?'
+  ).run(cutoff)
+
   return {
     deletedCount,
     deletedSyncedCount,
     deletedOrphanToolCalls,
     deletedQuotaSnapshots: quotaSnapshotResult.changes,
     deletedQuotaWindows: quotaWindowResult.changes,
+    deletedAgentSessions: agentSessionResult.changes,
+    deletedAgentEvents: agentEventResult.changes,
   }
 }
 
@@ -79,6 +93,11 @@ export function cleanAll(db: Database.Database): CleanAllResult {
   const quotaSnapshotResult = db.prepare('DELETE FROM quota_snapshots').run()
   const quotaWindowResult = db.prepare('DELETE FROM quota_windows').run()
   const quotaCurrentResult = db.prepare('DELETE FROM quota_current').run()
+  // Children first, so the counts reflect what was actually there rather than
+  // what the cascade had already removed.
+  const agentEventResult = db.prepare('DELETE FROM agent_session_events').run()
+  const agentSpanResult = db.prepare('DELETE FROM agent_session_spans').run()
+  const agentSessionResult = db.prepare('DELETE FROM agent_sessions').run()
 
   const watermarkPath = join(AIUSAGE_DIR, 'watermark.json')
   let watermarkRemoved = false
@@ -96,6 +115,9 @@ export function cleanAll(db: Database.Database): CleanAllResult {
     deletedQuotaSnapshots: quotaSnapshotResult.changes,
     deletedQuotaWindows: quotaWindowResult.changes,
     deletedQuotaCurrent: quotaCurrentResult.changes,
+    deletedAgentSessions: agentSessionResult.changes,
+    deletedAgentEvents: agentEventResult.changes,
+    deletedAgentSpans: agentSpanResult.changes,
     watermarkRemoved,
   }
 }

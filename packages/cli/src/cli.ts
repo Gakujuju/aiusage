@@ -2,6 +2,7 @@ import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { serve } from './commands/serve.js'
+import { runAgentEvent } from './commands/agent-event.js'
 import { runInit } from './commands/init.js'
 import { runSync } from './commands/sync.js'
 import { generateSummary } from './commands/summary.js'
@@ -333,6 +334,29 @@ program
   .action((options) => {
     const db = createDatabase(DB_PATH)
     serve({ port: parseInt(options.port), db })
+  })
+
+// agent-event command
+program
+  .command('agent-event')
+  .description('Report an agent session event; reads Claude Code hook JSON on stdin')
+  .option('--tool <tool>', 'Tool reporting the event', 'claude-code')
+  .option('--kind <kind>', 'Override the kind inferred from hook_event_name')
+  .option('--session-id <id>', 'Override the session id from the hook payload')
+  .option('--status <status>', 'Status to assert (manual events only)')
+  .option('--detail <detail>', 'Short human-readable detail')
+  .option('--print-hook-config', 'Print a settings.json fragment instead of sending')
+  .action(async (options) => {
+    // Always exits 0: a hook that fails or hangs would stall the agent.
+    await runAgentEvent({
+      tool: options.tool,
+      kind: options.kind,
+      sessionId: options.sessionId,
+      status: options.status,
+      detail: options.detail,
+      printHookConfig: options.printHookConfig,
+    })
+    process.exit(0)
   })
 
 // init command
