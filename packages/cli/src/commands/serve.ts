@@ -14,6 +14,9 @@ import { SyncRuntimeController } from '../sync/runtime.js'
 import { getSyncTarget } from '../sync/target.js'
 import { RuntimeSettingsController } from '../runtime/settings-controller.js'
 import { AsyncTaskQueue } from '../db/write-queue.js'
+import { recordQuotaSnapshot } from '../db/quota-history.js'
+import { queryAllQuotas } from '../quota.js'
+import { hostname } from 'node:os'
 import { fetchExchangeRate, CACHE_TTL_MS } from '@aiusage/core'
 import type Database from 'better-sqlite3'
 
@@ -86,6 +89,18 @@ export function serve(options: ServeOptions): void {
     getCurrentTarget: () => getSyncTarget(loadConfig()?.sync),
   })
 
+  // Poll the subscription usage APIs and fold the result into quota history.
+  // queryAllQuotas never rejects — it reports failures per tool — but the
+  // caller still guards, because a locked database can throw here.
+  const runQuotaSnapshot = async () => {
+    const results = await queryAllQuotas()
+    return runDbWrite(() => recordQuotaSnapshot(options.db, results, {
+      device: loadConfig()?.device || hostname() || 'unknown',
+      deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? '',
+      now: Date.now(),
+    }))
+  }
+
   const runtimeSettings = new RuntimeSettingsController({
     db: options.db,
     loadConfig,
@@ -93,9 +108,17 @@ export function serve(options: ServeOptions): void {
     runCleanup: (db, retentionDays) => runDbWrite(() => cleanOldData(db, retentionDays)),
     runLeaderboardUpload: (db) => uploadLeaderboardData(db, getState(AIUSAGE_DIR)?.deviceInstanceId).then(() => undefined),
     runSync: () => syncRuntime.start(),
+    runQuotaSnapshot,
     onSyncScheduleChanged: (ts) => syncRuntime.setNextSyncAt(ts),
   })
   runtimeSettings.start()
+
+  // Seed the history immediately so the first dashboard load is not empty.
+  // Deliberately not awaited: these are network calls to third-party endpoints
+  // and startup must not wait on them (or fail with them).
+  void runQuotaSnapshot().catch((err) => {
+    console.error('[serve] initial quota snapshot failed:', err)
+  })
 
   // Parse logs once on startup so the dashboard has data immediately
   console.log('[serve] parsing logs...')

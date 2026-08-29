@@ -8,12 +8,14 @@ export interface RuntimeSettingsControllerOptions {
   runCleanup: (db: Database.Database, retentionDays: number) => unknown | Promise<unknown>
   runLeaderboardUpload?: (db: Database.Database) => Promise<unknown>
   runSync?: () => void
+  runQuotaSnapshot?: () => Promise<unknown>
   onSyncScheduleChanged?: (nextSyncAt: number | undefined) => void
   cleanupIntervalMs?: number
 }
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000
 const DEFAULT_LEADERBOARD_UPLOAD_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
+export const DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000
 
 export class RuntimeSettingsController {
   private readonly db: Database.Database
@@ -22,15 +24,18 @@ export class RuntimeSettingsController {
   private readonly runCleanupFn: RuntimeSettingsControllerOptions['runCleanup']
   private readonly runLeaderboardUploadFn: RuntimeSettingsControllerOptions['runLeaderboardUpload']
   private readonly runSyncFn: RuntimeSettingsControllerOptions['runSync']
+  private readonly runQuotaSnapshotFn: RuntimeSettingsControllerOptions['runQuotaSnapshot']
   private readonly onSyncScheduleChangedFn: RuntimeSettingsControllerOptions['onSyncScheduleChanged']
   private readonly cleanupIntervalMs: number
   private parseTimer: ReturnType<typeof setInterval> | null = null
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
   private leaderboardUploadTimer: ReturnType<typeof setInterval> | null = null
   private syncTimer: ReturnType<typeof setInterval> | null = null
+  private quotaSnapshotTimer: ReturnType<typeof setInterval> | null = null
   private parseInFlight = false
   private cleanupInFlight = false
   private leaderboardUploadInFlight = false
+  private quotaSnapshotInFlight = false
   private started = false
 
   constructor(options: RuntimeSettingsControllerOptions) {
@@ -40,6 +45,7 @@ export class RuntimeSettingsController {
     this.runCleanupFn = options.runCleanup
     this.runLeaderboardUploadFn = options.runLeaderboardUpload
     this.runSyncFn = options.runSync
+    this.runQuotaSnapshotFn = options.runQuotaSnapshot
     this.onSyncScheduleChangedFn = options.onSyncScheduleChanged
     this.cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS
   }
@@ -61,10 +67,12 @@ export class RuntimeSettingsController {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     if (this.leaderboardUploadTimer) clearInterval(this.leaderboardUploadTimer)
     if (this.syncTimer) clearInterval(this.syncTimer)
+    if (this.quotaSnapshotTimer) clearInterval(this.quotaSnapshotTimer)
     this.parseTimer = null
     this.cleanupTimer = null
     this.leaderboardUploadTimer = null
     this.syncTimer = null
+    this.quotaSnapshotTimer = null
   }
 
   private applyConfig(): void {
@@ -72,10 +80,12 @@ export class RuntimeSettingsController {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     if (this.leaderboardUploadTimer) clearInterval(this.leaderboardUploadTimer)
     if (this.syncTimer) clearInterval(this.syncTimer)
+    if (this.quotaSnapshotTimer) clearInterval(this.quotaSnapshotTimer)
     this.parseTimer = null
     this.cleanupTimer = null
     this.leaderboardUploadTimer = null
     this.syncTimer = null
+    this.quotaSnapshotTimer = null
 
     const config = this.loadConfigFn()
     const parseInterval = Number(config?.refreshInterval ?? config?.parseInterval ?? 0)
@@ -98,6 +108,15 @@ export class RuntimeSettingsController {
       this.leaderboardUploadTimer = setInterval(() => {
         void this.runLeaderboardUploadSafely()
       }, leaderboardUploadInterval)
+    }
+
+    // Unlike the other timers this one defaults to on: quota history is only
+    // useful if it is sampled continuously, and a gap cannot be backfilled.
+    const quotaSnapshotInterval = Number(config?.quotaSnapshotInterval ?? DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS)
+    if (quotaSnapshotInterval > 0 && this.runQuotaSnapshotFn) {
+      this.quotaSnapshotTimer = setInterval(() => {
+        void this.runQuotaSnapshotSafely()
+      }, quotaSnapshotInterval)
     }
 
     const syncInterval = Number(config?.syncInterval ?? 0)
@@ -138,6 +157,20 @@ export class RuntimeSettingsController {
       console.error('[settings-controller] cleanup failed:', err)
     } finally {
       this.cleanupInFlight = false
+    }
+  }
+
+  private async runQuotaSnapshotSafely(): Promise<void> {
+    if (this.quotaSnapshotInFlight) return
+    this.quotaSnapshotInFlight = true
+    try {
+      await this.runQuotaSnapshotFn?.()
+    } catch (err) {
+      // The upstream usage APIs are undocumented and go down; never let that
+      // take the timer (or the process) with it.
+      console.error('[settings-controller] quota snapshot failed:', err)
+    } finally {
+      this.quotaSnapshotInFlight = false
     }
   }
 

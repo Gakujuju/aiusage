@@ -75,6 +75,26 @@ export function createReadonlyViews(db: Database.Database): void {
     FROM records
     GROUP BY session_id, tool, model, provider, device, device_instance_id;
   `)
+
+  // quota_snapshots only exists from v13 on. createReadonlyViews is called from
+  // v3, before the table is there, so guard the view separately — v13 creates
+  // it for real; this keeps the two definitions in one place for new databases.
+  const hasQuotaSnapshots = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quota_snapshots'"
+  ).get()
+  if (hasQuotaSnapshots) {
+    db.exec(`
+      CREATE VIEW IF NOT EXISTS v_quota_snapshots AS
+      SELECT
+        id, tool, tier, utilization, window_id, device, device_instance_id,
+        ts,
+        datetime(ts / 1000, 'unixepoch') || 'Z' AS timestamp,
+        resets_at,
+        CASE WHEN resets_at IS NULL THEN NULL
+             ELSE datetime(resets_at / 1000, 'unixepoch') || 'Z' END AS resets_timestamp
+      FROM quota_snapshots;
+    `)
+  }
 }
 
 export function createSchemaVersionTable(db: Database.Database): void {

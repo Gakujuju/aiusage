@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { RuntimeSettingsController } from '../../src/runtime/settings-controller.js'
+import { RuntimeSettingsController, DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS } from '../../src/runtime/settings-controller.js'
 
 describe('RuntimeSettingsController', () => {
   beforeEach(() => {
@@ -141,5 +141,114 @@ describe('RuntimeSettingsController', () => {
     await vi.advanceTimersByTimeAsync(100)
 
     expect(runParse).not.toHaveBeenCalled()
+  })
+
+  describe('quota snapshots', () => {
+    const base = { db: {} as any, runParse: vi.fn(async () => {}), runCleanup: vi.fn(() => {}) }
+
+    it('schedules on the configured interval', async () => {
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ quotaSnapshotInterval: 25 })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(25)
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(25)
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(2)
+    })
+
+    it('defaults to a 5-minute interval when unset', async () => {
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({})),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS - 1)
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('is disabled by an interval of 0', async () => {
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ quotaSnapshotInterval: 0 })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS * 2)
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('skips overlapping runs', async () => {
+      let release!: () => void
+      const runQuotaSnapshot = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ quotaSnapshotInterval: 25 })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(25)
+      await vi.advanceTimersByTimeAsync(25)
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(1)
+
+      release()
+      await vi.advanceTimersByTimeAsync(25)
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(2)
+    })
+
+    it('keeps the timer alive after a failure', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const runQuotaSnapshot = vi.fn(async () => { throw new Error('upstream is down') })
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ quotaSnapshotInterval: 25 })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      await vi.advanceTimersByTimeAsync(25)
+      await vi.advanceTimersByTimeAsync(25)
+
+      expect(runQuotaSnapshot).toHaveBeenCalledTimes(2)
+      expect(error).toHaveBeenCalled()
+    })
+
+    it('stops on stop()', async () => {
+      const runQuotaSnapshot = vi.fn(async () => {})
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ quotaSnapshotInterval: 25 })),
+        runQuotaSnapshot,
+      })
+
+      controller.start()
+      controller.stop()
+      await vi.advanceTimersByTimeAsync(500)
+      expect(runQuotaSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('does not schedule without a runQuotaSnapshot callback', async () => {
+      const controller = new RuntimeSettingsController({
+        ...base,
+        loadConfig: vi.fn(() => ({ quotaSnapshotInterval: 25 })),
+      })
+
+      controller.start()
+      // Nothing to assert beyond "this does not throw or leave a live timer".
+      await vi.advanceTimersByTimeAsync(500)
+      controller.stop()
+    })
   })
 })

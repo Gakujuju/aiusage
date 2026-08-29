@@ -275,6 +275,7 @@ program
       console.log('\nDeleting all local data...')
       const result = cleanAll(db)
       console.log(`  Local: deleted ${result.deletedRecords} records, ${result.deletedToolCalls} tool calls, ${result.deletedSyncedRecords} synced records`)
+      console.log(`  Local: deleted ${result.deletedQuotaSnapshots} quota snapshots, ${result.deletedQuotaWindows} quota windows, ${result.deletedQuotaCurrent} quota states`)
       if (result.watermarkRemoved) {
         console.log('  Watermark removed')
       }
@@ -282,6 +283,9 @@ program
       console.log(`\nCleaning local records older than ${days} days...`)
       const result = cleanOldData(db, days)
       console.log(`  Local: deleted ${result.deletedCount} records, ${result.deletedSyncedCount} synced records, ${result.deletedOrphanToolCalls} orphan tool calls`)
+      if (result.deletedQuotaSnapshots > 0 || result.deletedQuotaWindows > 0) {
+        console.log(`  Local: deleted ${result.deletedQuotaSnapshots} quota snapshots, ${result.deletedQuotaWindows} quota windows`)
+      }
     }
     db.close()
 

@@ -4,7 +4,7 @@ import { hostname, platform, tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
-import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, TOOLS, type PriceEntry } from '@aiusage/core'
+import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
 import { AIUSAGE_DIR, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent } from '../init.js'
@@ -29,6 +29,7 @@ import { base64url, sha256Buffer } from '../leaderboard/crypto.js'
 import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
 import { insertRecord } from '../db/records.js'
+import { recordQuotaSnapshot } from '../db/quota-history.js'
 import { AsyncTaskQueue, type AsyncTaskQueueStatus } from '../db/write-queue.js'
 import { getPricingRegistrySummary, getUserAliasBindings, hasUserPrice, listLocalModelBindings, listPricingAliasTargets, listPricingModels, loadPricingRuntime, removeUserPricingAlias, resetUserPriceToSynced, resolvePriceFromRegistry, setUserPrice, setUserPricingAlias, syncPricingFromLitellm } from '../pricing-registry.js'
 import type { DetectedTool } from '../discovery.js'
@@ -429,6 +430,122 @@ function getDeviceFilter(
   }
 }
 
+// ── Quota history helpers ──────────────────────────────────────────────────
+
+const QUOTA_HISTORY_RANGES = new Set(['day', 'week', 'month', 'all'])
+const QUOTA_HISTORY_MAX_POINTS = 2000
+const QUOTA_P90_WINDOW_LIMIT = 20
+
+interface QuotaCurrentRow {
+  tool: string
+  tier: string
+  device_instance_id: string
+  utilization: number
+  resets_at: number | null
+  window_id: string
+  ts: number
+  cred_status: string
+  last_success_at: number | null
+  last_error: string | null
+  last_error_kind: string
+  consecutive_errors: number
+}
+
+/** Accepts either an ISO 8601 string or epoch milliseconds. */
+function parseTimeParam(value: string | null): number | null {
+  if (!value) return null
+  const asNumber = Number(value)
+  if (Number.isFinite(asNumber) && value.trim() !== '') return asNumber
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/** Start of the requested range in ms, or null for an unbounded range. */
+function quotaHistoryStart(range: string, now: number): number | null {
+  if (range === 'all') return null
+  if (range === 'day') return now - 86400000
+  if (range === 'month') return now - 30 * 86400000
+  return now - 7 * 86400000
+}
+
+/**
+ * Evenly thin a series down to `max` points, always keeping the first and last
+ * so the endpoints of the chart stay truthful.
+ */
+function downsampleSeries<T>(points: T[], max: number): T[] {
+  if (points.length <= max) return points
+  const step = (points.length - 1) / (max - 1)
+  const out: T[] = []
+  for (let i = 0; i < max; i++) {
+    out.push(points[Math.round(i * step)])
+  }
+  return out
+}
+
+function readQuotaCurrent(db: Database.Database, device: string | null): QuotaCurrentRow[] {
+  if (device) {
+    return db.prepare(
+      'SELECT * FROM quota_current WHERE device_instance_id = @device ORDER BY tool, tier'
+    ).all({ device }) as QuotaCurrentRow[]
+  }
+  return db.prepare('SELECT * FROM quota_current ORDER BY tool, tier').all() as QuotaCurrentRow[]
+}
+
+/**
+ * Fill in the tiers of any tool whose live query failed, using the last value
+ * we stored for it. This is what keeps the dashboard readable when the
+ * undocumented upstream endpoints break or the machine is offline.
+ */
+function withStaleQuotaFallback(
+  db: Database.Database,
+  results: Array<Record<string, unknown>>,
+  deviceInstanceId: string,
+): Array<Record<string, unknown>> {
+  let stored: QuotaCurrentRow[] | null = null
+  const storedFor = (tool: string): QuotaCurrentRow[] => {
+    stored ??= readQuotaCurrent(db, deviceInstanceId || null)
+    return stored.filter((row) => row.tool === tool)
+  }
+
+  return results.map((result) => {
+    const tool = String(result.tool ?? '')
+    // Why the query failed, for a caller that wants to say "re-login" rather
+    // than "check your connection". cred_status reports 'valid' for both.
+    const lastErrorKind = classifyQuotaError(result as QuotaErrorInput)
+
+    if (result.success === true) {
+      return {
+        ...result,
+        stale: false,
+        lastSuccessAt: typeof result.queriedAt === 'number' ? result.queriedAt : null,
+        consecutiveErrors: 0,
+        lastErrorKind: '',
+      }
+    }
+
+    const rows = storedFor(tool)
+    if (rows.length === 0) {
+      return { ...result, stale: false, lastSuccessAt: null, consecutiveErrors: 0, lastErrorKind }
+    }
+
+    return {
+      ...result,
+      tiers: rows.map((row) => ({
+        name: row.tier,
+        utilization: row.utilization,
+        resetsAt: row.resets_at == null ? null : new Date(row.resets_at).toISOString(),
+      })),
+      stale: true,
+      lastErrorKind,
+      lastSuccessAt: rows.reduce<number | null>(
+        (acc, row) => (row.last_success_at == null ? acc : Math.max(acc ?? 0, row.last_success_at)),
+        null,
+      ),
+      consecutiveErrors: rows.reduce((acc, row) => Math.max(acc, row.consecutive_errors), 0),
+    }
+  })
+}
+
 export function createApiServer(db: Database.Database, options?: ApiServerOptions): http.Server {
   const cfg = loadConfig()
   let weekStart: 0 | 1 = (cfg?.weekStart ?? 1) as 0 | 1
@@ -439,6 +556,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
   let pricingRecalcStatus = emptyPricingRecalcStatus()
   let pricingNeedsRecalcSince: number | null = null
   let pricingRecalcGeneration = 0
+  let quotaRefreshInFlight = false
 
   const currentPricingRecalcStatus = (): PricingRecalcStatus => {
     const status = {
@@ -1507,9 +1625,208 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       }
 
       // ── /api/quotas ───────────────────────────────────────────────
+      // Public (see shouldProtectApiPath) — never put credentials in here.
       if (url.pathname === '/api/quotas' && req.method === 'GET') {
         const results = await queryAllQuotas()
-        json(res, { quotas: results })
+        json(res, {
+          quotas: withStaleQuotaFallback(
+            db,
+            results as unknown as Array<Record<string, unknown>>,
+            options?.currentDeviceInstanceId ?? '',
+          ),
+        })
+        return
+      }
+
+      // ── /api/quotas/history ───────────────────────────────────────
+      if (url.pathname === '/api/quotas/history' && req.method === 'GET') {
+        const range = url.searchParams.get('range') ?? 'week'
+        if (!QUOTA_HISTORY_RANGES.has(range)) {
+          json(res, { error: { code: 'INVALID_PARAM', message: 'Invalid range' } }, 400)
+          return
+        }
+
+        const from = parseTimeParam(url.searchParams.get('from'))
+        const to = parseTimeParam(url.searchParams.get('to'))
+        if ((url.searchParams.get('from') && from == null) || (url.searchParams.get('to') && to == null)) {
+          json(res, { error: { code: 'INVALID_PARAM', message: 'Invalid from/to' } }, 400)
+          return
+        }
+
+        const conditions: string[] = []
+        const params: Record<string, unknown> = {}
+
+        const tool = url.searchParams.get('tool')
+        if (tool) {
+          conditions.push('tool = @tool')
+          params.tool = tool
+        }
+        const tier = url.searchParams.get('tier')
+        if (tier) {
+          conditions.push('tier = @tier')
+          params.tier = tier
+        }
+        const device = url.searchParams.get('device')
+        if (device) {
+          conditions.push('device_instance_id = @device')
+          params.device = device
+        }
+
+        // Explicit from/to wins over the named range.
+        const start = from ?? quotaHistoryStart(range, Date.now())
+        if (start != null) {
+          conditions.push('ts >= @start')
+          params.start = start
+        }
+        if (to != null) {
+          conditions.push('ts <= @end')
+          params.end = to
+        }
+
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+        const rows = db.prepare(`
+          SELECT tool, tier, window_id, ts, utilization, resets_at
+          FROM quota_snapshots
+          ${where}
+          ORDER BY tool, tier, window_id, ts
+        `).all(params) as Array<{
+          tool: string
+          tier: string
+          window_id: string
+          ts: number
+          utilization: number
+          resets_at: number | null
+        }>
+
+        const grouped = new Map<string, {
+          tool: string
+          tier: string
+          windowId: string
+          resetsAt: number | null
+          points: Array<{ ts: number; utilization: number }>
+        }>()
+        for (const row of rows) {
+          const key = `${row.tool} ${row.tier} ${row.window_id}`
+          let series = grouped.get(key)
+          if (!series) {
+            series = { tool: row.tool, tier: row.tier, windowId: row.window_id, resetsAt: row.resets_at, points: [] }
+            grouped.set(key, series)
+          }
+          series.resetsAt = row.resets_at
+          series.points.push({ ts: row.ts, utilization: row.utilization })
+        }
+
+        let truncated = false
+        const series = [...grouped.values()].map((entry) => {
+          const points = downsampleSeries(entry.points, QUOTA_HISTORY_MAX_POINTS)
+          if (points.length < entry.points.length) truncated = true
+          return { ...entry, points }
+        })
+
+        json(res, { series, truncated })
+        return
+      }
+
+      // ── /api/quotas/forecast ──────────────────────────────────────
+      if (url.pathname === '/api/quotas/forecast' && req.method === 'GET') {
+        const device = url.searchParams.get('device')
+        const now = Date.now()
+        const currentRows = readQuotaCurrent(db, device)
+
+        const samplesStmt = db.prepare(`
+          SELECT ts, utilization FROM quota_snapshots
+          WHERE tool = @tool AND tier = @tier AND device_instance_id = @device AND window_id = @windowId
+          ORDER BY ts
+        `)
+        // gap_detected windows are excluded: their final_utilization is the
+        // last value we happened to see before polling stopped, not the value
+        // the window ended on, so it would drag the p90 down.
+        const finalsStmt = db.prepare(`
+          SELECT final_utilization FROM quota_windows
+          WHERE tool = @tool AND tier = @tier AND device_instance_id = @device
+            AND closed_at IS NOT NULL AND final_utilization IS NOT NULL
+            AND gap_detected = 0
+          ORDER BY closed_at DESC
+          LIMIT @limit
+        `)
+
+        const forecasts = currentRows.map((row) => {
+          const samples = samplesStmt.all({
+            tool: row.tool,
+            tier: row.tier,
+            device: row.device_instance_id,
+            windowId: row.window_id,
+          }) as Array<{ ts: number; utilization: number }>
+          const forecast = forecastQuota({
+            samples,
+            tier: row.tier,
+            resetsAt: row.resets_at,
+            now,
+          })
+          const finals = (finalsStmt.all({
+            tool: row.tool,
+            tier: row.tier,
+            device: row.device_instance_id,
+            limit: QUOTA_P90_WINDOW_LIMIT,
+          }) as Array<{ final_utilization: number }>).map((r) => r.final_utilization)
+
+          return {
+            tool: row.tool,
+            tier: row.tier,
+            windowId: row.window_id,
+            // quota_current is newer than the last snapshot when nothing moved.
+            current: row.utilization,
+            resetsAt: forecast.resetsAt,
+            windowStartedAt: forecast.windowStartedAt,
+            windowStartInferred: forecast.windowStartInferred,
+            elapsedRatio: forecast.elapsedRatio,
+            paceRatio: forecast.paceRatio,
+            burnRatePerHour: forecast.burnRatePerHour,
+            recentBurnRatePerHour: forecast.recentBurnRatePerHour,
+            exhaustAt: forecast.exhaustAt,
+            exhaustBeforeReset: forecast.exhaustBeforeReset,
+            risk: forecast.risk,
+            confidence: forecast.confidence,
+            p90FinalUtilization: p90FinalUtilization(finals),
+            stale: row.consecutive_errors > 0,
+          }
+        })
+
+        json(res, { forecasts, generatedAt: now })
+        return
+      }
+
+      // ── /api/quotas/refresh ───────────────────────────────────────
+      if (url.pathname === '/api/quotas/refresh' && req.method === 'POST') {
+        if (quotaRefreshInFlight) {
+          json(res, { error: { code: 'BUSY', message: 'A quota refresh is already running' } }, 409)
+          return
+        }
+        quotaRefreshInFlight = true
+        try {
+          const results = await queryAllQuotas()
+          const summary = await runDbWrite(() => recordQuotaSnapshot(db, results, {
+            device: getDeviceName(),
+            deviceInstanceId: options?.currentDeviceInstanceId ?? '',
+            now: Date.now(),
+          }))
+          json(res, {
+            summary,
+            quotas: withStaleQuotaFallback(
+              db,
+              results as unknown as Array<Record<string, unknown>>,
+              options?.currentDeviceInstanceId ?? '',
+            ),
+          })
+        } catch (error) {
+          if (isDatabaseLockedError(error)) {
+            databaseBusy(res)
+            return
+          }
+          throw error
+        } finally {
+          quotaRefreshInFlight = false
+        }
         return
       }
 

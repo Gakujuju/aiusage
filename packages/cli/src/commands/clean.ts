@@ -11,6 +11,8 @@ export interface CleanResult {
   deletedCount: number
   deletedSyncedCount: number
   deletedOrphanToolCalls: number
+  deletedQuotaSnapshots: number
+  deletedQuotaWindows: number
 }
 
 export interface CleanAllResult {
@@ -19,8 +21,14 @@ export interface CleanAllResult {
   deletedSyncedRecords: number
   deletedSyncRecordState: number
   deletedTombstones: number
+  deletedQuotaSnapshots: number
+  deletedQuotaWindows: number
+  deletedQuotaCurrent: number
   watermarkRemoved: boolean
 }
+
+/** Quota history is small and its value is historical, so it outlives records. */
+const DEFAULT_QUOTA_RETENTION_DAYS = 180
 
 export interface RemoteBackend {
   type: 'cloud' | 'github' | 's3'
@@ -43,10 +51,22 @@ export function cleanOldData(db: Database.Database, days: number): CleanResult {
   const orphanResult = db.prepare('DELETE FROM tool_calls WHERE record_id IS NULL AND ts < ?').run(cutoff)
   const deletedOrphanToolCalls = orphanResult.changes
 
+  // Quota history has its own, much longer horizon: the point of keeping it is
+  // to compare this window against the same window months ago.
+  const quotaDays = Number(loadConfig()?.quotaRetentionDays ?? DEFAULT_QUOTA_RETENTION_DAYS)
+  const quotaCutoff = Date.now() - quotaDays * 86400000
+
+  const quotaSnapshotResult = db.prepare('DELETE FROM quota_snapshots WHERE ts < ?').run(quotaCutoff)
+  const quotaWindowResult = db.prepare(
+    'DELETE FROM quota_windows WHERE closed_at IS NOT NULL AND closed_at < ?'
+  ).run(quotaCutoff)
+
   return {
     deletedCount,
     deletedSyncedCount,
     deletedOrphanToolCalls,
+    deletedQuotaSnapshots: quotaSnapshotResult.changes,
+    deletedQuotaWindows: quotaWindowResult.changes,
   }
 }
 
@@ -56,6 +76,9 @@ export function cleanAll(db: Database.Database): CleanAllResult {
   const syncedResult = db.prepare('DELETE FROM synced_records').run()
   const syncStateResult = db.prepare('DELETE FROM sync_record_state').run()
   const tombstonesResult = db.prepare('DELETE FROM sync_tombstones').run()
+  const quotaSnapshotResult = db.prepare('DELETE FROM quota_snapshots').run()
+  const quotaWindowResult = db.prepare('DELETE FROM quota_windows').run()
+  const quotaCurrentResult = db.prepare('DELETE FROM quota_current').run()
 
   const watermarkPath = join(AIUSAGE_DIR, 'watermark.json')
   let watermarkRemoved = false
@@ -70,6 +93,9 @@ export function cleanAll(db: Database.Database): CleanAllResult {
     deletedSyncedRecords: syncedResult.changes,
     deletedSyncRecordState: syncStateResult.changes,
     deletedTombstones: tombstonesResult.changes,
+    deletedQuotaSnapshots: quotaSnapshotResult.changes,
+    deletedQuotaWindows: quotaWindowResult.changes,
+    deletedQuotaCurrent: quotaCurrentResult.changes,
     watermarkRemoved,
   }
 }
