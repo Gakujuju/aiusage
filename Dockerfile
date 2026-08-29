@@ -26,4 +26,10 @@ RUN pnpm --filter @aiusage/core build && pnpm --filter @aiusage/web build && pnp
 VOLUME /root/.aiusage
 EXPOSE 3847
 
-CMD ["node", "packages/cli/dist/index.js", "serve", "--port", "3847"]
+# --host 0.0.0.0 is required here: serve binds 127.0.0.1 by default, which in a
+# container means nothing outside it can connect. Because this bind is reachable
+# from the network, serve will refuse to start without AIUSAGE_DASHBOARD_PASSWORD
+# — set it, or set AIUSAGE_ALLOW_INSECURE_HOST=1 if something else already
+# protects this port. That refusal is deliberate: the dashboard serves total
+# spend, project names and subscription usage.
+CMD ["node", "packages/cli/dist/index.js", "serve", "--port", "3847", "--host", "0.0.0.0"]

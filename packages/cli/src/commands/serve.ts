@@ -10,6 +10,7 @@ import { cleanOldData } from './clean.js'
 import { uploadLeaderboardData } from './leaderboard-upload.js'
 import { ensureAiusageDir, getState } from '../init.js'
 import { AIUSAGE_DIR, loadConfig, saveConfig } from '../config.js'
+import { isLoopbackHost } from '../auth.js'
 import { SyncRuntimeController } from '../sync/runtime.js'
 import { getSyncTarget } from '../sync/target.js'
 import { RuntimeSettingsController } from '../runtime/settings-controller.js'
@@ -29,6 +30,73 @@ import type Database from 'better-sqlite3'
 export interface ServeOptions {
   port: number
   db: Database.Database
+  /** Interface to bind. Defaults to loopback; see resolveServeHost. */
+  host?: string
+}
+
+export const DEFAULT_SERVE_HOST = '127.0.0.1'
+
+/** Priority: --host, then AIUSAGE_HOST, then loopback. */
+export function resolveServeHost(
+  hostOption?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const explicit = hostOption?.trim()
+  if (explicit) return explicit
+  const fromEnv = env.AIUSAGE_HOST?.trim()
+  if (fromEnv) return fromEnv
+  return DEFAULT_SERVE_HOST
+}
+
+export interface HostSafetyVerdict {
+  allowed: boolean
+  /** Present when the bind is reachable from the network without a password. */
+  insecure: boolean
+  message: string | null
+}
+
+/**
+ * Whether it is acceptable to listen on this host.
+ *
+ * Binding beyond loopback publishes total spend, project names, session
+ * history and subscription burn to everyone on the network, and the dashboard
+ * password is optional. Rather than force a password on the single-machine
+ * case — where none of this is exposed and a password is pure friction — the
+ * default bind is local and anything wider has to say so.
+ */
+export function checkHostSafety(
+  host: string,
+  env: NodeJS.ProcessEnv = process.env,
+): HostSafetyVerdict {
+  if (isLoopbackHost(host)) return { allowed: true, insecure: false, message: null }
+
+  if (env.AIUSAGE_DASHBOARD_PASSWORD) {
+    return { allowed: true, insecure: false, message: null }
+  }
+
+  // An escape hatch for a host already fronted by something else. Refusing
+  // outright would break reverse-proxy setups that are perfectly safe.
+  if (env.AIUSAGE_ALLOW_INSECURE_HOST === '1') {
+    return {
+      allowed: true,
+      insecure: true,
+      message:
+        `aiusage serve: listening on ${host} without a password ` +
+        '(AIUSAGE_ALLOW_INSECURE_HOST=1). Anyone who can reach this port can ' +
+        'read your usage data, costs and project names.',
+    }
+  }
+
+  return {
+    allowed: false,
+    insecure: true,
+    message:
+      `aiusage serve: refusing to listen on ${host} without a password.\n` +
+      'This exposes your usage data, costs and project names to your network.\n' +
+      'Set AIUSAGE_DASHBOARD_PASSWORD, or use the default local-only bind,\n' +
+      'or set AIUSAGE_ALLOW_INSECURE_HOST=1 if this host is already\n' +
+      'protected by something else (a reverse proxy, a private network).',
+  }
 }
 
 const MAX_PORT_ATTEMPTS = 10
@@ -49,6 +117,19 @@ const MIME_TYPES: Record<string, string> = {
 }
 
 export function serve(options: ServeOptions): void {
+  // Decided before anything else starts: refusing to bind should not leave a
+  // half-initialised process behind.
+  const host = resolveServeHost(options.host)
+  const isLoopback = isLoopbackHost(host)
+  const hostSafety = checkHostSafety(host)
+  if (!hostSafety.allowed) {
+    console.error(hostSafety.message)
+    process.exit(1)
+  }
+  if (hostSafety.insecure && hostSafety.message) {
+    console.warn(hostSafety.message)
+  }
+
   // First, before anything reads state.json. Nothing was calling this, so
   // state.json was never created — which left getIngestToken() returning null
   // and every hook POST answered with 401. The events were not lost, because
@@ -256,6 +337,7 @@ export function serve(options: ServeOptions): void {
   const apiServer = createApiServer(options.db, {
     currentDeviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId,
     agentEmitter,
+    isLoopbackBind: isLoopback,
     onRefresh: () => runParse(options.db),
     onSyncStart: () => syncRuntime.start(),
     getSyncStatus: () => syncRuntime.getStatus(),
@@ -321,13 +403,18 @@ export function serve(options: ServeOptions): void {
 
   const listenOnPort = (port: number): void => {
     currentPort = port
-    server.listen(port, '0.0.0.0')
+    server.listen(port, host)
   }
 
   server.on('listening', () => {
     started = true
     writeFileSync(PORT_FILE, String(currentPort), 'utf-8')
-    console.log(`aiusage serve listening on http://localhost:${currentPort}`)
+    // Say what was actually bound and whether it is protected. "listening on
+    // localhost" was true of the URL and false of the bind.
+    const scope = isLoopback
+      ? 'local only'
+      : (hostSafety.insecure ? 'network, NO PASSWORD — insecure' : 'network, password required')
+    console.log(`aiusage serve listening on http://${host}:${currentPort} (${scope})`)
   })
 
   server.on('error', (error: NodeJS.ErrnoException) => {

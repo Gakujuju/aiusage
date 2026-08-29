@@ -332,9 +332,10 @@ program
   .command('serve')
   .description('Start web dashboard')
   .option('-p, --port <port>', 'Port number', '3847')
+  .option('--host <host>', 'Interface to bind (default 127.0.0.1; AIUSAGE_HOST overrides)')
   .action((options) => {
     const db = createDatabase(DB_PATH)
-    serve({ port: parseInt(options.port), db })
+    serve({ port: parseInt(options.port), host: options.host, db })
   })
 
 // notify-test command

@@ -366,6 +366,12 @@ export interface ApiServerOptions {
   onConfigUpdated?: () => void
   runDbWrite?: <T>(task: () => T | Promise<T>) => Promise<T>
   agentEmitter?: AgentSessionEmitter
+  /**
+   * False when serve is bound beyond loopback. Reachable from the network,
+   * /api/summary and /api/quotas stop being safe to leave open — they are the
+   * total spend and the subscription burn.
+   */
+  isLoopbackBind?: boolean
   getDbWriteQueueStatus?: () => AsyncTaskQueueStatus
 }
 
@@ -751,7 +757,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       return
     }
 
-    if (dashboardPassword && shouldProtectApiPath(url.pathname) && !isAuthenticated(dashboardPassword, req.headers.cookie)) {
+    if (dashboardPassword && shouldProtectApiPath(url.pathname, options?.isLoopbackBind !== false) && !isAuthenticated(dashboardPassword, req.headers.cookie)) {
       json(res, { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }, 401)
       return
     }
@@ -1423,9 +1429,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       }
 
       // ── /api/agent ────────────────────────────────────────────────
-      // Writes here are authenticated on their own: serve binds 0.0.0.0 and
-      // the dashboard password is optional, so a shared token is the only
-      // thing standing between the network and this table.
+      // Writes here carry their own token regardless of the bind. serve now
+      // defaults to loopback, but the token is what makes --host 0.0.0.0 safe
+      // to offer at all, and it does not depend on the dashboard password
+      // being set.
       if (url.pathname.startsWith('/api/agent/')) {
         const isWrite = req.method === 'POST'
         if (isWrite && !hasValidIngestToken(req)) {

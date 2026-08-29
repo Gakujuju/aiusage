@@ -3,6 +3,7 @@ import {
   AUTH_COOKIE_NAME,
   buildAuthCookie,
   isAuthenticated,
+  isLoopbackHost,
   isPublicPath,
   shouldProtectApiPath,
   verifyPassword,
@@ -38,6 +39,39 @@ describe('dashboard auth helpers', () => {
     expect(shouldProtectApiPath('/api/tokens')).toBe(true)
     expect(shouldProtectApiPath('/api/config')).toBe(true)
     expect(shouldProtectApiPath('/api/sync')).toBe(true)
+  })
+
+  it('treats the loopback spellings as local, and nothing else', () => {
+    expect(isLoopbackHost('127.0.0.1')).toBe(true)
+    expect(isLoopbackHost('localhost')).toBe(true)
+    expect(isLoopbackHost('::1')).toBe(true)
+    expect(isLoopbackHost('[::1]')).toBe(true)
+    expect(isLoopbackHost('  LocalHost ')).toBe(true)
+
+    expect(isLoopbackHost('0.0.0.0')).toBe(false)
+    expect(isLoopbackHost('192.168.1.10')).toBe(false)
+    // Inside 127/8, but not a spelling we accept. Erring towards "not
+    // loopback" is the safe direction: the cost is an unnecessary password.
+    expect(isLoopbackHost('127.0.0.2')).toBe(false)
+    expect(isLoopbackHost('')).toBe(false)
+    expect(isLoopbackHost(null)).toBe(false)
+    expect(isLoopbackHost(undefined)).toBe(false)
+  })
+
+  it('stops exempting summary and quotas once the bind is not loopback', () => {
+    expect(shouldProtectApiPath('/api/summary', false)).toBe(true)
+    expect(shouldProtectApiPath('/api/quotas', false)).toBe(true)
+    expect(shouldProtectApiPath('/api/tokens', false)).toBe(true)
+
+    // Public paths stay public either way — login has to be reachable or the
+    // password could never be entered.
+    expect(shouldProtectApiPath('/api/auth/login', false)).toBe(false)
+    expect(shouldProtectApiPath('/overview', false)).toBe(false)
+  })
+
+  it('keeps the exemptions on a loopback bind', () => {
+    expect(shouldProtectApiPath('/api/summary', true)).toBe(false)
+    expect(shouldProtectApiPath('/api/quotas', true)).toBe(false)
   })
 
   it('recognizes the generated auth cookie', () => {

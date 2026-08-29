@@ -37,8 +37,11 @@
 3. ChatGPT Web / Gemini Web の会話利用は対象外（公開 API なし）。
    Claude.ai の Web 利用は Claude Code と 5h/7d 枠を共有するため、
    案A が通れば自動的に数字に含まれる。
-4. Phase 8 の前提として、認証を既定必須にする必要がある。
-   serve が 0.0.0.0 バインドかつ /api/summary と /api/quotas が無認証公開。
+4. serve のバインドは 127.0.0.1 が既定になった（D16）。
+   非ループバックはパスワード必須で、そのとき /api/summary と /api/quotas
+   も保護対象に入る。Phase 8（Android/PWA）で外から見る段になったら、
+   `--host` + `AIUSAGE_DASHBOARD_PASSWORD` か、
+   ループバックのままトンネルを張るかを選ぶ必要がある。
 5. `device_instance_id` が全件 'unknown'。正規化は D1 のとおり単独では行わない。
 6. コストは API 従量換算であって請求額ではない（D7）。UI で誤読されない表記が必要。
 
