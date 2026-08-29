@@ -612,8 +612,11 @@ export function listAgentSessions(db: Database.Database, query: ListSessionsQuer
                  + cache_write_tokens + thinking_tokens) AS total_tokens
       FROM records WHERE source_file NOT LIKE 'synced/%'
       GROUP BY session_id, tool, device_instance_id
-    ) u ON u.session_id = s.agent_session_id AND u.tool = s.tool
-       AND u.device_instance_id = s.device_instance_id
+    ) u ON u.tool = s.tool AND u.device_instance_id = s.device_instance_id
+       -- Suffix match too: on Windows records.session_id holds the whole path
+       -- rather than the bare id. See migration v16.
+       AND (u.session_id = s.agent_session_id
+            OR u.session_id LIKE '%' || s.agent_session_id)
     ${clause}
     ORDER BY s.last_event_at DESC
     LIMIT @limit OFFSET @offset
