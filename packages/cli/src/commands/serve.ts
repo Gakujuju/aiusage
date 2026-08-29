@@ -113,19 +113,22 @@ export function serve(options: ServeOptions): void {
   })
   runtimeSettings.start()
 
-  // Seed the history immediately so the first dashboard load is not empty.
-  // Deliberately not awaited: these are network calls to third-party endpoints
-  // and startup must not wait on them (or fail with them).
-  void runQuotaSnapshot().catch((err) => {
-    console.error('[serve] initial quota snapshot failed:', err)
-  })
-
   // Parse logs once on startup so the dashboard has data immediately
   console.log('[serve] parsing logs...')
   runDbWrite(() => runParse(options.db)).then((result) => {
     console.log(`[serve] parsed ${result.parsedCount} records, ${result.toolCallCount} tool calls.`)
   }).catch((err) => {
     console.error('[serve] initial parse failed:', err)
+  }).finally(() => {
+    // Seed the history so the first dashboard load is not empty. This waits
+    // for the parse rather than racing it: better-sqlite3 is synchronous, so a
+    // first parse of any size holds the event loop long enough for the usage
+    // APIs' 10-second fetch timeout to expire unserviced — the snapshot then
+    // failed silently on exactly the large-install first run it exists for.
+    // Still never awaited, so startup does not wait on third-party network.
+    void runQuotaSnapshot().catch((err) => {
+      console.error('[serve] initial quota snapshot failed:', err)
+    })
   })
 
   const apiServer = createApiServer(options.db, {
