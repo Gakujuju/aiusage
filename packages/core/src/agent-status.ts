@@ -47,6 +47,8 @@ export type AgentEventKind =
   | 'user_prompt'
   | 'pre_tool_use'
   | 'post_tool_use'
+  | 'permission_request'
+  | 'permission_denied'
   | 'notification'
   | 'stop'
   | 'stop_failure'
@@ -61,6 +63,8 @@ export const AGENT_EVENT_KINDS: readonly AgentEventKind[] = [
   'user_prompt',
   'pre_tool_use',
   'post_tool_use',
+  'permission_request',
+  'permission_denied',
   'notification',
   'stop',
   'stop_failure',
@@ -103,26 +107,48 @@ const MINUTE = 60_000
 /**
  * When a status stops being believable, and what it decays into.
  *
- * `ttlMs: null` means the status is a resting state we expect to sit in
- * indefinitely — a session waiting on a person is not stale just because the
- * person went to lunch.
+ * Two clocks, and the difference between them is the whole point:
+ *
+ *   ttlMs           how long the status itself stays plausible
+ *   silenceTimeoutMs  how long total silence is tolerated before we admit we
+ *                     have lost track
+ *
+ * Silence is only evidence of a problem for a status that implies something is
+ * happening. `running` going quiet for half an hour means we missed the end of
+ * it. `waiting_for_permission` going quiet for half an hour means the person
+ * has not answered yet — which is exactly when the waiting matters most.
+ * Decaying it to `unknown` would drop the most valuable signal this project
+ * has at the moment it becomes worth acting on.
+ *
+ * So both are null for the waiting states. What still ends them:
+ *   - a day of silence, via SILENCE_TO_COMPLETED_MS below
+ *   - a process disappearing (exit_reason 'process_gone'); the reason exists
+ *     now, the detection lands with process monitoring in a later phase
  */
 export interface DecayRule {
   ttlMs: number | null
+  silenceTimeoutMs: number | null
   next: AgentStatus
 }
 
 export const DECAY_POLICY: Record<AgentStatus, DecayRule> = {
-  running: { ttlMs: 15 * MINUTE, next: 'idle' },
-  waiting_for_user: { ttlMs: null, next: 'unknown' },
-  waiting_for_permission: { ttlMs: null, next: 'unknown' },
-  idle: { ttlMs: 30 * MINUTE, next: 'unknown' },
-  completed: { ttlMs: null, next: 'completed' },
-  failed: { ttlMs: null, next: 'failed' },
-  unknown: { ttlMs: null, next: 'unknown' },
+  // Should be making progress; silence means we missed something.
+  running: { ttlMs: 15 * MINUTE, silenceTimeoutMs: 30 * MINUTE, next: 'idle' },
+  idle: { ttlMs: 30 * MINUTE, silenceTimeoutMs: 30 * MINUTE, next: 'unknown' },
+  // Waiting on a person. Silence is the normal case, not a fault.
+  waiting_for_user: { ttlMs: null, silenceTimeoutMs: null, next: 'unknown' },
+  waiting_for_permission: { ttlMs: null, silenceTimeoutMs: null, next: 'unknown' },
+  // Already terminal, or already the fallback — nothing to decay into.
+  completed: { ttlMs: null, silenceTimeoutMs: null, next: 'completed' },
+  failed: { ttlMs: null, silenceTimeoutMs: null, next: 'failed' },
+  unknown: { ttlMs: null, silenceTimeoutMs: null, next: 'unknown' },
 }
 
-/** Silence this long with no event at all means we have lost track. */
+/**
+ * The silence budget for statuses that have one. Kept as a named export
+ * because tests and callers reason about it; DECAY_POLICY decides who it
+ * applies to.
+ */
 export const SILENCE_TO_UNKNOWN_MS = 30 * MINUTE
 
 /** An open session this quiet is presumed over. */
@@ -327,8 +353,13 @@ export function applyDecay(current: AgentSessionState, now: number): DecayResult
     }
   }
 
-  // Nothing at all for half an hour, whatever the status claims.
-  if (now - lastSignal >= SILENCE_TO_UNKNOWN_MS && current.status !== 'unknown') {
+  // Silence, for the statuses where silence is evidence of a problem. The
+  // waiting states opt out via silenceTimeoutMs: null — see DECAY_POLICY.
+  if (
+    rule?.silenceTimeoutMs != null &&
+    now - lastSignal >= rule.silenceTimeoutMs &&
+    current.status !== 'unknown'
+  ) {
     return {
       changed: true,
       status: 'unknown',
@@ -347,8 +378,15 @@ export function applyDecay(current: AgentSessionState, now: number): DecayResult
  * Does this notification mean Claude is blocked on a permission decision, or
  * just asking for input?
  *
- * `notification_type` is authoritative where the upstream provides it; the
- * text patterns are the fallback for builds that do not, and for other tools.
+ * Four levels, most reliable first:
+ *   1. a permission_request event — decided by statusForKind, never reaches here
+ *   2. notification_type from the upstream
+ *   3. the message text, English and Japanese
+ *   4. otherwise, someone is being asked for input
+ *
+ * Levels 3 and 4 are guesses, which is why the raw message is kept in the
+ * payload: the patterns can only be improved by looking at what actually
+ * arrived and did not match.
  */
 const PERMISSION_PATTERNS: readonly RegExp[] = [
   /needs? your permission/i,
@@ -385,6 +423,12 @@ export function statusForKind(kind: AgentEventKind): AgentStatus | null {
     case 'user_prompt': return 'running'
     case 'pre_tool_use': return 'running'
     case 'post_tool_use': return 'running'
+    // The definitive signal, where the upstream emits it — no text matching.
+    case 'permission_request': return 'waiting_for_permission'
+    // A refusal does not stop the agent: it tries another route or explains
+    // itself, either of which is work. If a Stop follows immediately it
+    // overwrites this anyway.
+    case 'permission_denied': return 'running'
     case 'stop': return 'waiting_for_user'
     // StopFailure means the *turn* ended on an API error (rate_limit,
     // overloaded, server_error…), not that the session died. The user can

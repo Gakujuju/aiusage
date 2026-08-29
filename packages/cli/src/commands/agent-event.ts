@@ -30,12 +30,34 @@ const HOOK_EVENT_KINDS: Record<string, string> = {
   UserPromptSubmit: 'user_prompt',
   PreToolUse: 'pre_tool_use',
   PostToolUse: 'post_tool_use',
+  PermissionRequest: 'permission_request',
+  PermissionDenied: 'permission_denied',
   Notification: 'notification',
   Stop: 'stop',
   StopFailure: 'stop_failure',
   SubagentStop: 'subagent_stop',
   SessionEnd: 'session_end',
 }
+
+/**
+ * Hook fields worth keeping. Anything else is dropped by name into
+ * payload._droppedKeys, so an upstream addition is visible without ever
+ * being stored.
+ */
+const PAYLOAD_FIELDS = new Set([
+  'hook_event_name', 'source', 'reason', 'message', 'notification_type',
+  'tool_name', 'error_type', 'permission_mode', 'transcript_path',
+  'stop_hook_active', 'prompt_id',
+  // Permission events.
+  'permission_suggestion', 'tool_use_id', 'agent_type',
+])
+
+/**
+ * Read into a column of their own rather than the payload. Not "dropped" —
+ * listing them would make _droppedKeys noise instead of a signal that the
+ * whitelist has fallen behind.
+ */
+const CONSUMED_FIELDS = new Set(['session_id', 'cwd'])
 
 export interface AgentEventOptions {
   tool?: string
@@ -86,13 +108,14 @@ export function buildAgentEvent(
   // Only the fields we actually use — the rest of the hook payload is not
   // copied wholesale, so a future field carrying secrets cannot leak in.
   const payload: Record<string, unknown> = {}
-  for (const key of [
-    'hook_event_name', 'source', 'reason', 'message', 'notification_type',
-    'tool_name', 'error_type', 'permission_mode', 'transcript_path',
-    'stop_hook_active', 'prompt_id',
-  ]) {
-    if (hook[key] !== undefined) payload[key] = hook[key]
+  const dropped: string[] = []
+  for (const key of Object.keys(hook)) {
+    if (PAYLOAD_FIELDS.has(key)) payload[key] = hook[key]
+    else if (!CONSUMED_FIELDS.has(key)) dropped.push(key)
   }
+  // Names only, never values. Enough to notice the whitelist has fallen behind
+  // an upstream change without having to capture a raw dump to find out.
+  if (dropped.length > 0) payload._droppedKeys = dropped.sort()
 
   const detail = options.detail
     ?? (typeof hook.tool_name === 'string' ? hook.tool_name : undefined)
@@ -214,16 +237,37 @@ export function drainAgentEventSpool(db: Database.Database, emitter?: AgentSessi
 
 /** A ready-made settings.json fragment, printed rather than written. */
 export function hookConfigSnippet(): string {
-  const command = process.platform === 'win32'
-    ? 'aiusage agent-event --tool claude-code'
-    : 'aiusage agent-event --tool claude-code'
-  const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-    'Notification', 'Stop', 'StopFailure', 'SubagentStop', 'SessionEnd']
+  const command = 'aiusage agent-event --tool claude-code'
   const hooks: Record<string, unknown> = {}
-  for (const event of events) {
+  for (const event of Object.keys(HOOK_EVENT_KINDS)) {
     hooks[event] = [{ hooks: [{ type: 'command', command }] }]
   }
   return JSON.stringify({ hooks }, null, 2)
+}
+
+/**
+ * StopFailure's matcher filters by error type, which is a sharper tool than
+ * classifying the error on our side after the fact.
+ */
+export function stopFailureMatcherSnippet(): string {
+  return JSON.stringify({
+    hooks: {
+      StopFailure: [
+        {
+          matcher: 'rate_limit|overloaded',
+          hooks: [{ type: 'command', command: `${command()} --kind stop_failure --detail rate_limited` }],
+        },
+        {
+          matcher: 'authentication_failed|billing_error',
+          hooks: [{ type: 'command', command: `${command()} --kind stop_failure --detail account_problem` }],
+        },
+      ],
+    },
+  }, null, 2)
+}
+
+function command(): string {
+  return 'aiusage agent-event --tool claude-code'
 }
 
 export async function runAgentEvent(options: AgentEventOptions): Promise<void> {
@@ -232,6 +276,14 @@ export async function runAgentEvent(options: AgentEventOptions): Promise<void> {
     console.log('# Existing hooks on the same events keep working — Claude Code')
     console.log('# runs every hook registered for an event, each with its own stdin.')
     console.log(hookConfigSnippet())
+    console.log('')
+    console.log('# PermissionRequest and PermissionDenied may not fire on every build.')
+    console.log('# They cost nothing if absent, and when present they identify a')
+    console.log('# permission wait outright instead of guessing from the message text.')
+    console.log('')
+    console.log('# Optional: split StopFailure by error type instead of classifying')
+    console.log('# it afterwards. Replaces the plain StopFailure entry above.')
+    console.log(stopFailureMatcherSnippet())
     return
   }
 

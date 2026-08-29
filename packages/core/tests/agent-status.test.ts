@@ -256,6 +256,16 @@ describe('statusForKind', () => {
     expect(statusForKind('session_end')).toBe('completed')
   })
 
+  it('takes a permission request as definitive, no text matching involved', () => {
+    expect(statusForKind('permission_request')).toBe('waiting_for_permission')
+  })
+
+  it('keeps the agent running after a permission is denied', () => {
+    // A refusal is not a wait: the agent tries another route or explains
+    // itself. A Stop right after would overwrite this anyway.
+    expect(statusForKind('permission_denied')).toBe('running')
+  })
+
   it('treats stop_failure as the turn ending, not the session dying', () => {
     // StopFailure fires when a turn ends on an API error (rate_limit,
     // overloaded, …). The session survives and the user can retry, so a
@@ -339,36 +349,75 @@ describe('applyDecay', () => {
     expect(r.status).toBe('unknown')
   })
 
-  it('leaves a waiting session waiting however long it sits', () => {
-    // No TTL: a session blocked on a person is not stale, and its last event
-    // is recent enough that the silence rule does not fire either.
-    const r = applyDecay(
-      state({
-        status: 'waiting_for_user',
-        statusExpiresAt: null,
-        lastEventAt: T0 + 20 * MIN,
-      }),
-      T0 + 25 * MIN,
-    )
-    expect(r.changed).toBe(false)
-    expect(r.status).toBe('waiting_for_user')
-  })
-
-  it('falls to unknown after 30 minutes of total silence', () => {
+  it('falls to unknown when running goes silent for 30 minutes', () => {
+    // The TTL fires first (running → idle at 15 min), so pin the status clock
+    // open and let only the silence rule apply.
     const at = T0 + SILENCE_TO_UNKNOWN_MS + MIN
-    const r = applyDecay(state({ status: 'waiting_for_user', statusExpiresAt: null }), at)
+    const r = applyDecay(state({ status: 'running', statusExpiresAt: null }), at)
     expect(r.changed).toBe(true)
     expect(r.status).toBe('unknown')
     expect(r.endedAt).toBeNull()
   })
 
+  it('falls to unknown when idle goes silent for 30 minutes', () => {
+    const at = T0 + SILENCE_TO_UNKNOWN_MS + MIN
+    const r = applyDecay(state({ status: 'idle', statusExpiresAt: null }), at)
+    expect(r.changed).toBe(true)
+    expect(r.status).toBe('unknown')
+  })
+
   it('counts a heartbeat as breaking the silence', () => {
     const at = T0 + SILENCE_TO_UNKNOWN_MS + MIN
     const r = applyDecay(
-      state({ status: 'waiting_for_user', statusExpiresAt: null, lastHeartbeatAt: at - MIN }),
+      state({ status: 'running', statusExpiresAt: null, lastHeartbeatAt: at - MIN }),
       at,
     )
     expect(r.changed).toBe(false)
+  })
+
+  // A person not answering is the normal case for these, and it is exactly
+  // when the waiting is worth acting on. Losing it to 'unknown' would drop
+  // the signal at the moment it matters most.
+  it('keeps waiting_for_permission through 30 minutes of silence', () => {
+    const r = applyDecay(state({ status: 'waiting_for_permission', statusExpiresAt: null }), T0 + SILENCE_TO_UNKNOWN_MS + MIN)
+    expect(r.changed).toBe(false)
+    expect(r.status).toBe('waiting_for_permission')
+  })
+
+  it('keeps waiting_for_user through 30 minutes of silence', () => {
+    const r = applyDecay(state({ status: 'waiting_for_user', statusExpiresAt: null }), T0 + SILENCE_TO_UNKNOWN_MS + MIN)
+    expect(r.changed).toBe(false)
+    expect(r.status).toBe('waiting_for_user')
+  })
+
+  it('keeps waiting_for_permission across the 30-minute boundary', () => {
+    const waiting = state({ status: 'waiting_for_permission', statusExpiresAt: null })
+    for (const at of [
+      T0 + SILENCE_TO_UNKNOWN_MS - 1,
+      T0 + SILENCE_TO_UNKNOWN_MS,
+      T0 + SILENCE_TO_UNKNOWN_MS + 1,
+      T0 + 12 * 60 * MIN,
+    ]) {
+      const r = applyDecay(waiting, at)
+      expect(r.changed).toBe(false)
+      expect(r.status).toBe('waiting_for_permission')
+    }
+  })
+
+  it('still closes waiting_for_permission after a day of silence', () => {
+    const at = T0 + SILENCE_TO_COMPLETED_MS + MIN
+    const r = applyDecay(state({ status: 'waiting_for_permission', statusExpiresAt: null }), at)
+    expect(r.changed).toBe(true)
+    expect(r.status).toBe('completed')
+    expect(r.exitReason).toBe('timeout')
+    expect(r.endedAt).toBe(at)
+  })
+
+  it('has no silence budget for the waiting states', () => {
+    expect(DECAY_POLICY.waiting_for_user.silenceTimeoutMs).toBeNull()
+    expect(DECAY_POLICY.waiting_for_permission.silenceTimeoutMs).toBeNull()
+    expect(DECAY_POLICY.running.silenceTimeoutMs).toBe(SILENCE_TO_UNKNOWN_MS)
+    expect(DECAY_POLICY.idle.silenceTimeoutMs).toBe(SILENCE_TO_UNKNOWN_MS)
   })
 
   it('closes an open session after a day of silence', () => {

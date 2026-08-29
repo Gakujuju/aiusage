@@ -140,6 +140,21 @@ describe('applyAgentEvents', () => {
     expect((db.prepare('SELECT project FROM agent_sessions').get() as any).project).toBe('Desktop')
   })
 
+  it('takes permission_request as waiting_for_permission outright', () => {
+    applyAgentEvents(db, [ev({ ts: t0 })], ctx(t0))
+    applyAgentEvents(db, [ev({
+      ts: t0 + 1000, kind: 'permission_request', payload: { tool_name: 'Bash' },
+    })], ctx(t0 + 1000))
+    expect((db.prepare('SELECT status FROM agent_sessions').get() as any).status)
+      .toBe('waiting_for_permission')
+  })
+
+  it('returns to running when a permission is denied', () => {
+    applyAgentEvents(db, [ev({ ts: t0, kind: 'permission_request' })], ctx(t0))
+    applyAgentEvents(db, [ev({ ts: t0 + 1000, kind: 'permission_denied' })], ctx(t0 + 1000))
+    expect((db.prepare('SELECT status FROM agent_sessions').get() as any).status).toBe('running')
+  })
+
   it('classifies a Japanese permission notification', () => {
     applyAgentEvents(db, [ev({ ts: t0, kind: 'notification', payload: { message: 'Bash の実行を許可しますか' } })], ctx(t0))
     const row = db.prepare('SELECT status FROM agent_sessions').get() as any
@@ -147,11 +162,31 @@ describe('applyAgentEvents', () => {
   })
 
   it('prefers notification_type over the message text', () => {
+    // A message that the patterns *would* match, overruled by a type that says
+    // otherwise — proving the order, not just the happy path.
     applyAgentEvents(db, [ev({
       ts: t0, kind: 'notification',
-      payload: { notification_type: 'permission_prompt', message: 'anything' },
+      payload: { notification_type: 'idle_prompt', message: 'needs your permission to use Bash' },
     })], ctx(t0))
+    expect((db.prepare('SELECT status FROM agent_sessions').get() as any).status).toBe('waiting_for_user')
+
+    applyAgentEvents(db, [ev({
+      ts: t0 + 1000, kind: 'notification',
+      payload: { notification_type: 'permission_prompt', message: 'anything at all' },
+    })], ctx(t0 + 1000))
     expect((db.prepare('SELECT status FROM agent_sessions').get() as any).status).toBe('waiting_for_permission')
+  })
+
+  it('falls through to waiting_for_user and keeps the unmatched message', () => {
+    const message = 'Claude has something to tell you'
+    applyAgentEvents(db, [ev({ ts: t0, kind: 'notification', payload: { message } })], ctx(t0))
+
+    expect((db.prepare('SELECT status FROM agent_sessions').get() as any).status).toBe('waiting_for_user')
+    // Kept so the patterns can be improved from what actually arrived.
+    const payload = JSON.parse((db.prepare(
+      "SELECT payload FROM agent_session_events WHERE kind = 'notification'"
+    ).get() as any).payload)
+    expect(payload.message).toBe(message)
   })
 
   it('treats stop_failure as the turn ending, keeping the session open', () => {
