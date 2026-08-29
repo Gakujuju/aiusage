@@ -139,6 +139,23 @@ export function claimPendingNotifications(
   return claimed
 }
 
+/**
+ * Put back anything left mid-flight by a process that died.
+ *
+ * A notification is marked 'sending' before the POST and written back after
+ * it. A crash, a Ctrl+C or a power cut in between leaves the row stuck: no
+ * later claim will ever look at it again.
+ *
+ * Some of what this requeues was in fact delivered, so the recipient may see
+ * one message twice. That is the right trade: a duplicate is a moment's
+ * confusion, a notification lost forever is the failure this whole queue
+ * exists to prevent. expires_at caps how stale a re-sent message can be.
+ * Please do not "fix" the duplicate by removing this.
+ */
+export function requeueInFlightNotifications(db: Database.Database): number {
+  return db.prepare("UPDATE notifications SET state = 'pending' WHERE state = 'sending'").run().changes
+}
+
 export function markNotificationSent(db: Database.Database, id: string, now: number): void {
   db.prepare(`
     UPDATE notifications

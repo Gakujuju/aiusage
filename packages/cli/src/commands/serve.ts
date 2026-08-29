@@ -17,6 +17,7 @@ import { AsyncTaskQueue } from '../db/write-queue.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import { AgentSessionEmitter, decayStaleSessions } from '../db/agent-sessions.js'
 import { NotificationSender } from '../notify/discord.js'
+import { requeueInFlightNotifications } from '../db/notifications.js'
 import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
 import { queryAllQuotas } from '../quota.js'
@@ -199,6 +200,14 @@ export function serve(options: ServeOptions): void {
       notifyEscalations(notifyContext())
     }).catch((err) => console.error('[serve] agent session reaper failed:', err))
   }, AGENT_REAPER_INTERVAL_MS)
+
+  // Anything the previous process was mid-send on. Runs before the sender
+  // starts, so the first tick can pick them up.
+  void runDbWrite(() => requeueInFlightNotifications(options.db))
+    .then((requeued) => {
+      if (requeued > 0) console.log(`[serve] requeued ${requeued} notification(s) left in flight`)
+    })
+    .catch((err) => console.error('[serve] notification requeue failed:', err))
 
   const notificationSender = new NotificationSender({
     db: options.db,

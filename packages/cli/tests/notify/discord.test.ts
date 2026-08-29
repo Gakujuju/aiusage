@@ -7,6 +7,7 @@ import {
   listNotifications,
   markNotificationFailed,
   markNotificationSent,
+  requeueInFlightNotifications,
   retryNotification,
   summariseNotifications,
   RETRY_BACKOFF_MS,
@@ -201,6 +202,39 @@ describe('notification outbox', () => {
     const summary = summariseNotifications(db, T0)
     expect(summary.stateCounts.pending).toBe(1)
     expect(JSON.stringify(summary)).not.toContain('discord.com')
+  })
+
+  // A row marked 'sending' when the process died would otherwise never be
+  // looked at again — no later claim considers it.
+  it('requeues notifications left in flight by a dead process', () => {
+    enqueueNotification(db, base(), T0)
+    claimPendingNotifications(db, T0, 5)
+    expect((db.prepare('SELECT state FROM notifications').get() as any).state).toBe('sending')
+
+    expect(requeueInFlightNotifications(db)).toBe(1)
+    expect((db.prepare('SELECT state FROM notifications').get() as any).state).toBe('pending')
+    // And the next tick picks it up again.
+    expect(claimPendingNotifications(db, T0, 5)).toHaveLength(1)
+  })
+
+  it('leaves settled notifications alone when requeuing', () => {
+    enqueueNotification(db, base({ dedupeKey: 'sent' }), T0)
+    enqueueNotification(db, base({ dedupeKey: 'failed' }), T0)
+    enqueueNotification(db, base({ dedupeKey: 'dropped', drop: true }), T0)
+    const claimed = claimPendingNotifications(db, T0, 5)
+    markNotificationSent(db, claimed.find((r) => r.dedupe_key === 'sent')!.id, T0)
+    const toFail = claimed.find((r) => r.dedupe_key === 'failed')!
+    for (let i = 0; i <= RETRY_BACKOFF_MS.length; i++) markNotificationFailed(db, toFail.id, 'boom', T0)
+
+    expect(requeueInFlightNotifications(db)).toBe(0)
+    const states = (db.prepare('SELECT dedupe_key, state FROM notifications').all() as any[])
+      .reduce((acc, r) => ({ ...acc, [r.dedupe_key]: r.state }), {} as Record<string, string>)
+    expect(states).toEqual({ sent: 'sent', failed: 'failed', dropped: 'dropped' })
+  })
+
+  it('reports nothing to requeue on a clean start', () => {
+    enqueueNotification(db, base(), T0)
+    expect(requeueInFlightNotifications(db)).toBe(0)
   })
 
   it('filters the list by state', () => {
