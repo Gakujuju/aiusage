@@ -467,6 +467,21 @@ describe('agent sessions API', () => {
     expect((await fetch(`${baseUrl}/api/agent/sessions/nope`)).status).toBe(404)
   })
 
+  it('finds a session by id however many others exist', async () => {
+    // The detail lookup filters on the primary key rather than paging through
+    // the list, so a long-lived device does not lose access to its sessions.
+    await postEvents(
+      Array.from({ length: 60 }, (_, i) => ev({ ts: t0 + i, sessionId: `bulk-${i}` })),
+    )
+    const list = await (await fetch(`${baseUrl}/api/agent/sessions?limit=1&offset=59`)).json()
+    expect(list.total).toBe(60)
+
+    const target = list.sessions[0]
+    const res = await fetch(`${baseUrl}/api/agent/sessions/${target.id}`)
+    expect(res.status).toBe(200)
+    expect((await res.json()).session.id).toBe(target.id)
+  })
+
   it('summarises by status, tool and attention', async () => {
     await postEvents([ev({ ts: t0 })])
     await postEvents([ev({
