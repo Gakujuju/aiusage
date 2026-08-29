@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
 import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
-import { AIUSAGE_DIR, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
+import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent, getIngestToken } from '../init.js'
 import { generateConsentFingerprint } from '../sync/consent.js'
@@ -31,6 +31,12 @@ import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
 import { insertRecord } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
+import {
+  enqueueNotification,
+  listNotifications,
+  retryNotification,
+  summariseNotifications,
+} from '../db/notifications.js'
 import {
   AgentSessionEmitter,
   applyAgentEvents,
@@ -1543,6 +1549,69 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         }
       }
 
+      // ── /api/notifications ────────────────────────────────────────
+      // The outbox never stores the webhook, and last_error is masked before
+      // it is written, so nothing returned here can carry the URL.
+      if (url.pathname.startsWith('/api/notifications')) {
+        try {
+          if (url.pathname === '/api/notifications' && req.method === 'GET') {
+            json(res, listNotifications(db, {
+              state: url.searchParams.get('state'),
+              subjectKind: url.searchParams.get('subjectKind'),
+              limit: Number(url.searchParams.get('limit')) || undefined,
+            }))
+            return
+          }
+
+          if (url.pathname === '/api/notifications/summary' && req.method === 'GET') {
+            json(res, summariseNotifications(db, Date.now()))
+            return
+          }
+
+          if (url.pathname === '/api/notifications/test' && req.method === 'POST') {
+            const cfg = loadConfig()
+            const enqueued = await runDbWrite(() => enqueueNotification(db, {
+              eventType: 'test',
+              subjectKind: 'system',
+              subjectId: 'test',
+              // Unique per request: a test is worth repeating on demand.
+              dedupeKey: `test:${Date.now()}:${randomBytes(4).toString('hex')}`,
+              title: `${cfg?.notifications?.prefix ?? '[aiusage] '}✅ ${getDeviceName()}｜通知テスト`,
+              body: 'aiusage から Discord への疎通確認です。',
+              deviceInstanceId: options?.currentDeviceInstanceId ?? '',
+              drop: cfg?.notifications?.notifierDevice !== true,
+              dropReason: 'not the notifier device',
+            }, Date.now()))
+            json(res, {
+              ok: true,
+              enqueued,
+              enabled: cfg?.notifications?.enabled === true,
+              webhookConfigured: loadCredential(DISCORD_WEBHOOK_CREDENTIAL) != null,
+              notifierDevice: cfg?.notifications?.notifierDevice === true,
+            })
+            return
+          }
+
+          const retryMatch = /^\/api\/notifications\/([^/]+)\/retry$/.exec(url.pathname)
+          if (retryMatch && req.method === 'POST') {
+            const ok = await runDbWrite(() =>
+              retryNotification(db, decodeURIComponent(retryMatch[1]), Date.now()))
+            if (!ok) {
+              json(res, { error: { code: 'NOT_FOUND', message: 'No retryable notification with that id' } }, 404)
+              return
+            }
+            json(res, { ok: true })
+            return
+          }
+        } catch (error) {
+          if (isDatabaseLockedError(error)) {
+            databaseBusy(res)
+            return
+          }
+          throw error
+        }
+      }
+
       // ── /api/projects ─────────────────────────────────────────────
       if (url.pathname === '/api/projects') {
         const dr = getDateRangeFilter(range, from, to, '', weekStart)
@@ -2294,6 +2363,9 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             exchangeRateCache: rest.exchangeRateCache ?? null,
             siteUrl: getSiteUrl(),
             credentialKeys: credentials ? Object.keys(credentials) : [],
+            notifications: rest.notifications ?? null,
+            // Whether a webhook exists, never what it is.
+            notificationWebhookConfigured: loadCredential(DISCORD_WEBHOOK_CREDENTIAL) != null,
             hostname: hostname(),
             platform: osPlatform,
           })
@@ -2350,6 +2422,16 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             if ('retentionDays' in update) {
               if (!update.retentionDays) delete existing.retentionDays
               else existing.retentionDays = Number(update.retentionDays)
+            }
+            if ('notifications' in update) {
+              // Merged rather than replaced, so a partial update cannot switch
+              // off events it never mentioned. The webhook is not accepted
+              // here — it goes through /api/config/credential like every other
+              // secret, so it never lands in the plain config section.
+              const incoming = (update.notifications ?? {}) as Record<string, unknown>
+              delete incoming.webhook
+              delete incoming.webhookUrl
+              existing.notifications = { ...(existing.notifications ?? {}), ...incoming }
             }
             if ('leaderboardAutoUpload' in update) {
               existing.leaderboardAutoUpload = update.leaderboardAutoUpload === true

@@ -16,6 +16,8 @@ import { RuntimeSettingsController } from '../runtime/settings-controller.js'
 import { AsyncTaskQueue } from '../db/write-queue.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import { AgentSessionEmitter, decayStaleSessions } from '../db/agent-sessions.js'
+import { NotificationSender } from '../notify/discord.js'
+import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
 import { queryAllQuotas } from '../quota.js'
 import { hostname } from 'node:os'
@@ -103,11 +105,15 @@ export function serve(options: ServeOptions): void {
   let loggedQuotaSuccess = false
   const runQuotaSnapshot = async () => {
     const results = await queryAllQuotas()
-    const summary = await runDbWrite(() => recordQuotaSnapshot(options.db, results, {
-      device: loadConfig()?.device || hostname() || 'unknown',
-      deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? '',
-      now: Date.now(),
-    }))
+    const summary = await runDbWrite(() => {
+      const recorded = recordQuotaSnapshot(options.db, results, {
+        device: loadConfig()?.device || hostname() || 'unknown',
+        deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? '',
+        now: Date.now(),
+      }, { thresholds: loadConfig()?.notifications?.quota?.thresholds })
+      notifyQuotaSummary(notifyContext(), recorded)
+      return recorded
+    })
 
     if (summary.attempted > 0 && summary.succeeded === 0) {
       const kinds = summary.errorKinds.length > 0 ? summary.errorKinds.join(', ') : 'unknown'
@@ -158,11 +164,48 @@ export function serve(options: ServeOptions): void {
   // quota poller it can simply skip a tick that lands during a parse: the next
   // one is 15 seconds away and decay is not time-critical.
   const agentEmitter = new AgentSessionEmitter()
+
+  // Read fresh each time, so switching notifications on takes effect without
+  // restarting serve.
+  const notifyContext = () => {
+    const cfg = loadConfig()
+    return {
+      db: options.db,
+      config: cfg?.notifications,
+      isNotifier: cfg?.notifications?.notifierDevice === true,
+      deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? '',
+      device: cfg?.device || hostname() || 'unknown',
+      now: Date.now(),
+    }
+  }
+
+  // A status change is the trigger. The emitter already fires outside the
+  // transaction that produced it, so queueing here cannot extend that lock.
+  agentEmitter.subscribe((session) => {
+    // Also on a kind change at the same status: Stop and StopFailure both land
+    // on waiting_for_user but mean different things. shouldNotifySession has
+    // the final say, and its duplicate check keys on the kind too.
+    if (!session.changed && !session.kindChanged) return
+    void runDbWrite(() => notifySessionChange(notifyContext(), session.id))
+      .catch((err) => console.error('[serve] notification enqueue failed:', err))
+  })
+
   const agentReaper = setInterval(() => {
     if (runtimeSettings.isParseInFlight()) return
-    void runDbWrite(() => decayStaleSessions(options.db, Date.now(), agentEmitter))
-      .catch((err) => console.error('[serve] agent session reaper failed:', err))
+    void runDbWrite(() => {
+      decayStaleSessions(options.db, Date.now(), agentEmitter)
+      // Re-announce permission waits nobody has answered. Only possible
+      // because those no longer decay away while the person is not looking.
+      notifyEscalations(notifyContext())
+    }).catch((err) => console.error('[serve] agent session reaper failed:', err))
   }, AGENT_REAPER_INTERVAL_MS)
+
+  const notificationSender = new NotificationSender({
+    db: options.db,
+    runDbWrite,
+    isParseInFlight: () => runtimeSettings.isParseInFlight(),
+  })
+  notificationSender.start()
 
   // Events buffered while serve was down. dedupeKey makes this idempotent.
   void runDbWrite(() => drainAgentEventSpool(options.db, agentEmitter))
@@ -260,6 +303,7 @@ export function serve(options: ServeOptions): void {
 
     runtimeSettings.stop()
     clearInterval(agentReaper)
+    notificationSender.stop()
     throw error
   })
 
@@ -275,6 +319,7 @@ export function serve(options: ServeOptions): void {
     cleanup()
     runtimeSettings.stop()
     clearInterval(agentReaper)
+    notificationSender.stop()
     server.close(() => {
       process.exit(0)
     })
@@ -284,6 +329,7 @@ export function serve(options: ServeOptions): void {
     cleanup()
     runtimeSettings.stop()
     clearInterval(agentReaper)
+    notificationSender.stop()
     server.close(() => {
       process.exit(0)
     })

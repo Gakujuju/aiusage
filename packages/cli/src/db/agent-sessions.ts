@@ -60,6 +60,15 @@ export interface AppliedSession {
   status: AgentStatus
   statusSince: number
   changed: boolean
+  /**
+   * Whether the kind of the latest event changed, even if the status did not.
+   *
+   * Needed because two different events can share a status while meaning
+   * different things to a person: StopFailure and Stop both leave a session at
+   * waiting_for_user, but one is "作業完了" and the other "処理エラー終了".
+   * Watching only `changed` would announce the first and swallow the second.
+   */
+  kindChanged: boolean
 }
 
 export interface ApplyEventsResult {
@@ -391,9 +400,11 @@ export function applyAgentEvents(
         status: resolution.status,
         statusSince: resolution.statusSince,
         changed: resolution.changed,
+        kindChanged: row.last_event_kind !== event.kind,
       }
       result.sessions.push(applied)
-      if (resolution.changed) emitted.push(applied)
+      // A new kind can be new news at an unchanged status — see kindChanged.
+      if (resolution.changed || applied.kindChanged) emitted.push(applied)
     }
   })
 
@@ -493,6 +504,7 @@ export function decayStaleSessions(
         status: decay.status,
         statusSince: decay.statusSince,
         changed: true,
+        kindChanged: false,
       })
     }
   })

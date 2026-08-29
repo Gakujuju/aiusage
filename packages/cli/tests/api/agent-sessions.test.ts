@@ -267,16 +267,39 @@ describe('applyAgentEvents', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM agent_sessions').get() as any).n).toBe(2)
   })
 
-  it('emits only on a real status change', () => {
+  it('emits on a status change and on a kind change, not on a repeat', () => {
     const emitter = new AgentSessionEmitter()
-    const seen: string[] = []
-    emitter.subscribe((s) => seen.push(s.status))
+    const seen: Array<{ status: string; changed: boolean; kindChanged: boolean }> = []
+    emitter.subscribe((s) => seen.push({ status: s.status, changed: s.changed, kindChanged: s.kindChanged }))
 
     applyAgentEvents(db, [ev({ ts: t0 })], ctx(t0), emitter)
     applyAgentEvents(db, [ev({ ts: t0 + 1000, kind: 'pre_tool_use' })], ctx(t0 + 1000), emitter)
+    // Same kind twice at the same status: nothing new to say.
+    applyAgentEvents(db, [ev({ ts: t0 + 1500, kind: 'pre_tool_use' })], ctx(t0 + 1500), emitter)
     applyAgentEvents(db, [ev({ ts: t0 + 2000, kind: 'stop' })], ctx(t0 + 2000), emitter)
 
-    expect(seen).toEqual(['running', 'waiting_for_user'])
+    expect(seen).toEqual([
+      { status: 'running', changed: true, kindChanged: true },
+      { status: 'running', changed: false, kindChanged: true },
+      { status: 'waiting_for_user', changed: true, kindChanged: true },
+    ])
+  })
+
+  // Stop and StopFailure both leave the session at waiting_for_user, but one
+  // means 作業完了 and the other 処理エラー終了. Watching only the status
+  // would announce the first and swallow the second.
+  it('emits for stop_failure arriving at an unchanged status', () => {
+    const emitter = new AgentSessionEmitter()
+    const seen: Array<{ status: string; changed: boolean; kindChanged: boolean }> = []
+    emitter.subscribe((s) => seen.push({ status: s.status, changed: s.changed, kindChanged: s.kindChanged }))
+
+    applyAgentEvents(db, [ev({ ts: t0, kind: 'stop' })], ctx(t0), emitter)
+    applyAgentEvents(db, [ev({
+      ts: t0 + 1000, kind: 'stop_failure', payload: { error_type: 'rate_limit' },
+    })], ctx(t0 + 1000), emitter)
+
+    expect(seen).toHaveLength(2)
+    expect(seen[1]).toEqual({ status: 'waiting_for_user', changed: false, kindChanged: true })
   })
 
   it('ignores events with an unknown kind or tool', () => {
