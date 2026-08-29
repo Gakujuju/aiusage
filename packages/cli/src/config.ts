@@ -53,6 +53,13 @@ export interface Config {
   quotaSnapshotInterval?: number
   /** Retention for quota history, in days. Independent of retentionDays. Defaults to 180. */
   quotaRetentionDays?: number
+  agentSessions?: {
+    /**
+     * Store a 120-character preview of the user's prompt on the session row.
+     * Off unless asked for: this is the most sensitive thing a hook carries.
+     */
+    storePromptPreview?: boolean
+  }
 }
 
 export function loadConfig(): Config | null {
