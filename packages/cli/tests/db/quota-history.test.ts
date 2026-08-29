@@ -379,26 +379,48 @@ describe('recordQuotaSnapshot', () => {
     expect(windowIds).toHaveLength(1)
   })
 
-  it('resets the Phase 7 notification state on a window roll', () => {
-    record(db, [success('codex', [{ name: 'five_hour', utilization: 90, resetsAt: RESET_A }])], t0)
-    db.prepare("UPDATE quota_current SET notified_level = 80, notified_window_id = 'w'").run()
+  it('reports each threshold once and remembers the highest announced', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 70, resetsAt: RESET_A }])], t0)
+    const first = record(db, [success('codex', [{ name: 'five_hour', utilization: 85, resetsAt: RESET_A }])], t0 + 60_000)
 
-    record(db, [success('codex', [{ name: 'five_hour', utilization: 5, resetsAt: RESET_B }])], t0 + 60_000)
+    expect(first.crossings).toEqual([{
+      tool: 'codex', tier: 'five_hour', windowId: expect.any(String),
+      threshold: 80, utilization: 85, resetsAt: Date.parse(RESET_A),
+    }])
+    expect((db.prepare('SELECT notified_level FROM quota_current').get() as any).notified_level).toBe(80)
 
-    const current = db.prepare('SELECT notified_level, notified_window_id FROM quota_current').get() as any
-    expect(current.notified_level).toBe(0)
-    expect(current.notified_window_id).toBe('')
+    // Still above 80, but 80 has already been said.
+    const second = record(db, [success('codex', [{ name: 'five_hour', utilization: 90, resetsAt: RESET_A }])], t0 + 120_000)
+    expect(second.crossings).toEqual([])
   })
 
-  it('preserves the notification state within a window', () => {
+  it('announces only the highest of several thresholds crossed at once', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 10, resetsAt: RESET_A }])], t0)
+    // 10 → 97 clears both 80 and 95; three messages in one second would say
+    // nothing the last one does not.
+    const summary = record(db, [success('codex', [{ name: 'five_hour', utilization: 97, resetsAt: RESET_A }])], t0 + 60_000)
+    expect(summary.crossings).toHaveLength(1)
+    expect(summary.crossings[0].threshold).toBe(95)
+  })
+
+  it('starts announcing again in a new window', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 90, resetsAt: RESET_A }])], t0)
+    expect((db.prepare('SELECT notified_level FROM quota_current').get() as any).notified_level).toBe(80)
+
+    // A rollover: utilization drops and the reset moves.
+    const rolled = record(db, [success('codex', [{ name: 'five_hour', utilization: 5, resetsAt: RESET_B }])], t0 + 60_000)
+    expect(rolled.resets).toHaveLength(1)
+    expect((db.prepare('SELECT notified_level FROM quota_current').get() as any).notified_level).toBe(0)
+
+    const again = record(db, [success('codex', [{ name: 'five_hour', utilization: 85, resetsAt: RESET_B }])], t0 + 120_000)
+    expect(again.crossings[0].threshold).toBe(80)
+  })
+
+  it('tracks the current window on the notification state', () => {
     record(db, [success('codex', [{ name: 'five_hour', utilization: 50, resetsAt: RESET_A }])], t0)
-    db.prepare("UPDATE quota_current SET notified_level = 50, notified_window_id = 'w'").run()
-
-    record(db, [success('codex', [{ name: 'five_hour', utilization: 60, resetsAt: RESET_A }])], t0 + 60_000)
-
-    const current = db.prepare('SELECT notified_level, notified_window_id FROM quota_current').get() as any
-    expect(current.notified_level).toBe(50)
-    expect(current.notified_window_id).toBe('w')
+    const windowId = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+    expect((db.prepare('SELECT notified_window_id FROM quota_current').get() as any).notified_window_id)
+      .toBe(windowId)
   })
 
   it('warns when it closes a window because polling stopped', () => {
@@ -539,7 +561,7 @@ describe('recordQuotaSnapshot', () => {
   it('returns an empty summary for an empty round', () => {
     expect(record(db, [], t0)).toEqual({
       attempted: 0, succeeded: 0, inserted: 0, updated: 0,
-      windowsClosed: 0, failedTools: [], errorKinds: [],
+      windowsClosed: 0, failedTools: [], errorKinds: [], crossings: [], resets: [],
     })
   })
 

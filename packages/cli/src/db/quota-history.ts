@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import { classifyQuotaError, windowDurationMs } from '@aiusage/core'
+import { classifyQuotaError, quotaThresholdCrossings, windowDurationMs, DEFAULT_QUOTA_THRESHOLDS } from '@aiusage/core'
 import type { QuotaResult } from '../quota.js'
 
 /**
@@ -107,6 +107,22 @@ export interface RecordSummary {
    * log: these are category names, never the error text, a URL or a token.
    */
   errorKinds: string[]
+  /** Thresholds crossed this round, for the notifier to act on. */
+  crossings: Array<{
+    tool: string
+    tier: string
+    windowId: string
+    threshold: number
+    utilization: number
+    resetsAt: number | null
+  }>
+  /** Windows that rolled over this round. */
+  resets: Array<{ tool: string; tier: string; newWindowId: string }>
+}
+
+/** Notification thresholds, mirrored from the config at the call site. */
+export interface QuotaNotifyOptions {
+  thresholds?: number[]
 }
 
 interface CurrentRow {
@@ -193,13 +209,16 @@ export function recordQuotaSnapshot(
   db: Database.Database,
   results: QuotaResult[],
   ctx: QuotaRecordContext,
+  notifyOptions?: QuotaNotifyOptions,
 ): RecordSummary {
   const summary: RecordSummary = {
     attempted: 0, succeeded: 0, inserted: 0, updated: 0,
     windowsClosed: 0, failedTools: [], errorKinds: [],
+    crossings: [], resets: [],
   }
   if (!Array.isArray(results) || results.length === 0) return summary
   const errorKinds = new Set<string>()
+  const thresholds = notifyOptions?.thresholds ?? [...DEFAULT_QUOTA_THRESHOLDS]
 
   const now = Number.isFinite(ctx.now) ? ctx.now : Date.now()
   const deviceInstanceId = ctx.deviceInstanceId || ''
@@ -327,6 +346,32 @@ export function recordQuotaSnapshot(
           ? previous.window_id
           : computeWindowId(deviceInstanceId, result.tool, tier.name, resetsAt, now)
 
+        // Notification bookkeeping. notified_level records the highest
+        // threshold already announced for this window, so a window that rolls
+        // starts announcing again from zero.
+        const notifiedLevel = rollover.rolled ? 0 : previous?.notified_level ?? 0
+        const crossed = quotaThresholdCrossings(
+          rollover.rolled || !previous ? null : previous.utilization,
+          tier.utilization,
+          thresholds,
+        ).filter((t) => t > notifiedLevel)
+        if (crossed.length > 0) {
+          // Only the highest: three messages saying 80, 95 and 100 in the same
+          // second tell the reader nothing the last one does not.
+          const highest = crossed[crossed.length - 1]
+          summary.crossings.push({
+            tool: result.tool,
+            tier: tier.name,
+            windowId,
+            threshold: highest,
+            utilization: tier.utilization,
+            resetsAt,
+          })
+        }
+        if (rollover.rolled) {
+          summary.resets.push({ tool: result.tool, tier: tier.name, newWindowId: windowId })
+        }
+
         if (rollover.rolled) {
           if (rollover.reason === 'gap') {
             console.warn(
@@ -382,10 +427,10 @@ export function recordQuotaSnapshot(
           windowId,
           ts: now,
           credStatus: result.credentialStatus,
-          // A new window means the Phase 7 notifier should be allowed to fire
-          // again from scratch.
-          notifiedLevel: rollover.rolled ? 0 : previous?.notified_level ?? 0,
-          notifiedWindowId: rollover.rolled ? '' : previous?.notified_window_id ?? '',
+          // The highest threshold already announced for this window. A rolled
+          // window resets it to 0 above, so the new window announces afresh.
+          notifiedLevel: crossed.length > 0 ? crossed[crossed.length - 1] : notifiedLevel,
+          notifiedWindowId: windowId,
         })
         summary.updated++
       }

@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { serve } from './commands/serve.js'
 import { runAgentEvent } from './commands/agent-event.js'
+import { runNotifyStatus, runNotifyTest } from './commands/notify.js'
 import { runInit } from './commands/init.js'
 import { runSync } from './commands/sync.js'
 import { generateSummary } from './commands/summary.js'
@@ -336,6 +337,29 @@ program
     serve({ port: parseInt(options.port), db })
   })
 
+// notify-test command
+program
+  .command('notify-test')
+  .description('Send one test notification to the configured Discord webhook')
+  .option('--set-webhook', 'Read a webhook URL from stdin and save it first')
+  .action(async (options) => {
+    const result = await runNotifyTest({ setWebhook: options.setWebhook })
+    // exitCode rather than process.exit(): forcing an exit immediately after
+    // consuming piped stdin trips a libuv assertion on Windows. Letting the
+    // loop drain gets the same status without the crash.
+    process.exitCode = result.sent || !result.webhookConfigured ? 0 : 1
+  })
+
+// notify-status command
+program
+  .command('notify-status')
+  .description('Show the notification outbox summary')
+  .action(() => {
+    const db = createDatabase(DB_PATH)
+    runNotifyStatus(db)
+    db.close()
+  })
+
 // agent-event command
 program
   .command('agent-event')
@@ -356,7 +380,10 @@ program
       detail: options.detail,
       printHookConfig: options.printHookConfig,
     })
-    process.exit(0)
+    // Never non-zero, and never process.exit(): an immediate exit after piped
+    // stdin trips a libuv assertion on Windows, and a crashing hook is exactly
+    // what this command exists to avoid.
+    process.exitCode = 0
   })
 
 // init command

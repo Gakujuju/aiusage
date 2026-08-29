@@ -85,7 +85,60 @@ export interface Config {
      */
     storePromptPreview?: boolean
   }
+  notifications?: NotificationConfig
+  /**
+   * Extra directory names to treat as workspace roots when naming a project
+   * from a path — added to the built-in set, never replacing it. e.g.
+   * ["Desktop"] makes ~/Desktop/aiusage report "aiusage" rather than "Desktop".
+   */
+  projectRoots?: string[]
+  /** Display names for projects, keyed by the extracted project name. */
+  projectAliases?: Record<string, string>
 }
+
+export interface NotificationConfig {
+  /** Off until deliberately switched on. Nothing is sent while false. */
+  enabled?: boolean
+  channel?: 'discord'
+  /** Marks messages as ours while running alongside the existing hooks. */
+  prefix?: string
+  /**
+   * Whether this machine is the one that sends. Several machines watching the
+   * same account would otherwise each announce the same thing.
+   */
+  notifierDevice?: boolean
+  /**
+   * Include the assistant's reply in the notification. Off by default: this
+   * sends response content to a third-party service, and the existing
+   * PowerShell hook doing so is not a reason to inherit the behaviour.
+   */
+  includeAssistantMessage?: boolean
+  /** Floor on how often one session may notify. */
+  minIntervalMs?: number
+  events?: {
+    waiting_for_permission?: boolean
+    waiting_for_user?: boolean
+    failed?: boolean
+    completed?: boolean
+    running?: boolean
+    idle?: boolean
+  }
+  escalation?: {
+    /** Delays from status_since at which to re-announce, in ms. */
+    waiting_for_permission?: number[]
+  }
+  quota?: {
+    thresholds?: number[]
+    notifyOnReset?: boolean
+  }
+  /** Local 'HH:MM' times. Unset means notify at any hour. */
+  quietHours?: { start: string; end: string }
+  /** Event kinds that ignore quiet hours. */
+  quietHoursAllow?: string[]
+}
+
+/** Credential key holding the Discord webhook. Never stored in `notifications`. */
+export const DISCORD_WEBHOOK_CREDENTIAL = 'discordWebhook'
 
 export function loadConfig(): Config | null {
   if (!existsSync(CONFIG_PATH)) return null

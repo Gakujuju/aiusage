@@ -229,6 +229,7 @@ export function drainAgentEventSpool(db: Database.Database, emitter?: AgentSessi
     platform: loadConfig()?.platform || platform(),
     now: Date.now(),
     storePromptPreview: loadConfig()?.agentSessions?.storePromptPreview === true,
+    projectRoots: loadConfig()?.projectRoots,
   }, emitter)
 
   clearSpool()
