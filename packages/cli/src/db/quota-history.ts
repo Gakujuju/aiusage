@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type Database from 'better-sqlite3'
+import { classifyQuotaError, windowDurationMs } from '@aiusage/core'
 import type { QuotaResult } from '../quota.js'
 
 /**
@@ -18,10 +19,66 @@ const MIN_UTILIZATION_DELTA = 0.1
 const MAX_SNAPSHOT_GAP_MS = 60 * 60 * 1000
 
 /**
- * A drop this large without a matching resets_at change is treated as upstream
- * noise rather than a window rollover.
+ * A drop at least this large means the window rolled. Anything smaller is
+ * upstream noise: the APIs report mid-recalculation values that wobble by a
+ * point or two without the window changing.
  */
-const SUSPICIOUS_DROP_POINTS = 10
+const ROLLOVER_DROP_POINTS = 5
+
+/**
+ * A reset time that jumps forward by at least this fraction of the window
+ * length really is a new window. Smaller jumps are the rolling reset Codex
+ * reports for an untouched five_hour window, which creeps forward on every
+ * poll and would otherwise mint a window each time.
+ */
+const ROLLOVER_RESET_JUMP_FRACTION = 0.5
+
+interface RolloverDecision {
+  rolled: boolean
+  /** Which of the three rules fired, for the gap flag and for logging. */
+  reason: 'drop' | 'reset_jump' | 'gap' | null
+}
+
+/**
+ * Decide whether this observation belongs to a new window.
+ *
+ * Keyed on resets_at alone this would be trivial, but the upstream reset time
+ * is not a stable boundary, so three independent signals are needed. A tier
+ * whose length we cannot look up (Copilot) can only use the first.
+ */
+export function detectRollover(
+  previous: { utilization: number; resets_at: number | null; ts: number },
+  tier: string,
+  utilization: number,
+  resetsAt: number | null,
+  now: number,
+): RolloverDecision {
+  // A) The number fell far enough that it cannot be the same window.
+  if (previous.utilization - utilization >= ROLLOVER_DROP_POINTS) {
+    return { rolled: true, reason: 'drop' }
+  }
+
+  const duration = windowDurationMs(tier)
+  if (duration == null) return { rolled: false, reason: null }
+
+  // B) The reset time jumped by half a window or more — a real boundary move,
+  //    not the few seconds of drift we see between polls.
+  if (
+    resetsAt != null &&
+    previous.resets_at != null &&
+    resetsAt - previous.resets_at >= duration * ROLLOVER_RESET_JUMP_FRACTION
+  ) {
+    return { rolled: true, reason: 'reset_jump' }
+  }
+
+  // C) We were not looking for a whole window. Whatever happened in between is
+  //    unobserved, so do not draw a line across the gap.
+  if (now - previous.ts >= duration) {
+    return { rolled: true, reason: 'gap' }
+  }
+
+  return { rolled: false, reason: null }
+}
 
 export interface QuotaRecordContext {
   device: string
@@ -51,6 +108,7 @@ interface CurrentRow {
   cred_status: string
   last_success_at: number | null
   last_error: string | null
+  last_error_kind: string
   consecutive_errors: number
   notified_level: number
   notified_window_id: string
@@ -58,18 +116,23 @@ interface CurrentRow {
 }
 
 /**
- * Identifies one reset window. Keyed on resets_at, so the id changes exactly
- * when the upstream window rolls over — that is the rollover signal.
+ * Identifies one occurrence of a reset window.
+ *
+ * `openedAt` — the moment we decided a new window had begun — is part of the
+ * key, not just resets_at. Rule A rolls a window whose reset time has not
+ * moved, and hashing resets_at alone would then hand the new window the id of
+ * the one just closed, leaving a permanently-closed row as the current window.
  */
 export function computeWindowId(
   deviceInstanceId: string,
   tool: string,
   tier: string,
   resetsAtMs: number | null,
+  openedAt: number,
 ): string {
   const resetPart = resetsAtMs == null ? 'unknown' : String(resetsAtMs)
   return createHash('sha256')
-    .update(deviceInstanceId + '\0' + tool + '\0' + tier + '\0' + resetPart)
+    .update(deviceInstanceId + '\0' + tool + '\0' + tier + '\0' + resetPart + '\0' + openedAt)
     .digest('hex')
     .slice(0, 16)
 }
@@ -145,11 +208,11 @@ export function recordQuotaSnapshot(
   const upsertCurrentSuccess = db.prepare(`
     INSERT INTO quota_current (
       tool, tier, device_instance_id, utilization, resets_at, window_id, ts,
-      cred_status, last_success_at, last_error, consecutive_errors,
+      cred_status, last_success_at, last_error, last_error_kind, consecutive_errors,
       notified_level, notified_window_id, updated_at
     ) VALUES (
       @tool, @tier, @deviceInstanceId, @utilization, @resetsAt, @windowId, @ts,
-      @credStatus, @ts, NULL, 0,
+      @credStatus, @ts, NULL, '', 0,
       @notifiedLevel, @notifiedWindowId, @ts
     )
     ON CONFLICT(tool, tier, device_instance_id) DO UPDATE SET
@@ -160,6 +223,7 @@ export function recordQuotaSnapshot(
       cred_status        = excluded.cred_status,
       last_success_at    = excluded.last_success_at,
       last_error         = NULL,
+      last_error_kind    = '',
       consecutive_errors = 0,
       notified_level     = excluded.notified_level,
       notified_window_id = excluded.notified_window_id,
@@ -169,6 +233,7 @@ export function recordQuotaSnapshot(
     UPDATE quota_current
     SET cred_status = @credStatus,
         last_error = @lastError,
+        last_error_kind = @lastErrorKind,
         consecutive_errors = consecutive_errors + 1,
         updated_at = @now
     WHERE tool = @tool AND tier = @tier AND device_instance_id = @deviceInstanceId
@@ -188,7 +253,7 @@ export function recordQuotaSnapshot(
   `)
   const closeWindow = db.prepare(`
     UPDATE quota_windows
-    SET closed_at = @closedAt, final_utilization = @finalUtilization
+    SET closed_at = @closedAt, final_utilization = @finalUtilization, gap_detected = @gapDetected
     WHERE window_id = @windowId AND closed_at IS NULL
   `)
 
@@ -201,6 +266,10 @@ export function recordQuotaSnapshot(
         // Keep utilization / resets_at / window_id untouched: those stored
         // values are what /api/quotas serves as the stale fallback.
         const rows = selectCurrentByTool.all(result.tool, deviceInstanceId) as CurrentRow[]
+        // cred_status cannot tell a dead network from working credentials —
+        // the reader calls both 'valid'. Phase 7 needs the distinction to say
+        // "re-login" versus "you're offline", so classify it here.
+        const lastErrorKind = classifyQuotaError(result)
         for (const row of rows) {
           markFailure.run({
             tool: row.tool,
@@ -208,6 +277,7 @@ export function recordQuotaSnapshot(
             deviceInstanceId,
             credStatus: result.credentialStatus,
             lastError: result.error ?? result.credentialMessage ?? null,
+            lastErrorKind,
             now,
           })
           summary.updated++
@@ -220,36 +290,31 @@ export function recordQuotaSnapshot(
         if (!Number.isFinite(tier.utilization)) continue
 
         const resetsAt = parseResetsAt(tier.resetsAt)
-        const candidateWindowId = computeWindowId(deviceInstanceId, result.tool, tier.name, resetsAt)
         const previous = selectCurrent.get(result.tool, tier.name, deviceInstanceId) as CurrentRow | undefined
 
-        // A changed resets_at is the rollover signal — but not on its own.
-        // Codex reports a *rolling* reset for an untouched 5-hour window
-        // (always "now + 5h"), so the reset time creeps forward on every poll
-        // and would otherwise mint a fresh window each time, shredding the
-        // series into one-point fragments. A genuine rollover always drops
-        // utilization, so require that too; without it we keep the window we
-        // already have and just adopt the newer reset time.
-        const resetChanged = previous != null && previous.window_id !== candidateWindowId
-        const windowRolled = resetChanged && tier.utilization < previous!.utilization
-        const windowId = previous != null && !windowRolled ? previous.window_id : candidateWindowId
+        const rollover: RolloverDecision = previous
+          ? detectRollover(previous, tier.name, tier.utilization, resetsAt, now)
+          : { rolled: false, reason: null }
 
-        if (!resetChanged && previous && previous.utilization - tier.utilization >= SUSPICIOUS_DROP_POINTS) {
-          // Same window, but the number fell off a cliff. Upstream sometimes
-          // reports mid-recalculation values; treating that as a new window
-          // would fragment the series and re-arm notifications for nothing.
-          console.warn(
-            `[quota-history] ${result.tool}/${tier.name}: utilization dropped ` +
-            `${previous.utilization.toFixed(1)} → ${tier.utilization.toFixed(1)} ` +
-            'without a reset change; keeping the current window'
-          )
-        }
+        // Outside a rollover the window keeps its identity and simply adopts
+        // the newer reset time — that is what absorbs Codex's drifting reset.
+        const windowId = previous != null && !rollover.rolled
+          ? previous.window_id
+          : computeWindowId(deviceInstanceId, result.tool, tier.name, resetsAt, now)
 
-        if (windowRolled) {
+        if (rollover.rolled) {
+          if (rollover.reason === 'gap') {
+            console.warn(
+              `[quota-history] ${result.tool}/${tier.name}: no observation for a full ` +
+              'window; starting a new one rather than joining across the gap'
+            )
+          }
           closeWindow.run({
             windowId: previous!.window_id,
             closedAt: now,
+            // The last value we actually saw, not an interpolation.
             finalUtilization: previous!.utilization,
+            gapDetected: rollover.reason === 'gap' ? 1 : 0,
           })
           summary.windowsClosed++
         }
@@ -294,8 +359,8 @@ export function recordQuotaSnapshot(
           credStatus: result.credentialStatus,
           // A new window means the Phase 7 notifier should be allowed to fire
           // again from scratch.
-          notifiedLevel: windowRolled ? 0 : previous?.notified_level ?? 0,
-          notifiedWindowId: windowRolled ? '' : previous?.notified_window_id ?? '',
+          notifiedLevel: rollover.rolled ? 0 : previous?.notified_level ?? 0,
+          notifiedWindowId: rollover.rolled ? '' : previous?.notified_window_id ?? '',
         })
         summary.updated++
       }

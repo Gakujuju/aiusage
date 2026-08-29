@@ -47,6 +47,9 @@ export function migrateV13(db: Database.Database): void {
       cred_status        TEXT NOT NULL DEFAULT 'valid',
       last_success_at    INTEGER,
       last_error         TEXT,
+      -- '' | 'auth' | 'network' | 'api' | 'parse'. cred_status cannot carry
+      -- this: the reader reports 'valid' for a dead network too.
+      last_error_kind    TEXT NOT NULL DEFAULT '',
       consecutive_errors INTEGER NOT NULL DEFAULT 0,
       notified_level     INTEGER NOT NULL DEFAULT 0,
       notified_window_id TEXT NOT NULL DEFAULT '',
@@ -64,7 +67,11 @@ export function migrateV13(db: Database.Database): void {
       closed_at          INTEGER,
       peak_utilization   REAL NOT NULL DEFAULT 0,
       final_utilization  REAL,
-      sample_count       INTEGER NOT NULL DEFAULT 0
+      sample_count       INTEGER NOT NULL DEFAULT 0,
+      -- 1 when the window was closed because polling stopped for longer than
+      -- the window itself, so final_utilization is the last value seen rather
+      -- than the value the window really ended on.
+      gap_detected       INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_quota_windows_series ON quota_windows(tool, tier, started_at DESC);

@@ -77,6 +77,14 @@ describe('migration v13', () => {
     expect(row.resets_timestamp).toBe('2026-08-29 12:00:00Z')
   })
 
+  it('carries the error-kind and gap columns', () => {
+    const currentCols = (db.prepare('PRAGMA table_info(quota_current)').all() as any[]).map((c) => c.name)
+    expect(currentCols).toContain('last_error_kind')
+
+    const windowCols = (db.prepare('PRAGMA table_info(quota_windows)').all() as any[]).map((c) => c.name)
+    expect(windowCols).toContain('gap_detected')
+  })
+
   it('creates the expected indexes', () => {
     const names = (db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_quota%'"
@@ -92,28 +100,36 @@ describe('migration v13', () => {
 })
 
 describe('computeWindowId', () => {
-  it('is stable for the same reset time', () => {
-    const a = computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000)
-    const b = computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000)
+  const OPENED = 500
+
+  it('is stable for the same inputs', () => {
+    const a = computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED)
+    const b = computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED)
     expect(a).toBe(b)
     expect(a).toHaveLength(16)
   })
 
   it('changes when the reset time changes', () => {
-    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000))
-      .not.toBe(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 2000))
+    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED))
+      .not.toBe(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 2000, OPENED))
+  })
+
+  it('changes when the same reset time opens a new window', () => {
+    // Rule A rolls without the reset moving, so openedAt has to separate them.
+    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED))
+      .not.toBe(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED + 1))
   })
 
   it('uses a stable placeholder for an unknown reset time', () => {
-    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', null))
-      .toBe(computeWindowId(DEVICE_ID, 'codex', 'five_hour', null))
+    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', null, OPENED))
+      .toBe(computeWindowId(DEVICE_ID, 'codex', 'five_hour', null, OPENED))
   })
 
   it('separates tools and tiers', () => {
-    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000))
-      .not.toBe(computeWindowId(DEVICE_ID, 'claude-code', 'five_hour', 1000))
-    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000))
-      .not.toBe(computeWindowId(DEVICE_ID, 'codex', 'weekly_limit', 1000))
+    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED))
+      .not.toBe(computeWindowId(DEVICE_ID, 'claude-code', 'five_hour', 1000, OPENED))
+    expect(computeWindowId(DEVICE_ID, 'codex', 'five_hour', 1000, OPENED))
+      .not.toBe(computeWindowId(DEVICE_ID, 'codex', 'weekly_limit', 1000, OPENED))
   })
 })
 
@@ -199,7 +215,113 @@ describe('recordQuotaSnapshot', () => {
     expect(countSnapshots(db)).toBe(2)
   })
 
-  it('rolls the window and closes the old one when resets_at changes', () => {
+  it('rule A: rolls when utilization drops by 5 points or more', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 20, resetsAt: RESET_A }])], t0)
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 80, resetsAt: RESET_A }])], t0 + 60_000)
+    const oldWindowId = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    // Same reset time, so only the drop can trigger this.
+    const summary = record(db, [success('codex', [{ name: 'five_hour', utilization: 75, resetsAt: RESET_A }])], t0 + 120_000)
+
+    expect(summary.windowsClosed).toBe(1)
+    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).not.toBe(oldWindowId)
+    const closed = db.prepare('SELECT * FROM quota_windows WHERE window_id = ?').get(oldWindowId) as any
+    expect(closed.final_utilization).toBe(80)
+    expect(closed.gap_detected).toBe(0)
+  })
+
+  it('rule A: does not roll on a drop under 5 points', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 80, resetsAt: RESET_A }])], t0)
+    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    const summary = record(db, [success('codex', [{ name: 'five_hour', utilization: 76, resetsAt: RESET_A }])], t0 + 60_000)
+
+    expect(summary.windowsClosed).toBe(0)
+    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).toBe(before)
+  })
+
+  it('rule B: rolls when resets_at jumps by half a window or more', () => {
+    // five_hour is 5h, so a 3h forward jump clears the 2.5h threshold with the
+    // utilization *rising* — rule A cannot explain this one.
+    const first = '2026-08-29T12:00:00.000Z'
+    const jumped = '2026-08-29T15:00:00.000Z'
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: first }])], t0)
+    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    const summary = record(db, [success('codex', [{ name: 'five_hour', utilization: 45, resetsAt: jumped }])], t0 + 60_000)
+
+    expect(summary.windowsClosed).toBe(1)
+    const after = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+    expect(after).not.toBe(before)
+    expect((db.prepare('SELECT gap_detected FROM quota_windows WHERE window_id = ?').get(before) as any).gap_detected).toBe(0)
+  })
+
+  it('rule B: does not roll on a jump under half a window', () => {
+    const first = '2026-08-29T12:00:00.000Z'
+    const nudged = '2026-08-29T14:00:00.000Z' // 2h < 2.5h
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: first }])], t0)
+    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    const summary = record(db, [success('codex', [{ name: 'five_hour', utilization: 45, resetsAt: nudged }])], t0 + 60_000)
+
+    expect(summary.windowsClosed).toBe(0)
+    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).toBe(before)
+    expect((db.prepare('SELECT resets_at FROM quota_current').get() as any).resets_at).toBe(Date.parse(nudged))
+  })
+
+  it('rule C: rolls and flags a gap after a window of no observations', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: RESET_A }])], t0)
+    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    // Five hours later, same reset, higher value — neither A nor B applies.
+    const summary = record(
+      db,
+      [success('codex', [{ name: 'five_hour', utilization: 45, resetsAt: RESET_A }])],
+      t0 + 5 * 3600_000,
+    )
+
+    expect(summary.windowsClosed).toBe(1)
+    const closed = db.prepare('SELECT * FROM quota_windows WHERE window_id = ?').get(before) as any
+    expect(closed.gap_detected).toBe(1)
+    expect(closed.final_utilization).toBe(40)
+  })
+
+  it('rule C: does not roll just under a full window of silence', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: RESET_A }])], t0)
+    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    const summary = record(
+      db,
+      [success('codex', [{ name: 'five_hour', utilization: 45, resetsAt: RESET_A }])],
+      t0 + 5 * 3600_000 - 1,
+    )
+
+    expect(summary.windowsClosed).toBe(0)
+    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).toBe(before)
+  })
+
+  it('applies only rule A to a tier with no known window length', () => {
+    // Copilot's chat tier has no duration, so B and C cannot fire.
+    const first = '2026-08-29T12:00:00.000Z'
+    const jumped = '2026-10-29T12:00:00.000Z'
+    record(db, [success('copilot', [{ name: 'chat', utilization: 40, resetsAt: first }])], t0)
+    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+
+    // A two-month reset jump and a month of silence, but utilization rose.
+    const summary = record(
+      db,
+      [success('copilot', [{ name: 'chat', utilization: 45, resetsAt: jumped }])],
+      t0 + 30 * 86400000,
+    )
+    expect(summary.windowsClosed).toBe(0)
+    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).toBe(before)
+
+    // A drop still rolls it.
+    record(db, [success('copilot', [{ name: 'chat', utilization: 5, resetsAt: jumped }])], t0 + 31 * 86400000)
+    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).not.toBe(before)
+  })
+
+  it('rolls the window and closes the old one when a new window resets it', () => {
     record(db, [success('codex', [{ name: 'five_hour', utilization: 20, resetsAt: RESET_A }])], t0)
     record(db, [success('codex', [{ name: 'five_hour', utilization: 80, resetsAt: RESET_A }])], t0 + 60_000)
     const oldWindowId = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
@@ -245,8 +367,9 @@ describe('recordQuotaSnapshot', () => {
   })
 
   it('keeps one window when resets_at drifts while utilization climbs', () => {
-    record(db, [success('codex', [{ name: 'five_hour', utilization: 10, resetsAt: RESET_A }])], t0)
-    record(db, [success('codex', [{ name: 'five_hour', utilization: 25, resetsAt: RESET_B }])], t0 + 60_000)
+    // A drift under half a window, with the number going up — no rule fires.
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 10, resetsAt: '2026-08-29T12:00:00.000Z' }])], t0)
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 25, resetsAt: '2026-08-29T13:00:00.000Z' }])], t0 + 60_000)
 
     expect((db.prepare('SELECT COUNT(*) AS n FROM quota_windows').get() as any).n).toBe(1)
     expect((db.prepare('SELECT COUNT(*) AS n FROM quota_windows WHERE closed_at IS NOT NULL').get() as any).n).toBe(0)
@@ -278,17 +401,21 @@ describe('recordQuotaSnapshot', () => {
     expect(current.notified_window_id).toBe('w')
   })
 
-  it('keeps the window and warns on a large drop with an unchanged reset time', () => {
+  it('warns when it closes a window because polling stopped', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    record(db, [success('codex', [{ name: 'five_hour', utilization: 60, resetsAt: RESET_A }])], t0)
-    const before = (db.prepare('SELECT window_id FROM quota_current').get() as any).window_id
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: RESET_A }])], t0)
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 45, resetsAt: RESET_A }])], t0 + 5 * 3600_000)
 
-    const summary = record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: RESET_A }])], t0 + 60_000)
-
-    expect(summary.windowsClosed).toBe(0)
-    expect((db.prepare('SELECT window_id FROM quota_current').get() as any).window_id).toBe(before)
     expect(warn).toHaveBeenCalledTimes(1)
-    expect(String(warn.mock.calls[0][0])).toContain('without a reset change')
+    expect(String(warn.mock.calls[0][0])).toContain('no observation for a full window')
+  })
+
+  it('closes a window without warning when the rollover was observed', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 80, resetsAt: RESET_A }])], t0)
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 2, resetsAt: RESET_B }])], t0 + 60_000)
+
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('does not write snapshots for a failed tool and keeps the last known value', () => {
@@ -307,8 +434,35 @@ describe('recordQuotaSnapshot', () => {
     expect(current.window_id).not.toBe('')
     expect(current.cred_status).toBe('expired')
     expect(current.last_error).toBe('Authentication failed (HTTP 401).')
+    expect(current.last_error_kind).toBe('auth')
     expect(current.consecutive_errors).toBe(1)
     expect(current.last_success_at).toBe(t0)
+  })
+
+  it('records a network failure as network even though cred_status stays valid', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 42, resetsAt: RESET_A }])], t0)
+    record(db, [{
+      tool: 'codex',
+      credentialStatus: 'valid',
+      credentialMessage: null,
+      success: false,
+      tiers: [],
+      error: 'Network error: TypeError: fetch failed',
+      queriedAt: t0 + 60_000,
+    }], t0 + 60_000)
+
+    const current = db.prepare('SELECT cred_status, last_error_kind FROM quota_current').get() as any
+    expect(current.cred_status).toBe('valid')
+    expect(current.last_error_kind).toBe('network')
+  })
+
+  it('clears the error kind on the next success', () => {
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 42, resetsAt: RESET_A }])], t0)
+    record(db, [failure('codex', 'expired', 'HTTP 401')], t0 + 60_000)
+    expect((db.prepare('SELECT last_error_kind FROM quota_current').get() as any).last_error_kind).toBe('auth')
+
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 43, resetsAt: RESET_A }])], t0 + 120_000)
+    expect((db.prepare('SELECT last_error_kind FROM quota_current').get() as any).last_error_kind).toBe('')
   })
 
   it('counts consecutive errors and clears them on the next success', () => {
@@ -370,7 +524,7 @@ describe('recordQuotaSnapshot', () => {
     expect(summary.inserted).toBe(1)
     const row = db.prepare('SELECT resets_at, window_id FROM quota_snapshots').get() as any
     expect(row.resets_at).toBeNull()
-    expect(row.window_id).toBe(computeWindowId(DEVICE_ID, 'copilot', 'chat', null))
+    expect(row.window_id).toBe(computeWindowId(DEVICE_ID, 'copilot', 'chat', null, t0))
   })
 
   it('skips tiers with a non-numeric utilization', () => {
