@@ -1,10 +1,35 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import type { ConsentConfig } from './sync/consent.js'
 import type { PriceEntry, ExchangeRateCache } from '@aiusage/core'
 
-export const AIUSAGE_DIR = join(homedir(), '.aiusage')
+/** Env var that relocates aiusage's own data directory. */
+export const AIUSAGE_HOME_ENV = 'AIUSAGE_HOME'
+
+/**
+ * Where aiusage keeps its database, config and state.
+ *
+ * Only aiusage's own data moves with this. The paths where other tools store
+ * their logs and credentials stay under the real home directory — those are
+ * facts about the machine, not about this installation.
+ *
+ * A relative override is resolved against the current working directory.
+ * Blank or whitespace-only counts as unset.
+ */
+export function resolveAiusageDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env[AIUSAGE_HOME_ENV]?.trim()
+  if (override) return resolve(override)
+  return join(homedir(), '.aiusage')
+}
+
+/**
+ * Evaluated once, when this module is first imported. Everything else — the
+ * database path, the config file, state.json — is derived from it, so the
+ * override must be in the environment before the process starts. Setting it
+ * from inside the process has no effect.
+ */
+export const AIUSAGE_DIR = resolveAiusageDir()
 export const CONFIG_PATH = join(AIUSAGE_DIR, 'config.json')
 
 export const SYNC_FIELDS = [
