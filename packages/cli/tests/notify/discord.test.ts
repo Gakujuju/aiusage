@@ -12,6 +12,20 @@ import {
   summariseNotifications,
   RETRY_BACKOFF_MS,
 } from '../../src/db/notifications.js'
+const { notifyConfig } = vi.hoisted(() => ({ notifyConfig: { notifications: undefined } as { notifications: unknown } }))
+let notifyWebhook: string | null = null
+
+// The sender reads its config at call time, so the whole suite would otherwise
+// depend on whatever the developer machine has configured.
+vi.mock('../../src/config.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config.js')>('../../src/config.js')
+  return {
+    ...actual,
+    loadConfig: () => notifyConfig,
+    loadCredential: () => notifyWebhook,
+  }
+})
+
 import { maskUrls, postToDiscord, runNotificationTick } from '../../src/notify/discord.js'
 import type { NotificationRow } from '../../src/db/notifications.js'
 
@@ -324,10 +338,20 @@ describe('runNotificationTick', () => {
   })
 
   it('does nothing while notifications are disabled', async () => {
+    // Explicitly disabled rather than relying on the ambient config: this
+    // assertion used to depend on the developer machine not having
+    // notifications switched on, and broke the day one did.
+    notifyConfig.notifications = { enabled: false }
     const result = await runNotificationTick(deps())
-    // No config file in the test environment, so notifications are off.
     expect(result.skipped).toBe('disabled')
     expect(result.sent).toBe(0)
+  })
+
+  it('skips when enabled but no webhook is stored', async () => {
+    notifyConfig.notifications = { enabled: true }
+    notifyWebhook = null
+    const result = await runNotificationTick(deps())
+    expect(result.skipped).toBe('no_webhook')
   })
 
   /**
@@ -337,11 +361,8 @@ describe('runNotificationTick', () => {
    * stubbed fetch records whether it saw the flag set.
    */
   it('sends outside the write queue', async () => {
-    const config = { notifications: { enabled: true } }
-    vi.doMock('../../src/config.js', async () => {
-      const actual = await vi.importActual<typeof import('../../src/config.js')>('../../src/config.js')
-      return { ...actual, loadConfig: () => config, loadCredential: () => WEBHOOK }
-    })
+    notifyConfig.notifications = { enabled: true }
+    notifyWebhook = WEBHOOK
 
     const d = deps()
     vi.stubGlobal('fetch', vi.fn(async () => {
@@ -351,10 +372,13 @@ describe('runNotificationTick', () => {
     }))
 
     enqueueNotification(db, base(), T0)
-    // The module under test read its config at import time in this harness, so
-    // assert the invariant directly rather than through the disabled early
-    // return: no fetch may be observed while a write task is in flight.
-    await runNotificationTick(d)
+    const result = await runNotificationTick(d)
+
+    expect(result.skipped).toBeNull()
+    expect(result.claimed).toBe(1)
+    expect(result.sent).toBe(1)
+    expect(writesDuringFetch).toBe(1)
+    // The invariant this test exists for.
     expect(fetchesInsideWrite).toBe(0)
   })
 })

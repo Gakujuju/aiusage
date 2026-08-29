@@ -59,6 +59,47 @@ describe('migration v14', () => {
     expect(names).toEqual(['quota_current', 'quota_snapshots', 'quota_windows', 'v_quota_snapshots'])
   })
 
+  /**
+   * On Windows the upstream extractSessionId splits the path on '/' only, so
+   * a backslash path never splits and records.session_id ends up as the whole
+   * path minus the extension. The join has to tolerate that shape, or every
+   * session reports NULL usage — which is what a real database did.
+   */
+  it('joins usage when records store the full path as the session id', () => {
+    const now = Date.now()
+    applyAgentEvents(db, [ev()], ctx(now))
+    db.prepare(`
+      INSERT INTO records (id, ts, ingested_at, updated_at, line_offset, tool, model, provider,
+        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens,
+        cost, cost_source, session_id, source_file, device, device_instance_id)
+      VALUES ('rp', ?, ?, ?, 0, 'claude-code', 'm', 'anthropic', 10, 5, 0, 0, 0,
+              0.25, 'pricing', ?, '/x.jsonl', 'test-host', ?)
+    `).run(
+      now, now, now,
+      `C:\\Users\\x\\.claude\\projects\\C--Users-x-Projects-aiusage\\${SESSION}`,
+      DEVICE_ID,
+    )
+
+    const row = db.prepare('SELECT record_count, total_cost FROM v_agent_sessions').get() as any
+    expect(row.record_count).toBe(1)
+    expect(row.total_cost).toBe(0.25)
+  })
+
+  it('does not match a session id that merely contains the same text', () => {
+    const now = Date.now()
+    applyAgentEvents(db, [ev()], ctx(now))
+    db.prepare(`
+      INSERT INTO records (id, ts, ingested_at, updated_at, line_offset, tool, model, provider,
+        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens,
+        cost, cost_source, session_id, source_file, device, device_instance_id)
+      VALUES ('rn', ?, ?, ?, 0, 'claude-code', 'm', 'anthropic', 10, 5, 0, 0, 0,
+              0.25, 'pricing', ?, '/x.jsonl', 'test-host', ?)
+    `).run(now, now, now, `${SESSION}-and-more`, DEVICE_ID)
+
+    const row = db.prepare('SELECT record_count FROM v_agent_sessions').get() as any
+    expect(row.record_count).toBeNull()
+  })
+
   it('joins usage into the view through the session id', () => {
     const now = Date.now()
     applyAgentEvents(db, [ev()], ctx(now))

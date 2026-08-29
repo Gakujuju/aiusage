@@ -112,9 +112,12 @@ export function createReadonlyViews(db: Database.Database): void {
         FROM records
         WHERE source_file NOT LIKE 'synced/%'
         GROUP BY session_id, tool, device_instance_id
-      ) u ON u.session_id = s.agent_session_id
-         AND u.tool = s.tool
-         AND u.device_instance_id = s.device_instance_id;
+      ) u ON u.tool = s.tool
+         AND u.device_instance_id = s.device_instance_id
+         -- Also matches a session_id that ends with the id: on Windows the
+         -- upstream extraction leaves the whole path in there. See v16.
+         AND (u.session_id = s.agent_session_id
+              OR u.session_id LIKE '%' || s.agent_session_id);
     `)
   }
 }
