@@ -22,7 +22,7 @@
 - v14 agent_sessions / agent_session_events / agent_session_spans
 - v15 notifications / agent_sessions.escalation_level
 - v16 v_agent_sessions の寛容な JOIN
-- v17 records.session_id のバックフィル（作業中・未適用）
+- v17 records.session_id のバックフィル（本番適用済み・10,368行を修正）
 
 ## 未解決の課題
 
@@ -39,13 +39,24 @@
    案A が通れば自動的に数字に含まれる。
 4. Phase 8 の前提として、認証を既定必須にする必要がある。
    serve が 0.0.0.0 バインドかつ /api/summary と /api/quotas が無認証公開。
-5. upstream の `extractSessionId`（parse.ts）が `'/'` でしか分割せず、
-   Windows のパスで session_id がフルパスになる。v17 で対応中。
-6. `device_instance_id` が全件 'unknown'。正規化は D1 のとおり単独では行わない。
+5. `device_instance_id` が全件 'unknown'。正規化は D1 のとおり単独では行わない。
+6. コストは API 従量換算であって請求額ではない（D7）。UI で誤読されない表記が必要。
+
+## コスト
+
+本番の総コストは $3,608.96（10,881 レコード、全件 cost_source='pricing'）。
+2026-08-30 に価格表を同期するまで $0 だった。原因は D15 を参照。
+
+| tool | model | 件数 | コスト |
+|---|---|---|---|
+| claude-code | claude-opus-5 | 7,529 | $2,508.46 |
+| claude-code | claude-fable-5 | 602 | $624.13 |
+| claude-code | claude-sonnet-5 | 2,311 | $277.88 |
+| codex | gpt-5.6-sol | 439 | $198.49 |
 
 ## 稼働中のもの
 
-- 本番 serve: ポート 3847（※ v17 適用作業のため一時停止中）
+- 本番 serve: ポート 3847
 - クォータ取得: 5分間隔（Codex の five_hour / weekly_limit）
 - Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）
 - hook: `~/.claude/settings.json` に8イベント登録済み
@@ -55,6 +66,6 @@
 ## バックアップ
 
 - `~/.aiusage/backup-v12-20260829/` プロジェクト開始前
-- `~/.aiusage/backup-v14-20260830/` 直近の安定状態（v16 取得後に削除予定）
+- `~/.aiusage/backup-v16-20260830/` 直近の安定状態
 - `~/.aiusage/backup-pre-claude-cli/` `~/.claude` 系（別目的・保持）
 - `~/.claude/settings.json.pre-notify-hooks` hook 追記前（sha256 3c0ef1dbcf7bb8ee）
