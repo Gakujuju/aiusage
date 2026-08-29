@@ -49,6 +49,10 @@ export interface Config {
   exchangeRateCache?: ExchangeRateCache
   /** Auto-sync interval in milliseconds (0 or undefined = disabled) */
   syncInterval?: number
+  /** Subscription quota polling interval in ms. 0 disables it. Defaults to 300000 (5 min). */
+  quotaSnapshotInterval?: number
+  /** Retention for quota history, in days. Independent of retentionDays. Defaults to 180. */
+  quotaRetentionDays?: number
 }
 
 export function loadConfig(): Config | null {

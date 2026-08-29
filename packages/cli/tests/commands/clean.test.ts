@@ -68,6 +68,35 @@ describe('cleanOldData', () => {
     expect(db.prepare('SELECT COUNT(*) as count FROM records').get()).toEqual({ count: 1 })
   })
 
+  it('deletes quota snapshots and closed windows past the quota horizon', () => {
+    const now = Date.now()
+    const day = 86400000
+    // quotaRetentionDays defaults to 180 and is independent of the `days` arg.
+    db.prepare(`
+      INSERT INTO quota_snapshots (id, ts, tool, tier, utilization, resets_at, window_id, device, device_instance_id, created_at)
+      VALUES ('q-old', ?, 'codex', 'five_hour', 10, NULL, 'w-old', 'd1', 'di1', ?)
+    `).run(now - 200 * day, now)
+    db.prepare(`
+      INSERT INTO quota_snapshots (id, ts, tool, tier, utilization, resets_at, window_id, device, device_instance_id, created_at)
+      VALUES ('q-new', ?, 'codex', 'five_hour', 20, NULL, 'w-new', 'd1', 'di1', ?)
+    `).run(now - 30 * day, now)
+    db.prepare(`
+      INSERT INTO quota_windows (window_id, tool, tier, device_instance_id, started_at, resets_at, closed_at, peak_utilization, final_utilization, sample_count)
+      VALUES ('w-old', 'codex', 'five_hour', 'di1', ?, NULL, ?, 90, 90, 5)
+    `).run(now - 201 * day, now - 200 * day)
+    db.prepare(`
+      INSERT INTO quota_windows (window_id, tool, tier, device_instance_id, started_at, resets_at, closed_at, peak_utilization, final_utilization, sample_count)
+      VALUES ('w-open', 'codex', 'five_hour', 'di1', ?, NULL, NULL, 10, NULL, 1)
+    `).run(now - 400 * day)
+
+    const result = cleanOldData(db, 20)
+    expect(result.deletedQuotaSnapshots).toBe(1)
+    expect(result.deletedQuotaWindows).toBe(1)
+    // An open window is never swept, however old it looks.
+    expect(db.prepare('SELECT COUNT(*) as count FROM quota_windows').get()).toEqual({ count: 1 })
+    expect(db.prepare('SELECT COUNT(*) as count FROM quota_snapshots').get()).toEqual({ count: 1 })
+  })
+
   it('preserves tool calls with valid record_id', () => {
     const now = Date.now()
     const day = 86400000
@@ -153,6 +182,27 @@ describe('cleanAll', () => {
 
     const result = cleanAll(db)
     expect(result.deletedTombstones).toBe(1)
+  })
+
+  it('deletes all quota history', () => {
+    const now = Date.now()
+    db.prepare(`
+      INSERT INTO quota_snapshots (id, ts, tool, tier, utilization, resets_at, window_id, device, device_instance_id, created_at)
+      VALUES ('q1', ?, 'codex', 'five_hour', 10, NULL, 'w1', 'd1', 'di1', ?)
+    `).run(now, now)
+    db.prepare(`
+      INSERT INTO quota_windows (window_id, tool, tier, device_instance_id, started_at, resets_at, closed_at, peak_utilization, final_utilization, sample_count)
+      VALUES ('w1', 'codex', 'five_hour', 'di1', ?, NULL, NULL, 10, NULL, 1)
+    `).run(now)
+    db.prepare(`
+      INSERT INTO quota_current (tool, tier, device_instance_id, utilization, resets_at, window_id, ts, cred_status, last_success_at, last_error, consecutive_errors, updated_at)
+      VALUES ('codex', 'five_hour', 'di1', 10, NULL, 'w1', ?, 'valid', ?, NULL, 0, ?)
+    `).run(now, now, now)
+
+    const result = cleanAll(db)
+    expect(result.deletedQuotaSnapshots).toBe(1)
+    expect(result.deletedQuotaWindows).toBe(1)
+    expect(result.deletedQuotaCurrent).toBe(1)
   })
 
   it('deletes watermark file when it exists', () => {
