@@ -5,6 +5,7 @@ import {
   formatQuotaMessage,
   formatSessionMessage,
   notifyStateFor,
+  resolveProjectDisplayName,
   shouldNotifySession,
   DEFAULT_ESCALATION_MS,
   type AgentStatus,
@@ -25,6 +26,8 @@ import type { RecordSummary } from '../db/quota-history.js'
  */
 
 export interface NotifyContext {
+  /** Display names for projects, from config. */
+  projectAliases?: Record<string, string>
   db: Database.Database
   config: NotificationRulesConfig | undefined
   /** False on machines that watch but do not announce. */
@@ -103,7 +106,7 @@ export function notifySessionChange(ctx: NotifyContext, sessionPk: string): Sess
     lastEventKind: session.last_event_kind,
     device: session.device,
     tool: session.tool,
-    project: session.project,
+    project: resolveProjectDisplayName(session.project, ctx.projectAliases),
     statusSince: session.status_since,
     now: ctx.now,
     runningMs: durations?.runningMs,
@@ -164,7 +167,7 @@ export function notifyEscalations(ctx: NotifyContext): number {
       lastEventKind: session.last_event_kind,
       device: session.device,
       tool: session.tool,
-      project: session.project,
+      project: resolveProjectDisplayName(session.project, ctx.projectAliases),
       statusSince: session.status_since,
       now: ctx.now,
       statusDetail: session.status_detail,

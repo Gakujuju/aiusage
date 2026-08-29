@@ -18,7 +18,7 @@ const CWD_WORKSPACE_ROOTS = new Set([
  *   /Users/alice/Documents/org-name/course/homework   → org-name
  *   /Users/alice/Documents/AppName/notes              → AppName
  */
-export function extractProjectFromCwd(cwd: string): string {
+export function extractProjectFromCwd(cwd: string, extraRoots?: string[]): string {
   if (!cwd) return 'unknown'
   const normalized = cwd.replace(/\\/g, '/')
   // Strip home-dir prefix: /Users/<name>/, /home/<name>/, /root/, C:/Users/<name>/
@@ -27,8 +27,15 @@ export function extractProjectFromCwd(cwd: string): string {
     .replace(/^\/(Users|home)\/[^/]+\//, '')
     .replace(/^\/root\//, '')
   const parts = withoutHome.split('/').filter(Boolean)
+  // config.projectRoots adds to the built-in set rather than replacing it.
+  // Leaving the default alone matters: someone with a single project directly
+  // under Desktop is correctly served by grouping on "Desktop" today, and
+  // changing that for everyone would silently regroup their history.
+  const roots = extraRoots?.length
+    ? new Set([...CWD_WORKSPACE_ROOTS, ...extraRoots])
+    : CWD_WORKSPACE_ROOTS
   for (const part of parts) {
-    if (!CWD_WORKSPACE_ROOTS.has(part)) return part
+    if (!roots.has(part)) return part
   }
   return parts[parts.length - 1] ?? 'unknown'
 }

@@ -86,6 +86,14 @@ export interface Config {
     storePromptPreview?: boolean
   }
   notifications?: NotificationConfig
+  /**
+   * Extra directory names to treat as workspace roots when naming a project
+   * from a path — added to the built-in set, never replacing it. e.g.
+   * ["Desktop"] makes ~/Desktop/aiusage report "aiusage" rather than "Desktop".
+   */
+  projectRoots?: string[]
+  /** Display names for projects, keyed by the extracted project name. */
+  projectAliases?: Record<string, string>
 }
 
 export interface NotificationConfig {

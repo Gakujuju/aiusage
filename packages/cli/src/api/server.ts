@@ -603,6 +603,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
     // Prompt text is the most sensitive thing a hook carries, so it is stored
     // only when the user has asked for it.
     storePromptPreview: loadConfig()?.agentSessions?.storePromptPreview === true,
+    projectRoots: loadConfig()?.projectRoots,
   })
 
   const hasValidIngestToken = (req: http.IncomingMessage): boolean => {

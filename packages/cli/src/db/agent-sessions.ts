@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3'
 import {
   applyDecay,
   classifyNotification,
+  resolveProjectDisplayName,
   confidenceForSource,
   generateAgentSessionId,
   isAgentEventKind,
@@ -14,6 +15,7 @@ import {
   type AgentStatus,
 } from '@aiusage/core'
 import { extractProjectFromCwd } from '../api/project-extraction.js'
+import { loadConfig } from '../config.js'
 
 /**
  * Storage for agent session state (Phase 6-B).
@@ -45,6 +47,8 @@ export interface AgentEventInput {
 }
 
 export interface AgentEventContext {
+  /** Extra workspace roots from config, for naming the project. */
+  projectRoots?: string[]
   device: string
   deviceInstanceId: string
   platform: string
@@ -287,7 +291,7 @@ export function applyAgentEvents(
           deviceInstanceId,
           platform: event.platform || ctx.platform || '',
           cwd,
-          project: cwd ? extractProjectFromCwd(cwd) : '',
+          project: cwd ? extractProjectFromCwd(cwd, ctx.projectRoots) : '',
           pid: Number.isFinite(event.pid) ? event.pid : null,
           ts,
         })
@@ -377,7 +381,7 @@ export function applyAgentEvents(
           ? null
           : (isTerminal ? (resolution.status === 'failed' ? 'error' : 'session_end') : row.exit_reason),
         cwd: cwd || row.cwd,
-        project: cwd ? extractProjectFromCwd(cwd) : row.project,
+        project: cwd ? extractProjectFromCwd(cwd, ctx.projectRoots) : row.project,
         pid: Number.isFinite(event.pid) ? event.pid : row.pid,
         device: event.device || row.device,
         platform: event.platform || row.platform,
@@ -618,6 +622,7 @@ export function listAgentSessions(db: Database.Database, query: ListSessionsQuer
   }>
 
   const durations = computeDurations(db, rows.map((r) => r.id), now)
+  const projectAliases = loadConfig()?.projectAliases
 
   return {
     total,
@@ -632,6 +637,8 @@ export function listAgentSessions(db: Database.Database, query: ListSessionsQuer
       platform: row.platform,
       cwd: row.cwd,
       project: row.project,
+      // Cosmetic layer only — `project` stays the join key against records.
+      projectDisplayName: resolveProjectDisplayName(row.project, projectAliases),
       pid: row.pid,
       status: row.status,
       statusDetail: row.status_detail,

@@ -174,6 +174,7 @@ export function serve(options: ServeOptions): void {
       db: options.db,
       config: cfg?.notifications,
       isNotifier: cfg?.notifications?.notifierDevice === true,
+      projectAliases: cfg?.projectAliases,
       deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? '',
       device: cfg?.device || hostname() || 'unknown',
       now: Date.now(),

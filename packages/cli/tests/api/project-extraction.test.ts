@@ -116,3 +116,21 @@ describe('extractProjectFromCwd', () => {
     expect(extractProjectFromCwd('C:/Users/alice/WebstormProjects/myproject')).toBe('myproject')
   })
 })
+
+describe('extractProjectFromCwd — configured workspace roots', () => {
+  it('keeps the built-in behaviour when nothing is configured', () => {
+    // Desktop is not a default root, so a project directly under it groups
+    // as "Desktop" — correct for someone with a single project there.
+    expect(extractProjectFromCwd('C:/Users/x/Desktop/aiusage')).toBe('Desktop')
+  })
+
+  it('adds configured roots without replacing the defaults', () => {
+    expect(extractProjectFromCwd('C:/Users/x/Desktop/aiusage', ['Desktop'])).toBe('aiusage')
+    // The built-ins still apply alongside it.
+    expect(extractProjectFromCwd('/Users/a/WebstormProjects/my-project', ['Desktop'])).toBe('my-project')
+  })
+
+  it('ignores an empty configuration', () => {
+    expect(extractProjectFromCwd('C:/Users/x/Desktop/aiusage', [])).toBe('Desktop')
+  })
+})
