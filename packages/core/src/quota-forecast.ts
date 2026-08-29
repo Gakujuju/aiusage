@@ -23,13 +23,22 @@ export type QuotaConfidence = 'low' | 'medium' | 'high'
 export interface QuotaForecast {
   /** Latest observed utilization */
   current: number
-  /** Timestamp of the first sample in the window */
+  /**
+   * Start of the window: `resetsAt - windowDurationMs(tier)` where the tier's
+   * length is known, otherwise the first sample we happen to hold.
+   */
   windowStartedAt: number
+  /** True when windowStartedAt was derived from resetsAt rather than observed */
+  windowStartInferred: boolean
   /** Window reset time in ms, null when the upstream API did not report one */
   resetsAt: number | null
   /** How far through the window we are, 0–1. null when resetsAt is unknown. */
   elapsedRatio: number | null
-  /** (utilization/100) ÷ elapsedRatio. >1 means burning faster than the window allows. */
+  /**
+   * (utilization/100) ÷ elapsedRatio. >1 means burning faster than the window
+   * allows. null in the first 2 % of a window, where the divisor is too small
+   * for the quotient to mean anything.
+   */
   paceRatio: number | null
   /** Least-squares slope over the whole window, in percentage points per hour */
   burnRatePerHour: number
@@ -44,7 +53,52 @@ export interface QuotaForecast {
 }
 
 const HOUR_MS = 3600000
+const DAY_MS = 86400000
 const RECENT_WINDOW_MS = 30 * 60 * 1000
+
+/**
+ * Below this much of the window elapsed, paceRatio is a division by almost
+ * zero and reports nonsense (a freshly observed weekly window produced 41760).
+ */
+const MIN_ELAPSED_RATIO_FOR_PACE = 0.02
+
+const WINDOW_DURATIONS: Record<string, number> = {
+  five_hour: 5 * HOUR_MS,
+  seven_day: 7 * DAY_MS,
+  seven_day_opus: 7 * DAY_MS,
+  seven_day_sonnet: 7 * DAY_MS,
+  weekly_limit: 7 * DAY_MS,
+  daily: 24 * HOUR_MS,
+  daily_limit: 24 * HOUR_MS,
+  monthly: 30 * DAY_MS,
+}
+
+/** Tier names the CLI synthesises for unrecognised windows, e.g. "18000s". */
+const SECONDS_TIER = /^(\d+)s$/
+
+/**
+ * How long one window of this tier lasts, or null when we cannot know.
+ *
+ * Copilot's premium_interactions/chat have no fixed period we can name, and a
+ * tier we have never seen is better treated as unknown than guessed at — the
+ * callers all degrade gracefully on null.
+ */
+export function windowDurationMs(tier: string): number | null {
+  if (typeof tier !== 'string') return null
+  const known = WINDOW_DURATIONS[tier]
+  if (known != null) return known
+
+  // windowSecondsToTierName falls through to `${seconds}s` for windows it does
+  // not recognise. Codex has only ever returned 5h/7d, but if it starts
+  // reporting a daily or monthly window this keeps working instead of quietly
+  // losing the duration.
+  const match = SECONDS_TIER.exec(tier)
+  if (match) {
+    const seconds = Number(match[1])
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000
+  }
+  return null
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -123,6 +177,11 @@ export function p90FinalUtilization(finals: number[]): number | null {
   return percentile(clean, 90)
 }
 
+/**
+ * `critical` is not gated on confidence: a measured 95 % is a fact, however
+ * few samples we hold. `warn` and `watch` are both projections, so both are
+ * withheld until we have enough of a series to stand behind them.
+ */
 export function classifyRisk(
   current: number,
   paceRatio: number | null,
@@ -131,7 +190,7 @@ export function classifyRisk(
 ): QuotaRisk {
   if (isFiniteNumber(current) && current >= 95) return 'critical'
   if (exhaustBeforeReset && confidence !== 'low') return 'warn'
-  if (paceRatio != null && isFiniteNumber(paceRatio) && paceRatio >= 1.3) return 'watch'
+  if (paceRatio != null && isFiniteNumber(paceRatio) && paceRatio >= 1.3 && confidence !== 'low') return 'watch'
   return 'ok'
 }
 
@@ -143,19 +202,31 @@ function classifyConfidence(samples: QuotaSample[]): QuotaConfidence {
   return 'low'
 }
 
-export function forecastQuota(
-  samples: QuotaSample[],
-  resetsAt: number | null,
-  now: number,
-): QuotaForecast {
+export interface ForecastQuotaInput {
+  samples: QuotaSample[]
+  /** Tier name, used to look up the window length */
+  tier: string
+  resetsAt: number | null
+  now: number
+}
+
+export function forecastQuota(input: ForecastQuotaInput): QuotaForecast {
+  const { samples, tier, resetsAt, now } = input ?? ({} as ForecastQuotaInput)
   const clean = sanitize(samples)
   const reset = isFiniteNumber(resetsAt) ? resetsAt : null
   const nowMs = isFiniteNumber(now) ? now : 0
 
+  // Prefer the real window boundary over the first sample we happen to hold.
+  // Starting the clock at first observation makes elapsedRatio ≈ 0 for any
+  // window we joined late, which is most of them after a restart.
+  const duration = windowDurationMs(tier)
+  const inferredStart = duration != null && reset != null ? reset - duration : null
+
   if (clean.length === 0) {
     return {
       current: 0,
-      windowStartedAt: nowMs,
+      windowStartedAt: inferredStart ?? nowMs,
+      windowStartInferred: inferredStart != null,
       resetsAt: reset,
       elapsedRatio: null,
       paceRatio: null,
@@ -168,7 +239,7 @@ export function forecastQuota(
     }
   }
 
-  const windowStartedAt = clean[0].ts
+  const windowStartedAt = inferredStart ?? clean[0].ts
   const current = clean[clean.length - 1].utilization
   const confidence = classifyConfidence(clean)
 
@@ -180,10 +251,15 @@ export function forecastQuota(
     elapsedRatio = Math.min(1, Math.max(0, (nowMs - windowStartedAt) / total))
   }
 
-  // At elapsedRatio 0 the ratio is unbounded, so leave it undefined rather
-  // than reporting Infinity as a pace.
+  // Inferring the start fixes most of the near-zero divisors, but not all:
+  // Codex reports a rolling "now + 5h" reset for an untouched window, which
+  // keeps elapsedRatio pinned near 0 no matter how the start is derived. Below
+  // 2 % elapsed the quotient is noise, so report no pace rather than a number
+  // in the tens of thousands.
   const paceRatio =
-    elapsedRatio != null && elapsedRatio > 0 ? current / 100 / elapsedRatio : null
+    elapsedRatio != null && elapsedRatio >= MIN_ELAPSED_RATIO_FOR_PACE
+      ? current / 100 / elapsedRatio
+      : null
 
   const burnRatePerHour = slopePerHour(clean)
 
@@ -205,6 +281,7 @@ export function forecastQuota(
   return {
     current,
     windowStartedAt,
+    windowStartInferred: inferredStart != null,
     resetsAt: reset,
     elapsedRatio,
     paceRatio,
