@@ -76,13 +76,14 @@ export function createReadonlyViews(db: Database.Database): void {
     GROUP BY session_id, tool, model, provider, device, device_instance_id;
   `)
 
-  // quota_snapshots only exists from v13 on. createReadonlyViews is called from
-  // v3, before the table is there, so guard the view separately — v13 creates
-  // it for real; this keeps the two definitions in one place for new databases.
-  const hasQuotaSnapshots = db.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quota_snapshots'"
-  ).get()
-  if (hasQuotaSnapshots) {
+  // The tables behind the views below arrive in later migrations, but
+  // createReadonlyViews is only ever called from v3 — before they exist. Guard
+  // each one so a fresh database still ends up with every view, while the
+  // migrations remain the thing that actually creates them for existing ones.
+  const hasTable = (name: string): boolean =>
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) != null
+
+  if (hasTable('quota_snapshots')) {
     db.exec(`
       CREATE VIEW IF NOT EXISTS v_quota_snapshots AS
       SELECT
@@ -93,6 +94,27 @@ export function createReadonlyViews(db: Database.Database): void {
         CASE WHEN resets_at IS NULL THEN NULL
              ELSE datetime(resets_at / 1000, 'unixepoch') || 'Z' END AS resets_timestamp
       FROM quota_snapshots;
+    `)
+  }
+
+  if (hasTable('agent_sessions')) {
+    db.exec(`
+      CREATE VIEW IF NOT EXISTS v_agent_sessions AS
+      SELECT s.*, u.record_count, u.total_cost, u.total_tokens, u.first_ts, u.last_ts
+      FROM agent_sessions s
+      LEFT JOIN (
+        SELECT session_id, tool, device_instance_id,
+               COUNT(*) AS record_count,
+               SUM(cost) AS total_cost,
+               SUM(input_tokens + output_tokens + cache_read_tokens
+                   + cache_write_tokens + thinking_tokens) AS total_tokens,
+               MIN(ts) AS first_ts, MAX(ts) AS last_ts
+        FROM records
+        WHERE source_file NOT LIKE 'synced/%'
+        GROUP BY session_id, tool, device_instance_id
+      ) u ON u.session_id = s.agent_session_id
+         AND u.tool = s.tool
+         AND u.device_instance_id = s.device_instance_id;
     `)
   }
 }
