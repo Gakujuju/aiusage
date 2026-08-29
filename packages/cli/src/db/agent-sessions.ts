@@ -559,6 +559,8 @@ export function computeDurations(
 }
 
 export interface ListSessionsQuery {
+  /** Primary key, for the detail endpoint. Matches at most one row. */
+  id?: string | null
   status?: string | null
   tool?: string | null
   device?: string | null
@@ -572,6 +574,7 @@ export function listAgentSessions(db: Database.Database, query: ListSessionsQuer
   const where: string[] = []
   const params: Record<string, unknown> = {}
 
+  if (query.id) { where.push('s.id = @id'); params.id = query.id }
   if (query.status) { where.push('s.status = @status'); params.status = query.status }
   if (query.tool) { where.push('s.tool = @tool'); params.tool = query.tool }
   if (query.device) { where.push('s.device_instance_id = @device'); params.device = query.device }
@@ -646,17 +649,9 @@ export function listAgentSessions(db: Database.Database, query: ListSessionsQuer
 }
 
 export function getAgentSession(db: Database.Database, id: string, now: number) {
-  const row = db.prepare('SELECT agent_session_id, tool, device_instance_id FROM agent_sessions WHERE id = ?')
-    .get(id) as { agent_session_id: string; tool: string; device_instance_id: string } | undefined
-  if (!row) return null
-
-  // Reuse the list shaping so detail and list can never drift apart. The
-  // filters below identify exactly one session.
-  const detail = listAgentSessions(
-    db,
-    { tool: row.tool, device: row.device_instance_id, limit: 500 },
-    now,
-  ).sessions.find((s) => s.id === id)
+  // Reuse the list shaping so detail and list can never drift apart, filtered
+  // on the primary key so exactly one row comes back however many exist.
+  const detail = listAgentSessions(db, { id, limit: 1 }, now).sessions[0]
   if (!detail) return null
 
   const events = db.prepare(`
