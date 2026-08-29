@@ -2,7 +2,7 @@ import type { Parser, ParseResult, ParseContext } from '../types.js'
 import type { StatsRecord, ToolCallRecord, Tool } from '../types.js'
 import { generateRecordId, generateToolCallId, generateOrphanToolCallId } from '../record-id.js'
 import { inferProvider } from '../provider.js'
-import { calculateCost } from '../pricing.js'
+import { calculateCost, resolvePrice } from '../pricing.js'
 
 interface PendingToolCall {
   name: string
@@ -78,7 +78,10 @@ export class CodexParser implements Parser {
       thinkingTokens,
     }, context.exchangeRate)
 
-    const costSource = model === 'unknown' ? 'unknown' as const : 'pricing' as const
+    // Whether a price was actually found, not merely whether the model was
+    // named. Reporting 'pricing' for a model missing from the table is what
+    // let a total of $0 read as "no usage" rather than "no prices", for months.
+    const costSource = resolvePrice(model) != null ? 'pricing' as const : 'unknown' as const
     const provider = inferProvider(model)
 
     const recordId = generateRecordId(context.deviceInstanceId, context.sourceFile, context.lineOffset)

@@ -633,7 +633,7 @@ export function listAgentSessions(db: Database.Database, query: ListSessionsQuer
     offset,
     sessions: rows.map((row) => ({
       id: row.id,
-      sessionId: row.agent_session_id,
+      agentSessionId: row.agent_session_id,
       tool: row.tool,
       device: row.device,
       deviceInstanceId: row.device_instance_id,

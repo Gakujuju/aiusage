@@ -29,7 +29,7 @@ import { clearCredentials, hasCredentials, loadCredentials, saveCredentials } fr
 import { base64url, sha256Buffer } from '../leaderboard/crypto.js'
 import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
-import { insertRecord } from '../db/records.js'
+import { countUnpricedRecords, insertRecord } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import {
   enqueueNotification,
@@ -932,6 +932,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           byTool,
           topToolCalls,
           topMcpServers,
+          // A total of $0 read as "no usage" for months when it actually meant
+          // "no prices for the models in use". Surfacing the count makes the
+          // difference visible without anyone having to go looking.
+          ...countUnpricedRecords(db),
         })
         return
       }

@@ -2,7 +2,7 @@ import type { Parser, ParseResult, ParseContext } from '../types.js'
 import type { StatsRecord, ToolCallRecord, Tool } from '../types.js'
 import { generateRecordId, generateToolCallId } from '../record-id.js'
 import { inferProvider } from '../provider.js'
-import { calculateCost } from '../pricing.js'
+import { calculateCost, resolvePrice } from '../pricing.js'
 
 export class ClaudeCodeParser implements Parser {
   readonly tool: Tool = 'claude-code'
@@ -41,7 +41,10 @@ export class ClaudeCodeParser implements Parser {
       thinkingTokens,
     }, context.exchangeRate)
 
-    const costSource = model === 'unknown' ? 'unknown' as const : 'pricing' as const
+    // Whether a price was actually found, not merely whether the model was
+    // named. Reporting 'pricing' for a model missing from the table is what
+    // let a total of $0 read as "no usage" rather than "no prices", for months.
+    const costSource = resolvePrice(model) != null ? 'pricing' as const : 'unknown' as const
     const provider = inferProvider(model)
 
     const messageId = parsed.message.id

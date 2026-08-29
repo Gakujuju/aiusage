@@ -144,3 +144,34 @@ export function findPredominantDeviceInstanceId(db: Database.Database): string |
   `).get() as { id: string; n: number } | undefined
   return row?.id ?? null
 }
+
+export interface UnpricedSummary {
+  /** Records whose cost could not be computed from a price table. */
+  unpricedRecords: number
+  /** The models responsible, most affected first. */
+  unpricedModels: string[]
+}
+
+/**
+ * How much usage is going uncosted, and which models are to blame.
+ *
+ * Both halves of the condition matter. cost_source='unknown' is the honest
+ * signal, but records written before that was set correctly report 'pricing'
+ * with a cost of zero — so a row with tokens and no cost counts too.
+ */
+export function countUnpricedRecords(db: Database.Database): UnpricedSummary {
+  const rows = db.prepare(`
+    SELECT model, COUNT(*) AS n
+    FROM records
+    WHERE cost_source = 'unknown'
+       OR (cost = 0 AND (input_tokens + output_tokens + cache_read_tokens
+                         + cache_write_tokens + thinking_tokens) > 0)
+    GROUP BY model
+    ORDER BY n DESC
+  `).all() as Array<{ model: string; n: number }>
+
+  return {
+    unpricedRecords: rows.reduce((acc, r) => acc + r.n, 0),
+    unpricedModels: rows.map((r) => r.model),
+  }
+}

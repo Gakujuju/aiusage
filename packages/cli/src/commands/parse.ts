@@ -62,7 +62,13 @@ function extractCwdFromJson(data: Record<string, unknown>): string | undefined {
   return undefined
 }
 
-function extractSessionId(filePath: string, tool: Tool): string {
+function extractSessionId(rawFilePath: string, tool: Tool): string {
+  // Every branch below reduces a path to its last segment, and all but the
+  // qoder one split on '/' alone — so on Windows nothing split and the whole
+  // path became the session id. deriveSessionId (further down this file)
+  // already normalises first; do the same here so the two agree.
+  const filePath = rawFilePath.replace(/\\/g, '/')
+
   if (tool === 'claude-code') {
     // Extract from path like ~/.claude/projects/<project>/<session>.jsonl
     const parts = filePath.split('/')

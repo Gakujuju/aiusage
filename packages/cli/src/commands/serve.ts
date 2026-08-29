@@ -14,7 +14,7 @@ import { SyncRuntimeController } from '../sync/runtime.js'
 import { getSyncTarget } from '../sync/target.js'
 import { RuntimeSettingsController } from '../runtime/settings-controller.js'
 import { AsyncTaskQueue } from '../db/write-queue.js'
-import { findPredominantDeviceInstanceId } from '../db/records.js'
+import { countUnpricedRecords, findPredominantDeviceInstanceId } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import { AgentSessionEmitter, decayStaleSessions } from '../db/agent-sessions.js'
 import { NotificationSender } from '../notify/discord.js'
@@ -165,6 +165,17 @@ export function serve(options: ServeOptions): void {
   console.log('[serve] parsing logs...')
   runDbWrite(() => runParse(options.db)).then((result) => {
     console.log(`[serve] parsed ${result.parsedCount} records, ${result.toolCallCount} tool calls.`)
+    // Said out loud, because the alternative is a dashboard reading $0 and
+    // being believed. That is exactly what happened for months.
+    const unpriced = countUnpricedRecords(options.db)
+    if (unpriced.unpricedRecords > 0) {
+      const [first, ...rest] = unpriced.unpricedModels
+      const models = rest.length > 0 ? `${first} ほか${rest.length}モデル` : first
+      console.warn(
+        `[serve] ${unpriced.unpricedRecords} 件のレコードに価格が設定されていません（${models}）。` +
+        ' POST /api/pricing/sync で価格表を更新できます。'
+      )
+    }
   }).catch((err) => {
     console.error('[serve] initial parse failed:', err)
   }).finally(() => {
