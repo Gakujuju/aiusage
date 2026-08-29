@@ -4,10 +4,10 @@ import { hostname, platform, tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
-import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
+import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
 import { AIUSAGE_DIR, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
-import { setSyncConsent } from '../init.js'
+import { setSyncConsent, getIngestToken } from '../init.js'
 import { generateConsentFingerprint } from '../sync/consent.js'
 import { getSyncTarget } from '../sync/target.js'
 import { extractProject, extractProjectFromCwd } from './project-extraction.js'
@@ -19,6 +19,7 @@ import {
   buildClearAuthCookie,
   getDashboardPassword,
   isAuthenticated,
+  safeEqual,
   shouldProtectApiPath,
   verifyPassword,
 } from '../auth.js'
@@ -30,6 +31,14 @@ import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
 import { insertRecord } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
+import {
+  AgentSessionEmitter,
+  applyAgentEvents,
+  getAgentSession,
+  listAgentSessions,
+  summariseAgentSessions,
+  type AgentEventInput,
+} from '../db/agent-sessions.js'
 import { AsyncTaskQueue, type AsyncTaskQueueStatus } from '../db/write-queue.js'
 import { getPricingRegistrySummary, getUserAliasBindings, hasUserPrice, listLocalModelBindings, listPricingAliasTargets, listPricingModels, loadPricingRuntime, removeUserPricingAlias, resetUserPriceToSynced, resolvePriceFromRegistry, setUserPrice, setUserPricingAlias, syncPricingFromLitellm } from '../pricing-registry.js'
 import type { DetectedTool } from '../discovery.js'
@@ -350,6 +359,7 @@ export interface ApiServerOptions {
   getSyncStatus?: () => SyncStatusSnapshot | null
   onConfigUpdated?: () => void
   runDbWrite?: <T>(task: () => T | Promise<T>) => Promise<T>
+  agentEmitter?: AgentSessionEmitter
   getDbWriteQueueStatus?: () => AsyncTaskQueueStatus
 }
 
@@ -428,6 +438,26 @@ function getDeviceFilter(
     useUnion: false,
     localOnly: false,
   }
+}
+
+// ── Agent session helpers ──────────────────────────────────────────────────
+
+const MAX_AGENT_EVENT_BATCH = 200
+
+const AGENT_EVENT_SOURCES = new Set([
+  'manual', 'hook', 'log', 'heartbeat', 'process', 'derived', 'unknown',
+])
+
+/** Returns an error message, or null when the entry is usable. */
+function validateAgentEvent(entry: Record<string, unknown>): string | null {
+  if (!entry || typeof entry !== 'object') return 'Each event must be an object'
+  if (typeof entry.sessionId !== 'string' || !entry.sessionId) return 'sessionId required'
+  if (typeof entry.tool !== 'string' || !TOOLS.includes(entry.tool as never)) return 'Invalid tool'
+  if (!isAgentEventKind(entry.kind)) return 'Invalid kind'
+  if (entry.source != null && !AGENT_EVENT_SOURCES.has(String(entry.source))) return 'Invalid source'
+  if (entry.ts != null && !Number.isFinite(entry.ts)) return 'ts must be a number'
+  if (entry.status != null && !isAgentStatus(entry.status)) return 'Invalid status'
+  return null
 }
 
 // ── Quota history helpers ──────────────────────────────────────────────────
@@ -557,6 +587,26 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
   let pricingNeedsRecalcSince: number | null = null
   let pricingRecalcGeneration = 0
   let quotaRefreshInFlight = false
+  const agentEmitter = options?.agentEmitter ?? new AgentSessionEmitter()
+
+  const agentContext = () => ({
+    device: getDeviceName(),
+    deviceInstanceId: options?.currentDeviceInstanceId ?? '',
+    platform: loadConfig()?.platform || platform(),
+    now: Date.now(),
+    // Prompt text is the most sensitive thing a hook carries, so it is stored
+    // only when the user has asked for it.
+    storePromptPreview: loadConfig()?.agentSessions?.storePromptPreview === true,
+  })
+
+  const hasValidIngestToken = (req: http.IncomingMessage): boolean => {
+    const expected = getIngestToken(AIUSAGE_DIR)
+    if (!expected) return false
+    const header = req.headers['x-aiusage-token']
+    const supplied = Array.isArray(header) ? header[0] : header
+    if (typeof supplied !== 'string' || !supplied) return false
+    return safeEqual(supplied, expected)
+  }
 
   const currentPricingRecalcStatus = (): PricingRecalcStatus => {
     const status = {
@@ -1359,6 +1409,138 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           pageSize,
         })
         return
+      }
+
+      // ── /api/agent ────────────────────────────────────────────────
+      // Writes here are authenticated on their own: serve binds 0.0.0.0 and
+      // the dashboard password is optional, so a shared token is the only
+      // thing standing between the network and this table.
+      if (url.pathname.startsWith('/api/agent/')) {
+        const isWrite = req.method === 'POST'
+        if (isWrite && !hasValidIngestToken(req)) {
+          json(res, { error: { code: 'UNAUTHORIZED', message: 'Missing or invalid ingest token' } }, 401)
+          return
+        }
+
+        try {
+          if (url.pathname === '/api/agent/events' && req.method === 'POST') {
+            const body = await readJsonBody(req)
+            const raw = Array.isArray(body.events) ? body.events : null
+            if (!raw) {
+              json(res, { error: { code: 'INVALID_PARAM', message: 'events array required' } }, 400)
+              return
+            }
+            if (raw.length > MAX_AGENT_EVENT_BATCH) {
+              json(res, {
+                error: { code: 'INVALID_PARAM', message: `At most ${MAX_AGENT_EVENT_BATCH} events per request` },
+              }, 400)
+              return
+            }
+
+            const events: AgentEventInput[] = []
+            for (const entry of raw as Array<Record<string, unknown>>) {
+              const invalid = validateAgentEvent(entry)
+              if (invalid) {
+                json(res, { error: { code: 'INVALID_PARAM', message: invalid } }, 400)
+                return
+              }
+              events.push(entry as unknown as AgentEventInput)
+            }
+
+            const result = await runDbWrite(() => applyAgentEvents(db, events, agentContext(), agentEmitter))
+            json(res, { ok: true, ...result })
+            return
+          }
+
+          if (url.pathname === '/api/agent/heartbeat' && req.method === 'POST') {
+            const body = await readJsonBody(req)
+            const invalid = validateAgentEvent({ ...body, kind: 'heartbeat' })
+            if (invalid) {
+              json(res, { error: { code: 'INVALID_PARAM', message: invalid } }, 400)
+              return
+            }
+            const event = { ...body, kind: 'heartbeat', source: 'heartbeat' } as unknown as AgentEventInput
+            const result = await runDbWrite(() => applyAgentEvents(db, [event], agentContext(), agentEmitter))
+            json(res, { ok: true, ...result })
+            return
+          }
+
+          const statusMatch = /^\/api\/agent\/sessions\/([^/]+)\/status$/.exec(url.pathname)
+          if (statusMatch && req.method === 'POST') {
+            const body = await readJsonBody(req)
+            if (!isAgentStatus(body.status)) {
+              json(res, { error: { code: 'INVALID_PARAM', message: 'Unknown status' } }, 400)
+              return
+            }
+            const existing = db.prepare(
+              'SELECT agent_session_id, tool, device_instance_id FROM agent_sessions WHERE id = ?'
+            ).get(decodeURIComponent(statusMatch[1])) as
+              { agent_session_id: string; tool: string; device_instance_id: string } | undefined
+            if (!existing) {
+              json(res, { error: { code: 'NOT_FOUND', message: 'Unknown session' } }, 404)
+              return
+            }
+
+            const event: AgentEventInput = {
+              sessionId: existing.agent_session_id,
+              tool: existing.tool,
+              deviceInstanceId: existing.device_instance_id,
+              kind: 'manual',
+              source: 'manual',
+              status: body.status,
+              detail: typeof body.detail === 'string' ? body.detail : undefined,
+              ts: Date.now(),
+            }
+            const result = await runDbWrite(() => applyAgentEvents(db, [event], agentContext(), agentEmitter))
+            json(res, { ok: true, ...result })
+            return
+          }
+
+          if (url.pathname === '/api/agent/sessions' && req.method === 'GET') {
+            const status = url.searchParams.get('status')
+            if (status && !isAgentStatus(status)) {
+              json(res, { error: { code: 'INVALID_PARAM', message: 'Unknown status' } }, 400)
+              return
+            }
+            const tool = url.searchParams.get('tool')
+            if (tool && !TOOLS.includes(tool as never)) {
+              json(res, { error: { code: 'INVALID_PARAM', message: 'Invalid tool' } }, 400)
+              return
+            }
+            json(res, listAgentSessions(db, {
+              status,
+              tool,
+              device: url.searchParams.get('device'),
+              project: url.searchParams.get('project'),
+              active: url.searchParams.get('active') === 'true',
+              limit: Number(url.searchParams.get('limit')) || undefined,
+              offset: Number(url.searchParams.get('offset')) || undefined,
+            }, Date.now()))
+            return
+          }
+
+          if (url.pathname === '/api/agent/summary' && req.method === 'GET') {
+            json(res, summariseAgentSessions(db, Date.now()))
+            return
+          }
+
+          const detailMatch = /^\/api\/agent\/sessions\/([^/]+)$/.exec(url.pathname)
+          if (detailMatch && req.method === 'GET') {
+            const detail = getAgentSession(db, decodeURIComponent(detailMatch[1]), Date.now())
+            if (!detail) {
+              json(res, { error: { code: 'NOT_FOUND', message: 'Unknown session' } }, 404)
+              return
+            }
+            json(res, detail)
+            return
+          }
+        } catch (error) {
+          if (isDatabaseLockedError(error)) {
+            databaseBusy(res)
+            return
+          }
+          throw error
+        }
       }
 
       // ── /api/projects ─────────────────────────────────────────────

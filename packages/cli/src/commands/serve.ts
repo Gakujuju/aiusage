@@ -15,6 +15,8 @@ import { getSyncTarget } from '../sync/target.js'
 import { RuntimeSettingsController } from '../runtime/settings-controller.js'
 import { AsyncTaskQueue } from '../db/write-queue.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
+import { AgentSessionEmitter, decayStaleSessions } from '../db/agent-sessions.js'
+import { drainAgentEventSpool } from './agent-event.js'
 import { queryAllQuotas } from '../quota.js'
 import { hostname } from 'node:os'
 import { fetchExchangeRate, CACHE_TTL_MS } from '@aiusage/core'
@@ -26,6 +28,7 @@ export interface ServeOptions {
 }
 
 const MAX_PORT_ATTEMPTS = 10
+const AGENT_REAPER_INTERVAL_MS = 15_000
 const PORT_FILE = join(AIUSAGE_DIR, '.serve-port')
 
 const MIME_TYPES: Record<string, string> = {
@@ -151,8 +154,26 @@ export function serve(options: ServeOptions): void {
     })
   })
 
+  // Age out sessions nothing has reported on. No network here, so unlike the
+  // quota poller it can simply skip a tick that lands during a parse: the next
+  // one is 15 seconds away and decay is not time-critical.
+  const agentEmitter = new AgentSessionEmitter()
+  const agentReaper = setInterval(() => {
+    if (runtimeSettings.isParseInFlight()) return
+    void runDbWrite(() => decayStaleSessions(options.db, Date.now(), agentEmitter))
+      .catch((err) => console.error('[serve] agent session reaper failed:', err))
+  }, AGENT_REAPER_INTERVAL_MS)
+
+  // Events buffered while serve was down. dedupeKey makes this idempotent.
+  void runDbWrite(() => drainAgentEventSpool(options.db, agentEmitter))
+    .then((drained) => {
+      if (drained > 0) console.log(`[serve] replayed ${drained} buffered agent event(s)`)
+    })
+    .catch((err) => console.error('[serve] agent event spool replay failed:', err))
+
   const apiServer = createApiServer(options.db, {
     currentDeviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId,
+    agentEmitter,
     onRefresh: () => runParse(options.db),
     onSyncStart: () => syncRuntime.start(),
     getSyncStatus: () => syncRuntime.getStatus(),
@@ -238,6 +259,7 @@ export function serve(options: ServeOptions): void {
     }
 
     runtimeSettings.stop()
+    clearInterval(agentReaper)
     throw error
   })
 
@@ -252,6 +274,7 @@ export function serve(options: ServeOptions): void {
     console.log('\nShutting down...')
     cleanup()
     runtimeSettings.stop()
+    clearInterval(agentReaper)
     server.close(() => {
       process.exit(0)
     })
@@ -260,6 +283,7 @@ export function serve(options: ServeOptions): void {
   process.on('SIGTERM', () => {
     cleanup()
     runtimeSettings.stop()
+    clearInterval(agentReaper)
     server.close(() => {
       process.exit(0)
     })
