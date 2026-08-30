@@ -21,6 +21,9 @@ function stopHook(extra: Record<string, unknown> = {}) {
     hook_event_name: 'Stop',
     stop_hook_active: false,
     last_assistant_message: LONG,
+    // A field the whitelist genuinely does not cover, so the rest of
+    // _droppedKeys can be asserted on independently.
+    background_tasks: [],
     ...extra,
   }
 }
@@ -95,5 +98,40 @@ describe('assistant preview capture (Claude Code hooks)', () => {
       expect(event?.payload?.assistant_preview).toBeUndefined()
       expect(JSON.stringify(event?.payload)).not.toContain('あ')
     }
+  })
+})
+
+describe('_droppedKeys and the assistant preview', () => {
+  beforeEach(() => { config.value = undefined })
+  afterEach(() => { config.value = undefined })
+
+  it('does not list the source field once it has been consumed', () => {
+    // _droppedKeys means "the whitelist has fallen behind". A field read into
+    // a column or a derived value is not behind — it is handled. Same
+    // reasoning as CONSUMED_FIELDS for session_id and cwd.
+    config.value = { notifications: { includeAssistantMessage: true } }
+    const payload = buildAgentEvent(stopHook(), {})?.payload as Record<string, unknown>
+
+    expect(payload.assistant_preview).toBeDefined()
+    expect(payload._droppedKeys ?? []).not.toContain('last_assistant_message')
+    // Everything else the whitelist really does not cover is still listed.
+    expect(payload._droppedKeys).toContain('background_tasks')
+  })
+
+  it('lists it when the setting is off, because it really was thrown away', () => {
+    config.value = { notifications: { enabled: true } }
+    const payload = buildAgentEvent(stopHook(), {})?.payload as Record<string, unknown>
+
+    expect(payload.assistant_preview).toBeUndefined()
+    expect(payload._droppedKeys).toContain('last_assistant_message')
+  })
+
+  it('lists it when the reply was empty and produced no preview', () => {
+    config.value = { notifications: { includeAssistantMessage: true } }
+    const payload = buildAgentEvent(stopHook({ last_assistant_message: '   ' }), {})
+      ?.payload as Record<string, unknown>
+
+    expect(payload.assistant_preview).toBeUndefined()
+    expect(payload._droppedKeys).toContain('last_assistant_message')
   })
 })

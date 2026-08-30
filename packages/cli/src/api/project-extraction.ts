@@ -25,10 +25,16 @@ export function extractProjectFromCwd(cwd: string, extraRoots?: string[]): strin
   if (!cwd) return 'unknown'
   const normalized = cwd.replace(/\\/g, '/')
   // Strip home-dir prefix: /Users/<name>/, /home/<name>/, /root/, C:/Users/<name>/
+  //
+  // The trailing separator is optional because the home directory itself is
+  // not a project either. Requiring it meant a cwd of exactly C:\Users\alice
+  // matched nothing and was reported as the project "Users" — same mistake as
+  // the drive letter below, inventing a project that does not exist. With it
+  // optional the whole path is consumed and there is nothing left to name.
   const withoutHome = normalized
-    .replace(/^[A-Za-z]:\/(?:Users|home)\/[^/]+\//, '')
-    .replace(/^\/(Users|home)\/[^/]+\//, '')
-    .replace(/^\/root\//, '')
+    .replace(/^[A-Za-z]:\/(?:Users|home)\/[^/]+(?:\/|$)/, '')
+    .replace(/^\/(Users|home)\/[^/]+(?:\/|$)/, '')
+    .replace(/^\/root(?:\/|$)/, '')
   // A drive letter is never a project. It survives the home strip whenever the
   // path is not under the home directory, and C:\work\myproj was reported as
   // the project "C:". Dropped here rather than inside the loop so the

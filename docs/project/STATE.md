@@ -20,8 +20,6 @@
 
 - Phase 5 のクローズ確認のうち、スクラッチ作業での通知1点
   （実プロジェクトでの動作は 2026-08-30 13:27 のセッションで確認済み）
-- 応答プレビューが Discord に出ることの実機確認
-  （設定は本番に投入済み。次の Stop hook で発火する）
 - 段階3 の材料収集（既存 PowerShell 通知との併走データを数日分）
 
 ルール:
@@ -131,14 +129,20 @@ CLAUDE_KNOWN_TIERS に無い未知 tier で、resets_at も返らない。
 ウォッチャの初期不具合により device="DESKTOP-QOS4C85" /
 project="Codex" / turn_count=0 で記録されている。
 この1件は履歴として残す。
+（履歴1行の見た目のために本番DBを直接 UPDATE する前例を作らない。
+  turn_count は正しい値を復元できず、device と project だけ直すと
+  部分的に正しい行になってかえって紛らわしい）
 
 修正後の 13:27 開始のセッションでは device="自宅PC" / project="aiusage" /
 turn_count=2 となり、session_start から先頭読みできている。
 会話本文は入っておらず、_droppedKeys に message / local_images /
 local_audio / text_elements / last_agent_message の名前だけが残っている。
-（履歴1行の見た目のために本番DBを直接 UPDATE する前例を作らない。
-  turn_count は正しい値を復元できず、device と project だけ直すと
-  部分的に正しい行になってかえって紛らわしい）
+
+agent_sessions に cwd="C:\Users\Gakujun Yamaba"（ホームそのもの）の
+claude-code セッションが1件あり、project="C:" のまま残っている。
+ドライブレターとホーム除去の両方を直したので、次にこのセッションへ
+イベントが来れば "unknown" に更新される。来なければこのまま残る。
+DB は直接変更しない。
 
 ## upstream への PR 候補
 
@@ -147,8 +151,12 @@ local_audio / text_elements / last_agent_message の名前だけが残ってい�
 2. cost_source を価格の有無で判定していない
    （claude-code.ts / codex.ts だけが model === 'unknown' で判定し、
      価格表に無いモデルでも cost=0 / cost_source='pricing' になる。D15）
-3. `extractProjectFromCwd` がドライブレターを返す
-   （C:\work\myproj → project='C:'）
+3. `extractProjectFromCwd` が存在しないプロジェクト名を作る2件
+   ・ドライブレターを返す（C:\work\myproj → project='C:'）
+   ・ホーム除去の正規表現が末尾スラッシュを必須にしているため、
+     cwd がホームちょうどだと project='Users' になる
+     （C:\Users\alice、/Users/alice、/home/alice。プラットフォーム共通）
+   同じ関数の同じ種類のバグなので1つにまとめる。
 4. `serve` が無条件に 0.0.0.0 で listen する（D16）
    ※ 挙動変更を伴うため、PR より先に issue で意図を確認すべき。
      upstream が LAN ダッシュボードを意図している可能性がある
@@ -163,6 +171,7 @@ local_audio / text_elements / last_agent_message の名前だけが残ってい�
 方針: 1・2・3・6 は挙動を壊さない明確なバグ修正なので1つの PR に
 まとめてよい。4・5 は影響が大きいので個別に issue から始める。
 まだ作成していない。
+
 ## バックアップ
 
 - `~/.aiusage/backup-v12-20260829/` プロジェクト開始前

@@ -169,3 +169,36 @@ describe('extractProjectFromCwd — Windows drive letters', () => {
     expect(extractProjectFromCwd('/C:extra/app')).toBe('C:extra')
   })
 })
+
+describe('extractProjectFromCwd — the home directory itself', () => {
+  // The home directory is not a project any more than a drive letter is.
+  // The strip used to require a trailing separator, so a cwd of exactly
+  // C:\Users\alice matched nothing and came back as the project "Users" —
+  // and one such row existed in production.
+  it('has nothing to report for the home directory', () => {
+    expect(extractProjectFromCwd('C:\\Users\\alice')).toBe('unknown')
+    expect(extractProjectFromCwd('C:\\Users\\alice\\')).toBe('unknown')
+    expect(extractProjectFromCwd('C:/Users/alice')).toBe('unknown')
+    expect(extractProjectFromCwd('/Users/alice')).toBe('unknown')
+    expect(extractProjectFromCwd('/Users/alice/')).toBe('unknown')
+    expect(extractProjectFromCwd('/home/alice')).toBe('unknown')
+    expect(extractProjectFromCwd('/root')).toBe('unknown')
+    expect(extractProjectFromCwd('/root/')).toBe('unknown')
+    expect(extractProjectFromCwd('C:\\Users\\Gakujun Yamaba')).toBe('unknown')
+  })
+
+  it('still strips the home prefix from everything under it', () => {
+    expect(extractProjectFromCwd('C:\\Users\\alice\\Desktop\\proj')).toBe('Desktop')
+    expect(extractProjectFromCwd('C:\\Users\\alice\\Desktop\\proj', ['Desktop'])).toBe('proj')
+    expect(extractProjectFromCwd('C:\\Users\\alice\\src\\proj')).toBe('proj')
+    expect(extractProjectFromCwd('/Users/alice/WebstormProjects/my-project')).toBe('my-project')
+    expect(extractProjectFromCwd('/home/alice/code/thing')).toBe('thing')
+    expect(extractProjectFromCwd('/root/work/thing')).toBe('work')
+  })
+
+  it('does not strip a directory that merely starts with the home name', () => {
+    // /Users/alicia must not be read as /Users/alice + "ia".
+    expect(extractProjectFromCwd('/Usersomething/proj')).toBe('Usersomething')
+    expect(extractProjectFromCwd('/rootkit/proj')).toBe('rootkit')
+  })
+})

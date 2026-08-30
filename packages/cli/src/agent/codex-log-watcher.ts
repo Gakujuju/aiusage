@@ -179,7 +179,9 @@ export function sanitizePayload(
   }
 
   for (const [key, value] of Object.entries(payload)) {
-    // Recorded as dropped when the preview is off, which is what it is.
+    // Consumed into assistant_preview, so not dropped — the same reasoning as
+    // CONSUMED_KEYS. With the setting off, or an empty reply, it really was
+    // thrown away and belongs in the list.
     if (key === assistantField && kept.assistant_preview != null) continue
     if (allowed.includes(key)) {
       // Only scalars. A whitelisted key that turns into an object one day

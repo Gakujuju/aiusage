@@ -48,6 +48,13 @@ describe('codex sanitizePayload — assistant preview', () => {
     expect(out._droppedKeys ?? []).not.toContain('last_agent_message')
   })
 
+  it('lists the source field when the reply was empty', () => {
+    // Nothing was consumed, so it really was thrown away.
+    const out = sanitizePayload('task_complete', { last_agent_message: '   ' }, true)
+    expect(out.assistant_preview).toBeUndefined()
+    expect(out._droppedKeys).toContain('last_agent_message')
+  })
+
   it('keeps nothing from a line that is not a finished turn', () => {
     const out = sanitizePayload('user_message', { message: LONG_REPLY }, true)
     expect(out.assistant_preview).toBeUndefined()

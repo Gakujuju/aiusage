@@ -3,6 +3,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, statSync
 import { join } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import Database from 'better-sqlite3'
+
+// These tests describe the default: no reply text captured. Reading the real
+// ~/.aiusage/config.json would make them pass or fail depending on whether
+// the machine running them has the preview switched on.
+vi.mock('../../src/config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/config.js')>()
+  return { ...actual, loadConfig: () => ({}) }
+})
 import { initializeDatabase } from '../../src/db/index.js'
 import { applyAgentEvents } from '../../src/db/agent-sessions.js'
 import { extractSessionId } from '../../src/commands/parse.js'

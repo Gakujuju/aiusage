@@ -120,22 +120,29 @@ export function buildAgentEvent(
   // copied wholesale, so a future field carrying secrets cannot leak in.
   const payload: Record<string, unknown> = {}
   const dropped: string[] = []
+
+  // Normalised here, at capture, so the full reply never reaches the
+  // database. Stored under one name regardless of tool so nothing
+  // downstream has to know which hook it came from.
+  const assistantField = loadConfig()?.notifications?.includeAssistantMessage === true
+    ? ASSISTANT_MESSAGE_FIELD[kind]
+    : undefined
+  const assistantPreview = assistantField
+    ? normalizeAssistantPreview(hook[assistantField])
+    : null
+  if (assistantPreview) payload.assistant_preview = assistantPreview
+
   for (const key of Object.keys(hook)) {
     if (PAYLOAD_FIELDS.has(key)) payload[key] = hook[key]
+    // Consumed into assistant_preview, so not dropped — the same reasoning as
+    // CONSUMED_FIELDS. When the setting is off, or the reply was empty, it
+    // really was thrown away and belongs in the list.
+    else if (key === assistantField && assistantPreview) continue
     else if (!CONSUMED_FIELDS.has(key)) dropped.push(key)
   }
   // Names only, never values. Enough to notice the whitelist has fallen behind
   // an upstream change without having to capture a raw dump to find out.
   if (dropped.length > 0) payload._droppedKeys = dropped.sort()
-
-  // Normalised here, at capture, so the full reply never reaches the
-  // database. Stored under one name regardless of tool so nothing
-  // downstream has to know which hook it came from.
-  if (loadConfig()?.notifications?.includeAssistantMessage === true) {
-    const field = ASSISTANT_MESSAGE_FIELD[kind]
-    const preview = field ? normalizeAssistantPreview(hook[field]) : null
-    if (preview) payload.assistant_preview = preview
-  }
 
   const detail = options.detail
     ?? (typeof hook.tool_name === 'string' ? hook.tool_name : undefined)
