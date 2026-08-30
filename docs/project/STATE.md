@@ -13,7 +13,7 @@
 | 5 | Codex の状態取得 | 完了・実データ確認済み（rollout ログ追尾・D18） |
 | 6-A | クォータ履歴・枯渇予測 | 完了（Claude / Codex で稼働中） |
 | 6-B | 状態管理・作業時間計測 | 完了 |
-| 7 | Discord 通知統合 | 完了（段階2 併走中） |
+| 7 | Discord 通知統合 | 完了（段階3 実施済み・aiusage 単独） |
 | 8-A-1 | クォータ推移・枯渇予測の UI | 完了 |
 | 8-A-2 | エージェント状態ボード /agents | 完了 |
 | 8-A-3 | 通知の設定と送信履歴 | 完了 |
@@ -23,7 +23,10 @@
 
 - Phase 5 のクローズ確認のうち、スクラッチ作業での通知1点
   （実プロジェクトでの動作は 2026-08-30 13:27 のセッションで確認済み）
-- 段階3 の実行判断（材料は報告済み、前提3件は解消済み。判断は指示役）
+- 段階3 の24時間観測（2026-08-30 16:2x 実施。以下を次回報告する）
+  ・作業完了 / 確認・入力待ち / 処理エラー終了 がすべて aiusage から届くか
+  ・reason のログに想定外の抑制が出ていないか
+  ・応答プレビューが結論行を拾えているか（外れた例があれば）
 
 ルール:
 
@@ -102,14 +105,15 @@
   copilot: 認証情報が無いため not_found（正常）
 - Codex ログ追尾: 5秒間隔。~/.codex/sessions 配下の rollout-*.jsonl のうち、
   直近7日分のディレクトリ＋カーソル済みファイルで、mtime が直近30分以内のもの。
-- Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）。
+- Discord 通知: aiusage 単独（2026-08-30 に既存 PowerShell 通知を除去）。
   設定は /settings の通知セクション、送信履歴は /notifications。
   webhook は画面から編集できない（CLI の notify-test --set-webhook のみ）。
+  接頭辞 [aiusage] は当面そのまま（一度に2つ変えないため）。
   Codex のターン完了でも通知が出るようになった。
   tool 別に切るなら config の notifications.tools（例 { "codex": false }）。
 - 応答プレビュー: 有効（notifications.includeAssistantMessage = true）。
   取得時点で200文字に切り詰め、改行を畳んで assistant_preview に入れる（D10）。
-- hook: `~/.claude/settings.json` に8イベント登録済み
+- hook: `~/.claude/settings.json` に8イベント・8エントリ（aiusage のみ）
   （Stop / StopFailure / Notification / UserPromptSubmit /
     SessionStart / SessionEnd / PermissionRequest / PermissionDenied）
 
@@ -186,4 +190,8 @@ DB は直接変更しない。
   ※ v19 は空テーブルを足すだけなので、内容は v18 適用後と同じ。
 - `~/.aiusage/backup-pre-claude-cli/` `~/.claude` 系（別目的・保持）
 - `~/.claude/settings.json.pre-notify-hooks` hook 追記前（sha256 3c0ef1dbcf7bb8ee）
+- `~/.claude/settings.json.pre-stage3` 段階3 直前（sha256 6f9ab1067fca9091）
+  現在の settings.json は sha256 78c2756b6f49dbd6。
+  戻すには: copy settings.json.pre-stage3 settings.json
+  .ps1 3本と task-times/ は残してあるので、復元すれば即座に元に戻る。
   現在の settings.json は sha256 bbfbead44827f015（案A の CLI ログイン後）。
