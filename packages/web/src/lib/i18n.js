@@ -604,6 +604,11 @@ const translations = {
         all_time: 'All time',
       },
     },
+    errors: {
+      offline: 'Cannot reach the server. aiusage may not be running on the PC, or Tailscale may be disconnected.',
+      server: 'The server returned an error.',
+      unknown: 'Something went wrong.',
+    },
     auth: {
       locked: 'Dashboard locked',
       lockedHint: 'Enter the dashboard password to view this page.',
@@ -1237,6 +1242,11 @@ const translations = {
         all_time: '全期間',
       },
     },
+    errors: {
+      offline: 'サーバに接続できません。PC の aiusage が起動していないか、Tailscale が切れている可能性があります。',
+      server: 'サーバがエラーを返しました。',
+      unknown: '問題が発生しました。',
+    },
     auth: {
       locked: 'ダッシュボードはロックされています',
       lockedHint: 'このページを表示するにはダッシュボードのパスワードを入力してください。',
@@ -1869,6 +1879,11 @@ const translations = {
         yearly: '今年',
         all_time: '累计',
       },
+    },
+    errors: {
+      offline: '无法连接到服务器。PC 上的 aiusage 可能未运行，或 Tailscale 已断开。',
+      server: '服务器返回了错误。',
+      unknown: '发生了问题。',
     },
     auth: {
       locked: '仪表盘已锁定',

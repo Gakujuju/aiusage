@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { readFileSync, existsSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
+import { readFileSync, existsSync, statSync, utimesSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join, extname, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApiServer } from '../api/server.js'
@@ -196,6 +196,35 @@ const AGENT_REAPER_INTERVAL_MS = 15_000
 const CODEX_LOG_INTERVAL_MS = 5_000
 const PORT_FILE = join(AIUSAGE_DIR, '.serve-port')
 
+/**
+ * How often the port file's timestamp is refreshed while serve is alive.
+ *
+ * The file exists to tell hooks which port to use; touching it also leaves a
+ * record of when this process was last known to be running, which is the
+ * only thing a killed process can leave behind about when it died.
+ */
+const PORT_FILE_HEARTBEAT_MS = 60_000
+
+/**
+ * Say how long the gap was, if the previous process left its port file.
+ *
+ * A file still sitting there means the last shutdown was not graceful — the
+ * SIGINT path removes it — and its mtime is that process's final heartbeat.
+ */
+function reportOutage(portFile: string, now: number = Date.now()): void {
+  let lastSeen: number
+  try {
+    lastSeen = statSync(portFile).mtimeMs
+  } catch {
+    return // Clean start, or a clean shutdown last time. Nothing to say.
+  }
+  const gapMs = now - lastSeen
+  if (gapMs < 0) return
+  const minutes = Math.round(gapMs / 60_000)
+  const spoken = minutes < 1 ? '1分未満' : `約${minutes}分`
+  console.warn(`[serve] 前回の稼働確認から${spoken}ぶりの再開です（前回は正常停止していません）`)
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -348,7 +377,22 @@ export function serve(options: ServeOptions): void {
   })
   runtimeSettings.start()
 
-  // Parse logs once on startup so the dashboard has data immediately
+  /**
+   * Parse once on startup — but only after the port is open.
+   *
+   * runParse is better-sqlite3, so it is synchronous: it holds the event loop
+   * for as long as it takes, and with 22,000 records that is tens of seconds.
+   * Started here directly it ran to completion before server.listen() was
+   * even reached, so every request during a restart was refused outright.
+   * Deferring it one turn of the loop puts the socket up first, and the
+   * requests that arrive during the parse wait in the accept queue instead.
+   *
+   * Nothing can read a half-parsed database this way: the parse blocks the
+   * loop, so a request is handled either before it starts or after it
+   * finishes, never in the middle. The change turns "connection refused"
+   * into "slow", which is the whole of it.
+   */
+  setImmediate(() => {
   console.log('[serve] parsing logs...')
   runDbWrite(() => runParse(options.db)).then((result) => {
     console.log(`[serve] parsed ${result.parsedCount} records, ${result.toolCallCount} tool calls.`)
@@ -383,6 +427,7 @@ export function serve(options: ServeOptions): void {
         console.error('[serve] initial quota snapshot failed:', err)
       })
     }
+  })
   })
 
   // Age out sessions nothing has reported on. No network here, so unlike the
@@ -591,6 +636,16 @@ export function serve(options: ServeOptions): void {
 
   server.on('listening', () => {
     started = true
+    /**
+     * How long the dashboard was unreachable, said out loud.
+     *
+     * A .serve-port left behind means the previous process was killed rather
+     * than stopped, and its modification time is that process's last
+     * heartbeat — so the difference is the outage, to within a minute. The
+     * log already said "it was killed"; it could not say for how long, which
+     * is the part anyone reading it actually wants.
+     */
+    reportOutage(PORT_FILE)
     writeFileSync(PORT_FILE, String(currentPort), 'utf-8')
     // Say what was actually bound and whether it is protected. "listening on
     // localhost" was true of the URL and false of the bind.
@@ -598,6 +653,24 @@ export function serve(options: ServeOptions): void {
     // Only now: the port is settled, so every interface gets the same one.
     for (const host of hosts.filter((h) => h !== DEFAULT_SERVE_HOST)) listenSecondary(host)
   })
+
+  /**
+   * Keep the port file's timestamp current.
+   *
+   * Cheap, and it is what makes the outage figure above possible: a process
+   * that is killed cannot write a shutdown time, so the last time it was
+   * seen alive has to already be on disk.
+   */
+  const portFileHeartbeat = setInterval(() => {
+    if (!started) return
+    try {
+      const now = new Date()
+      utimesSync(PORT_FILE, now, now)
+    } catch {
+      // The file may have been removed by hand. Not worth a line of output.
+    }
+  }, PORT_FILE_HEARTBEAT_MS)
+  portFileHeartbeat.unref?.()
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE' && !started && currentPort < options.port + MAX_PORT_ATTEMPTS - 1) {
@@ -612,6 +685,7 @@ export function serve(options: ServeOptions): void {
     runtimeSettings.stop()
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
+    clearInterval(portFileHeartbeat)
     notificationSender.stop()
     throw error
   })
@@ -629,6 +703,7 @@ export function serve(options: ServeOptions): void {
     runtimeSettings.stop()
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
+    clearInterval(portFileHeartbeat)
     notificationSender.stop()
     for (const extra of extraServers) extra.close()
     server.close(() => {
@@ -641,6 +716,7 @@ export function serve(options: ServeOptions): void {
     runtimeSettings.stop()
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
+    clearInterval(portFileHeartbeat)
     notificationSender.stop()
     for (const extra of extraServers) extra.close()
     server.close(() => {

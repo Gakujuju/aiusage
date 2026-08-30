@@ -1,3 +1,6 @@
+import { get } from 'svelte/store'
+import { t } from './i18n.js'
+
 function buildUrl(base, params) {
   const searchParams = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -36,8 +39,72 @@ function reportUnauthorized(url) {
   if (unauthorizedHandler) unauthorizedHandler()
 }
 
+/**
+ * How many times to try again when the server cannot be reached at all.
+ *
+ * A dashboard left open on a phone loses its server for a second or two
+ * whenever serve is restarted, and the reader saw "API error" and had to
+ * know to press refresh. Three and a half seconds covers that window.
+ *
+ * Deliberately not longer. A real outage lasts until the watchdog's next
+ * tick — minutes, not seconds — and no retry schedule is going to cover
+ * that. Waiting longer would only replace a wrong answer with a long silence
+ * before the same answer.
+ */
+const OFFLINE_RETRY_DELAYS_MS = [500, 1000, 2000]
+
+/** @param {number} ms */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Say what went wrong in a way the reader can act on.
+ *
+ * "API error" was true of everything — the server being down, the session
+ * having lapsed, a bug in a query — and told nobody which. The message is
+ * resolved here rather than at each page so that every page gets it without
+ * being touched, and it goes through the same translations as the rest.
+ *
+ * @param {'offline' | 'server' | 'other'} kind
+ * @param {string} [serverMessage]
+ */
+function describeFailure(kind, serverMessage) {
+  const translate = get(t)
+  if (kind === 'offline') return translate('errors.offline')
+  if (kind === 'server') return translate('errors.server')
+  return serverMessage || translate('errors.unknown')
+}
+
+/**
+ * An Error that also says what kind of failure it was, so a caller can tell
+ * an unreachable server from one that answered.
+ *
+ * @param {string} message
+ * @param {'offline' | 'server' | 'other'} kind
+ * @param {number} [status]
+ */
+function apiError(message, kind, status) {
+  return Object.assign(new Error(message), { kind, status })
+}
+
 async function apiFetch(url, { signal, swr = false } = {}) {
-  const request = () => signal ? fetch(url, { signal }) : fetch(url)
+  /**
+   * A fetch that rejects only once the server has had a few chances.
+   *
+   * Retries are for unreachability alone: a 500 is the server answering, and
+   * asking again just repeats whatever went wrong. An aborted request is the
+   * caller's decision and must not be second-guessed.
+   */
+  const request = async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return signal ? await fetch(url, { signal }) : await fetch(url)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        if (attempt >= OFFLINE_RETRY_DELAYS_MS.length) throw error
+        await sleep(OFFLINE_RETRY_DELAYS_MS[attempt])
+      }
+    }
+  }
 
   // Stale-while-revalidate: return cached data immediately, refresh in background
   if (swr && swrCache.has(url)) {
@@ -63,14 +130,24 @@ async function apiFetch(url, { signal, swr = false } = {}) {
     .then(async (response) => {
       if (!response.ok) {
         if (response.status === 401) reportUnauthorized(url)
-        const error = await response.json().catch(() => ({ error: { message: 'API error' } }))
-        throw new Error(error.error?.message || `HTTP ${response.status}`)
+        const body = await response.json().catch(() => null)
+        const serverMessage = body?.error?.message
+        // 5xx is the server failing; 4xx is usually something it can explain
+        // better than we can, so its own message wins there.
+        const kind = response.status >= 500 ? 'server' : 'other'
+        throw apiError(describeFailure(kind, serverMessage), kind, response.status)
       }
       return response.json()
     })
     .then(data => {
       if (swr) swrCache.set(url, { data, fetchedAt: Date.now() })
       return data
+    })
+    .catch((error) => {
+      // Only a fetch that never got an answer lands here without a kind: the
+      // branch above sets one on everything the server did reply to.
+      if (error?.kind || error?.name === 'AbortError') throw error
+      throw apiError(describeFailure('offline'), 'offline')
     })
     .finally(() => inflightRequests.delete(url))
 
