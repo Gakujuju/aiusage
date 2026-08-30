@@ -99,6 +99,44 @@ export function checkHostSafety(
   }
 }
 
+export interface ServeCommandDeps {
+  dbPath: string
+  createDatabase: (path: string) => Database.Database
+  serve: (options: ServeOptions) => void
+  env?: NodeJS.ProcessEnv
+  onError?: (message: string) => void
+  onExit?: (code: number) => void
+}
+
+/**
+ * The `serve` CLI command, in the order the steps have to happen in.
+ *
+ * The host check comes before createDatabase because createDatabase runs the
+ * migrations. Opening the database first meant a refused start still left the
+ * production database migrated — harmless while no migration is pending, and a
+ * real "start was refused but the schema moved anyway" the moment one is.
+ *
+ * Nothing warns here: serve() re-checks and warns when it actually binds, so
+ * warning in both places would print the same line twice.
+ */
+export function runServeCommand(
+  options: { port: number; host?: string },
+  deps: ServeCommandDeps,
+): void {
+  const host = resolveServeHost(options.host, deps.env)
+  const safety = checkHostSafety(host, deps.env)
+  if (!safety.allowed) {
+    // The same message serve() would print. Kept in checkHostSafety rather
+    // than written out at each call site so the two cannot drift.
+    ;(deps.onError ?? console.error)(safety.message ?? '')
+    ;(deps.onExit ?? process.exit)(1)
+    return
+  }
+
+  const db = deps.createDatabase(deps.dbPath)
+  deps.serve({ port: options.port, host, db })
+}
+
 const MAX_PORT_ATTEMPTS = 10
 const AGENT_REAPER_INTERVAL_MS = 15_000
 const PORT_FILE = join(AIUSAGE_DIR, '.serve-port')
@@ -119,6 +157,12 @@ const MIME_TYPES: Record<string, string> = {
 export function serve(options: ServeOptions): void {
   // Decided before anything else starts: refusing to bind should not leave a
   // half-initialised process behind.
+  //
+  // runServeCommand already refuses before the database is opened, so on the
+  // CLI path this looks redundant — do not remove it on those grounds. serve()
+  // is exported and gets called directly by tests and by anything embedding
+  // it, and it has to be safe on its own. resolveServeHost is idempotent, so
+  // running it again over an already-resolved host is a no-op.
   const host = resolveServeHost(options.host)
   const isLoopback = isLoopbackHost(host)
   const hostSafety = checkHostSafety(host)

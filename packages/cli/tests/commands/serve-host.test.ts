@@ -3,6 +3,7 @@ import {
   DEFAULT_SERVE_HOST,
   checkHostSafety,
   resolveServeHost,
+  runServeCommand,
 } from '../../src/commands/serve.js'
 
 describe('resolveServeHost', () => {
@@ -60,5 +61,79 @@ describe('checkHostSafety', () => {
 
   it('ignores an empty password', () => {
     expect(checkHostSafety('0.0.0.0', { AIUSAGE_DASHBOARD_PASSWORD: '' }).allowed).toBe(false)
+  })
+})
+
+describe('runServeCommand', () => {
+  const fakeDb = {} as never
+
+  function deps(env: NodeJS.ProcessEnv) {
+    const created: string[] = []
+    const served: Array<{ port: number; host?: string }> = []
+    const errors: string[] = []
+    const exits: number[] = []
+    return {
+      created,
+      served,
+      errors,
+      exits,
+      value: {
+        dbPath: '/tmp/does-not-exist/cache.db',
+        createDatabase: (path: string) => {
+          created.push(path)
+          return fakeDb
+        },
+        serve: (options: { port: number; host?: string }) => {
+          served.push(options)
+        },
+        env,
+        onError: (message: string) => {
+          errors.push(message)
+        },
+        onExit: (code: number) => {
+          exits.push(code)
+        },
+      },
+    }
+  }
+
+  it('refuses without opening the database', () => {
+    // createDatabase runs the migrations. A refused start that has already
+    // migrated the production database is the failure this ordering exists to
+    // prevent, so the assertion is about the call count, not the message.
+    const d = deps({})
+    runServeCommand({ port: 3847, host: '0.0.0.0' }, d.value)
+
+    expect(d.created).toEqual([])
+    expect(d.served).toEqual([])
+    expect(d.exits).toEqual([1])
+    expect(d.errors[0]).toContain('refusing to listen on 0.0.0.0')
+  })
+
+  it('opens the database and serves when the host is allowed', () => {
+    const d = deps({})
+    runServeCommand({ port: 3847 }, d.value)
+
+    expect(d.created).toEqual(['/tmp/does-not-exist/cache.db'])
+    expect(d.served).toEqual([{ port: 3847, host: '127.0.0.1', db: fakeDb }])
+    expect(d.exits).toEqual([])
+    expect(d.errors).toEqual([])
+  })
+
+  it('passes the resolved host down rather than the raw option', () => {
+    const d = deps({ AIUSAGE_HOST: '0.0.0.0', AIUSAGE_DASHBOARD_PASSWORD: 'secret' })
+    runServeCommand({ port: 3847 }, d.value)
+
+    expect(d.served[0]?.host).toBe('0.0.0.0')
+  })
+
+  it('still opens the database under the escape hatch', () => {
+    const d = deps({ AIUSAGE_ALLOW_INSECURE_HOST: '1' })
+    runServeCommand({ port: 3847, host: '0.0.0.0' }, d.value)
+
+    expect(d.created).toHaveLength(1)
+    // The warning belongs to serve(), which is what actually binds. Printing
+    // it here too would double it up.
+    expect(d.errors).toEqual([])
   })
 })

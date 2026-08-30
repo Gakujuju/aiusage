@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { serve } from './commands/serve.js'
+import { runServeCommand, serve } from './commands/serve.js'
 import { runAgentEvent } from './commands/agent-event.js'
 import { runNotifyStatus, runNotifyTest } from './commands/notify.js'
 import { runInit } from './commands/init.js'
@@ -334,8 +334,10 @@ program
   .option('-p, --port <port>', 'Port number', '3847')
   .option('--host <host>', 'Interface to bind (default 127.0.0.1; AIUSAGE_HOST overrides)')
   .action((options) => {
-    const db = createDatabase(DB_PATH)
-    serve({ port: parseInt(options.port), host: options.host, db })
+    runServeCommand(
+      { port: parseInt(options.port), host: options.host },
+      { dbPath: DB_PATH, createDatabase, serve },
+    )
   })
 
 // notify-test command
