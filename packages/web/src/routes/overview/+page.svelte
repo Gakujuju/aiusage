@@ -2,12 +2,15 @@
   import { onMount } from 'svelte'
   import { dateRange, selectedDevice, selectedTool, formatNumber, formatCost, formatTokens } from '$lib/stores.js'
   import { fetchSummary, refreshData } from '$lib/api.js'
+  import UnpricedWarning from '$lib/components/UnpricedWarning.svelte'
   import { t } from '$lib/i18n.js'
   import DateRangeSelector from '$lib/components/DateRangeSelector.svelte'
   import DeviceSelector from '$lib/components/DeviceSelector.svelte'
   import ToolSelector from '$lib/components/ToolSelector.svelte'
 
+  /** @type {any} */
   let data = null
+  /** @type {any} */
   let error = null
   let loading = true
   let tcTab = 'all'
@@ -52,6 +55,11 @@
   <DeviceSelector />
   <ToolSelector />
 </div>
+
+<UnpricedWarning
+  unpricedRecords={data?.unpricedRecords ?? 0}
+  unpricedModels={data?.unpricedModels ?? []}
+/>
 
 {#if loading}
   <div class="state-msg">{$t('common.loading')}</div>

@@ -1,9 +1,16 @@
 <script>
   import { onMount } from 'svelte'
-  import { t } from '$lib/i18n.js'
-  import { fetchQuotas } from '$lib/api.js'
+  import { t, lang } from '$lib/i18n.js'
+  import { fetchQuotas, fetchQuotaHistory, fetchQuotaForecast } from '$lib/api.js'
+  import QuotaChart from '$lib/components/QuotaChart.svelte'
 
+  /** @type {any} */
   let data = null
+  /** @type {any} */
+  let history = null
+  /** @type {any} */
+  let forecast = null
+  /** @type {any} */
   let error = null
   let loading = true
 
@@ -31,6 +38,20 @@
       data = null
     } finally {
       loading = false
+    }
+
+    // History and forecast are extra detail, not the page. If either fails the
+    // live numbers above still render, so their errors are swallowed rather
+    // than replacing the page with an error state.
+    try {
+      history = await fetchQuotaHistory({ range: 'week' })
+    } catch {
+      history = null
+    }
+    try {
+      forecast = await fetchQuotaForecast()
+    } catch {
+      forecast = null
     }
   }
 
@@ -94,6 +115,70 @@
     return quota.credentialStatus !== 'not_found'
   }
 
+  // ── Forecast and history ──────────────────────────────────────────────
+
+  /** BCP-47 tag for Intl, from the app's language setting. */
+  $: locale = $lang === 'ja' ? 'ja-JP' : $lang === 'zh' ? 'zh-CN' : 'en-US'
+
+  /** "8/30 14:12" in ja, "Aug 30, 2:12 PM" in en — Intl decides, not us. */
+  function formatDateTime(ms) {
+    if (!Number.isFinite(ms)) return null
+    return new Date(ms).toLocaleString(locale, {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+  }
+
+  /** "1時間3分" / "1h 3m". Null when the moment has passed. */
+  function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return null
+    const totalMinutes = Math.floor(ms / 60000)
+    const days = Math.floor(totalMinutes / (60 * 24))
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60)
+    const minutes = totalMinutes % 60
+    const parts = []
+    if (days > 0) parts.push($t('quotas.forecast.days').replace('{n}', days))
+    if (hours > 0) parts.push($t('quotas.forecast.hours').replace('{n}', hours))
+    // Minutes are noise next to days, and the only unit when nothing else fits.
+    if (days === 0 && (minutes > 0 || parts.length === 0)) {
+      parts.push($t('quotas.forecast.minutes').replace('{n}', minutes))
+    }
+    return parts.join(' ')
+  }
+
+  $: forecastByKey = new Map(
+    (forecast?.forecasts ?? []).map((f) => [`${f.tool}:${f.tier}`, f]),
+  )
+
+  /**
+   * Samples keyed by tool, tier and window.
+   *
+   * Both maps are read straight from the markup rather than through a helper.
+   * Svelte tracks the reactive values an expression names, and a helper hides
+   * them: a template calling seriesFor(...) never re-rendered when `history`
+   * arrived, so every tier reported having no samples.
+   */
+  $: seriesByKey = new Map(
+    (history?.series ?? []).map((s) => [`${s.tool}:${s.tier}:${s.windowId}`, s.points ?? []]),
+  )
+
+  /**
+   * Whether the forecast is worth showing as numbers.
+   *
+   * 'low' means too few samples, or samples too far apart, to say anything —
+   * the same reason quotaThresholdCrossings reports nothing without a
+   * baseline. A pace and an exhaustion time carry more authority than
+   * anything else on this page, so they are the first things withheld.
+   */
+  function isTrusted(f) {
+    return f != null && f.confidence !== 'low'
+  }
+
+  /** null when there is nothing to say — 'ok' is the quiet default. */
+  function riskLabel(risk) {
+    if (!risk || risk === 'ok') return null
+    return $t(`quotas.forecast.risk.${risk}`)
+  }
+
   /** Quotas with credentials (to show), plus not_found ones for context */
   $: visibleQuotas = data?.quotas ?? []
   $: activeQuotas = visibleQuotas.filter(q => q.credentialStatus !== 'not_found')
@@ -152,7 +237,11 @@
                 {/if}
               </div>
             </div>
-          {:else if !quota.success}
+          <!-- A failed poll with stored tiers is not the same as having
+               nothing: the last known numbers and this window's history are
+               still worth showing. They are labelled stale below rather than
+               hidden, which is what the previous version did. -->
+          {:else if !quota.success && quota.tiers.length === 0}
             <div class="status-msg status-error">
               <span class="status-icon">✕</span>
               <div>
@@ -168,13 +257,30 @@
               <div class="status-title">{$t('quotas.noTiers')}</div>
             </div>
           {:else}
+            <!-- Once per card, not once per tier: the whole tool is stale,
+                 and saying so three times is noise, not emphasis. -->
+            {#if quota.stale}
+              <div class="tier-stale">
+                {$t('quotas.staleValue').replace('{time}', formatQueryTime(quota.lastSuccessAt))}
+              </div>
+            {/if}
+
             <div class="tiers">
               {#each quota.tiers as tier (tier.name)}
                 {@const pct = Math.min(Math.round(tier.utilization), 100)}
                 {@const countdown = countdownStr(tier.resetsAt)}
+                {@const f = forecastByKey.get(`${quota.tool}:${tier.name}`) ?? null}
+                <!-- Keyed on the current window, so a closed window's series
+                     is never drawn as though it were the present one. -->
+                {@const series = (f?.windowId && seriesByKey.get(`${quota.tool}:${tier.name}:${f.windowId}`)) || []}
+                {@const trusted = isTrusted(f)}
+                {@const risk = riskLabel(f?.risk)}
                 <div class="tier-row">
                   <div class="tier-label">
                     <span class="tier-name">{tierLabel(tier.name)}</span>
+                    {#if risk}
+                      <span class="risk-badge risk-{f.risk}">{risk}</span>
+                    {/if}
                     {#if countdown}
                       <span class="tier-reset">↻ {countdown}</span>
                     {/if}
@@ -188,6 +294,72 @@
                     </div>
                     <span class="tier-pct" style="color: {utilizationBarColor(tier.utilization)}">{pct}%</span>
                   </div>
+
+                  {#if series.length > 0}
+                    <QuotaChart
+                      points={series}
+                      resetsAt={f?.resetsAt ?? null}
+                      color={utilizationBarColor(tier.utilization)}
+                      ariaLabel={`${toolLabel(quota.tool)} ${tierLabel(tier.name)} ${$t('quotas.chart.label')}`}
+                    />
+                  {:else}
+                    <div class="tier-empty">{$t('quotas.chart.empty')}</div>
+                  {/if}
+
+                  {#if f}
+                    <dl class="forecast">
+                      {#if trusted && f.paceRatio != null}
+                        <div class="forecast-row">
+                          <dt>{$t('quotas.forecast.pace')}</dt>
+                          <dd class:over={f.paceRatio > 1}>
+                            {f.paceRatio.toFixed(2)}×
+                            <span class="forecast-note">
+                              {f.paceRatio > 1
+                                ? $t('quotas.forecast.paceFast')
+                                : $t('quotas.forecast.paceOk')}
+                            </span>
+                          </dd>
+                        </div>
+                      {/if}
+
+                      {#if trusted && f.exhaustAt != null}
+                        <div class="forecast-row">
+                          <dt>{$t('quotas.forecast.exhaustAt')}</dt>
+                          <dd class:over={f.exhaustBeforeReset}>
+                            {formatDateTime(f.exhaustAt)}
+                            {#if f.exhaustBeforeReset}
+                              <span class="forecast-note">{$t('quotas.forecast.beforeReset')}</span>
+                            {/if}
+                          </dd>
+                        </div>
+                      {/if}
+
+                      <!-- Tiers with no resets_at (nimbus_quill) have no reset
+                           row at all rather than an empty one. -->
+                      {#if f.resetsAt != null}
+                        {@const remaining = formatDuration(f.resetsAt - Date.now())}
+                        {#if remaining}
+                          <div class="forecast-row">
+                            <dt>{$t('quotas.forecast.resetsIn')}</dt>
+                            <dd>{remaining}<span class="forecast-note">{formatDateTime(f.resetsAt)}</span></dd>
+                          </div>
+                        {/if}
+                      {/if}
+
+                      {#if f.p90FinalUtilization != null}
+                        <div class="forecast-row">
+                          <dt>{$t('quotas.forecast.p90')}</dt>
+                          <dd>{Math.round(f.p90FinalUtilization)}%<span class="forecast-note">{$t('quotas.forecast.p90Note')}</span></dd>
+                        </div>
+                      {/if}
+
+                      {#if !trusted}
+                        <div class="forecast-row forecast-unknown">
+                          {$t('quotas.forecast.lowConfidence')}
+                        </div>
+                      {/if}
+                    </dl>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -431,5 +603,99 @@
     .quota-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* ── Forecast, chart and risk ──────────────────────────────────────── */
+
+  .tier-row {
+    /* Each tier now owns a block, not a line. */
+    padding-bottom: 0.75rem;
+  }
+
+  .tier-row + .tier-row {
+    border-top: 1px solid var(--color-border-subtle, var(--border));
+    padding-top: 0.75rem;
+  }
+
+  .risk-badge {
+    font-size: 0.6875rem;
+    font-weight: 550;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  /* DESIGN.md has no warning colour, and inventing one is not mine to do.
+     'watch' borrows --color-info, and 'warn' and 'critical' share the error
+     hue at different strengths: warn is the low-opacity badge the design
+     already prescribes, critical is the solid one. Two weights of the same
+     colour still read as an escalation without adding to the palette. */
+  .risk-watch {
+    background: oklch(0.55 0.14 250 / 0.12);
+    color: oklch(0.45 0.14 250);
+  }
+
+  .risk-warn {
+    background: oklch(0.58 0.2 25 / 0.12);
+    color: oklch(0.48 0.2 25);
+  }
+
+  .risk-critical {
+    background: oklch(0.58 0.2 25);
+    color: white;
+  }
+
+  .tier-stale {
+    margin-bottom: 0.6rem;
+    font-size: 0.75rem;
+    color: oklch(0.48 0.2 25);
+  }
+
+  .tier-empty {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted, var(--color-text-muted));
+  }
+
+  .forecast {
+    margin: 0.5rem 0 0;
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .forecast-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .forecast-row dt {
+    color: var(--text-muted, var(--color-text-muted));
+    min-width: 7.5rem;
+  }
+
+  .forecast-row dd {
+    margin: 0;
+    font-family: var(--font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--text, var(--color-text));
+  }
+
+  .forecast-row dd.over {
+    color: oklch(0.48 0.2 25);
+  }
+
+  .forecast-note {
+    margin-left: 0.4rem;
+    font-family: inherit;
+    font-size: 0.6875rem;
+    color: var(--text-muted, var(--color-text-muted));
+  }
+
+  .forecast-unknown {
+    color: var(--text-muted, var(--color-text-muted));
+    font-style: normal;
   }
 </style>

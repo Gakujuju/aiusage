@@ -243,6 +243,16 @@ export async function fetchQuotas() {
   return apiFetch('/api/quotas')
 }
 
+/** @param {Record<string, string | undefined>} params */
+export async function fetchQuotaHistory(params = {}) {
+  return apiFetch(buildUrl('/api/quotas/history', params))
+}
+
+/** @param {Record<string, string | undefined>} params */
+export async function fetchQuotaForecast(params = {}) {
+  return apiFetch(buildUrl('/api/quotas/forecast', params))
+}
+
 export async function fetchAuthStatus() {
   return apiFetch('/api/auth/status')
 }

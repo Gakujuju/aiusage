@@ -1,12 +1,17 @@
 <script>
   import { dateRange, selectedDevice, selectedTool, formatCost } from '$lib/stores.js'
-  import { fetchCost } from '$lib/api.js'
+  import { fetchCost, fetchSummary } from '$lib/api.js'
+  import UnpricedWarning from '$lib/components/UnpricedWarning.svelte'
   import { t } from '$lib/i18n.js'
   import DateRangeSelector from '$lib/components/DateRangeSelector.svelte'
   import DeviceSelector from '$lib/components/DeviceSelector.svelte'
   import ToolSelector from '$lib/components/ToolSelector.svelte'
 
+  /** @type {any} */
   let data = null
+  /** @type {any} */
+  let summary = null
+  /** @type {any} */
   let error = null
   let loading = true
 
@@ -18,6 +23,10 @@
     error = null
     try {
       data = await fetchCost({ ...$dateRange, device: $selectedDevice, tool: $selectedTool })
+      // Secondary: the chart is the page, so a failure here leaves the
+      // warning off rather than taking the page down with it.
+      summary = await fetchSummary({ ...$dateRange, device: $selectedDevice, tool: $selectedTool })
+        .catch(() => null)
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load data'
       data = null
@@ -90,6 +99,11 @@
   <DeviceSelector />
   <ToolSelector />
 </div>
+
+<UnpricedWarning
+  unpricedRecords={summary?.unpricedRecords ?? 0}
+  unpricedModels={summary?.unpricedModels ?? []}
+/>
 
 {#if loading}
   <div class="state-msg">{$t('common.loading')}</div>

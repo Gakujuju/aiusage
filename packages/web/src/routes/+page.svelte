@@ -3,6 +3,7 @@
   import { tweened } from 'svelte/motion'
   import { cubicOut } from 'svelte/easing'
   import { fetchSummary, refreshData as triggerRefresh, fetchConfig, fetchQuotas, SETTINGS_UPDATED_EVENT } from '$lib/api.js'
+  import UnpricedWarning from '$lib/components/UnpricedWarning.svelte'
   import { t } from '$lib/i18n.js'
   import { formatCost, displayCurrency, exchangeRate } from '$lib/stores.js'
 
@@ -309,6 +310,11 @@
     {/each}
   </div>
 {/if}
+
+<UnpricedWarning
+  unpricedRecords={data?.unpricedRecords ?? 0}
+  unpricedModels={data?.unpricedModels ?? []}
+/>
 
 {#if loading}
   <div class="splash-loading">
