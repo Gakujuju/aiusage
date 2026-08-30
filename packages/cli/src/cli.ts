@@ -2,6 +2,7 @@ import { Command } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { runServeCommand, serve } from './commands/serve.js'
+import { runSetDashboardPassword, runDashboardPasswordStatus } from './commands/dashboard-password.js'
 import { runAgentEvent } from './commands/agent-event.js'
 import { runNotifyStatus, runNotifyTest } from './commands/notify.js'
 import { runInit } from './commands/init.js'
@@ -332,12 +333,28 @@ program
   .command('serve')
   .description('Start web dashboard')
   .option('-p, --port <port>', 'Port number', '3847')
-  .option('--host <host>', 'Interface to bind (default 127.0.0.1; AIUSAGE_HOST overrides)')
+  .option('--host <hosts>', 'Comma-separated interfaces to bind (default 127.0.0.1, which is always included; AIUSAGE_HOST overrides)')
   .action((options) => {
     runServeCommand(
       { port: parseInt(options.port), host: options.host },
       { dbPath: DB_PATH, createDatabase, serve },
     )
+  })
+
+// dashboard password
+program
+  .command('set-dashboard-password')
+  .description('Set the dashboard password (read from stdin, never argv)')
+  .action(async () => {
+    const result = await runSetDashboardPassword()
+    if (!result.saved) process.exitCode = 1
+  })
+
+program
+  .command('dashboard-password-status')
+  .description('Say whether a dashboard password is set (never prints it)')
+  .action(() => {
+    runDashboardPasswordStatus()
   })
 
 // notify-test command

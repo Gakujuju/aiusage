@@ -3,8 +3,10 @@ import {
   DEFAULT_SERVE_HOST,
   checkHostSafety,
   resolveServeHost,
+  resolveServeHosts,
   runServeCommand,
 } from '../../src/commands/serve.js'
+import { isLoopbackHost, shouldProtectApiPath } from '../../src/auth.js'
 
 describe('resolveServeHost', () => {
   it('defaults to loopback', () => {
@@ -12,10 +14,19 @@ describe('resolveServeHost', () => {
     expect(DEFAULT_SERVE_HOST).toBe('127.0.0.1')
   })
 
-  it('prefers --host over AIUSAGE_HOST over the default', () => {
-    expect(resolveServeHost('0.0.0.0', { AIUSAGE_HOST: '192.168.1.5' })).toBe('0.0.0.0')
-    expect(resolveServeHost(undefined, { AIUSAGE_HOST: '192.168.1.5' })).toBe('192.168.1.5')
-    expect(resolveServeHost('  10.0.0.4  ', {})).toBe('10.0.0.4')
+  it('reports loopback as the primary, whatever else was asked for', () => {
+    // The primary is the interface whose port-in-use retry settles the port,
+    // and that is always loopback now. The full list is resolveServeHosts.
+    expect(resolveServeHost('0.0.0.0', { AIUSAGE_HOST: '192.168.1.5' })).toBe('127.0.0.1')
+    expect(resolveServeHost(undefined, {})).toBe('127.0.0.1')
+  })
+
+  it('still lets --host win over AIUSAGE_HOST', () => {
+    expect(resolveServeHosts('0.0.0.0', { AIUSAGE_HOST: '192.168.1.5' }))
+      .toEqual(['127.0.0.1', '0.0.0.0'])
+    expect(resolveServeHosts(undefined, { AIUSAGE_HOST: '192.168.1.5' }))
+      .toEqual(['127.0.0.1', '192.168.1.5'])
+    expect(resolveServeHosts('  10.0.0.4  ', {})).toEqual(['127.0.0.1', '10.0.0.4'])
   })
 
   it('ignores blank values rather than binding to an empty host', () => {
@@ -124,7 +135,8 @@ describe('runServeCommand', () => {
     const d = deps({ AIUSAGE_HOST: '0.0.0.0', AIUSAGE_DASHBOARD_PASSWORD: 'secret' })
     runServeCommand({ port: 3847 }, d.value)
 
-    expect(d.served[0]?.host).toBe('0.0.0.0')
+    // The whole list is handed over, not just the primary.
+    expect(d.served[0]?.host).toBe('127.0.0.1,0.0.0.0')
   })
 
   it('still opens the database under the escape hatch', () => {
@@ -135,5 +147,94 @@ describe('runServeCommand', () => {
     // The warning belongs to serve(), which is what actually binds. Printing
     // it here too would double it up.
     expect(d.errors).toEqual([])
+  })
+})
+
+describe('resolveServeHosts', () => {
+  it('defaults to loopback alone', () => {
+    expect(resolveServeHosts(undefined, {})).toEqual(['127.0.0.1'])
+  })
+
+  it('splits a comma-separated list, ignoring spacing and empties', () => {
+    expect(resolveServeHosts('127.0.0.1, 100.82.102.59', {}))
+      .toEqual(['127.0.0.1', '100.82.102.59'])
+    expect(resolveServeHosts('  100.82.102.59 ,, ,0.0.0.0  ', {}))
+      .toEqual(['127.0.0.1', '100.82.102.59', '0.0.0.0'])
+  })
+
+  it('always listens on loopback, asked for or not', () => {
+    // agent-event posts to 127.0.0.1 and the widget connects to localhost.
+    // Binding only the Tailscale address makes both unreachable, and
+    // agent-event spools rather than erroring — so the whole hook pipeline
+    // would stop with nothing in any log to say why.
+    expect(resolveServeHosts('100.82.102.59', {})).toEqual(['127.0.0.1', '100.82.102.59'])
+    expect(resolveServeHosts('0.0.0.0', {})).toEqual(['127.0.0.1', '0.0.0.0'])
+  })
+
+  it('puts loopback first, so it decides the port', () => {
+    expect(resolveServeHosts('100.82.102.59,127.0.0.1', {})[0]).toBe('127.0.0.1')
+  })
+
+  it('does not list the same address twice', () => {
+    expect(resolveServeHosts('127.0.0.1,127.0.0.1,100.82.102.59', {}))
+      .toEqual(['127.0.0.1', '100.82.102.59'])
+  })
+
+  it('takes AIUSAGE_HOST when no flag is given, and the flag when both are', () => {
+    expect(resolveServeHosts(undefined, { AIUSAGE_HOST: '100.82.102.59' }))
+      .toEqual(['127.0.0.1', '100.82.102.59'])
+    expect(resolveServeHosts('10.0.0.4', { AIUSAGE_HOST: '100.82.102.59' }))
+      .toEqual(['127.0.0.1', '10.0.0.4'])
+  })
+
+  it('agrees with resolveServeHost on the primary interface', () => {
+    expect(resolveServeHost('100.82.102.59', {})).toBe('127.0.0.1')
+  })
+})
+
+describe('checkHostSafety over a list', () => {
+  it('asks for nothing when every listener is loopback', () => {
+    expect(checkHostSafety(['127.0.0.1'], {}))
+      .toEqual({ allowed: true, insecure: false, message: null })
+    expect(checkHostSafety(['127.0.0.1', 'localhost', '::1'], {}))
+      .toEqual({ allowed: true, insecure: false, message: null })
+  })
+
+  it('requires a password if even one listener is reachable', () => {
+    // The loopback listener beside it does not make the other one private.
+    const verdict = checkHostSafety(['127.0.0.1', '100.82.102.59'], {})
+    expect(verdict.allowed).toBe(false)
+    expect(verdict.message).toContain('100.82.102.59')
+    // The refusal names only the exposed one; 127.0.0.1 is not the problem.
+    expect(verdict.message).not.toContain('127.0.0.1')
+  })
+
+  it('names every exposed listener', () => {
+    const verdict = checkHostSafety(['127.0.0.1', '100.82.102.59', '10.0.0.4'], {})
+    expect(verdict.message).toContain('100.82.102.59')
+    expect(verdict.message).toContain('10.0.0.4')
+  })
+
+  it('is satisfied by a password', () => {
+    expect(checkHostSafety(['127.0.0.1', '100.82.102.59'], { AIUSAGE_DASHBOARD_PASSWORD: 'secret' }))
+      .toEqual({ allowed: true, insecure: false, message: null })
+  })
+
+  it('still accepts a single host, as the older callers pass it', () => {
+    expect(checkHostSafety('127.0.0.1', {}).allowed).toBe(true)
+    expect(checkHostSafety('0.0.0.0', {}).allowed).toBe(false)
+  })
+})
+
+describe('open endpoints follow the widest listener', () => {
+  it('keeps summary and quotas open only when every listener is loopback', () => {
+    const allLoopback = ['127.0.0.1', '::1'].every(isLoopbackHost)
+    expect(allLoopback).toBe(true)
+    expect(shouldProtectApiPath('/api/summary', allLoopback)).toBe(false)
+
+    const mixed = ['127.0.0.1', '100.82.102.59'].every(isLoopbackHost)
+    expect(mixed).toBe(false)
+    expect(shouldProtectApiPath('/api/summary', mixed)).toBe(true)
+    expect(shouldProtectApiPath('/api/quotas', mixed)).toBe(true)
   })
 })

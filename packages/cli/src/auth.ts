@@ -1,12 +1,24 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import type http from 'node:http'
+import { loadCredential, DASHBOARD_PASSWORD_CREDENTIAL } from './config.js'
 
 export const AUTH_COOKIE_NAME = 'aiusage_dashboard_auth'
 const AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
+/**
+ * The dashboard password, from the environment or from config.
+ *
+ * The environment variable came first and still wins, but it is awkward as
+ * the only source: serve is started by hand on this machine, and a password
+ * that has to be exported before every launch is one that will be forgotten
+ * exactly when the bind is not loopback. config.credentials is the same
+ * 0600 file the webhook already lives in.
+ */
 export function getDashboardPassword(): string | null {
-  const password = process.env.AIUSAGE_DASHBOARD_PASSWORD?.trim()
-  return password ? password : null
+  const fromEnv = process.env.AIUSAGE_DASHBOARD_PASSWORD?.trim()
+  if (fromEnv) return fromEnv
+  const stored = loadCredential(DASHBOARD_PASSWORD_CREDENTIAL)?.trim()
+  return stored ? stored : null
 }
 
 export function verifyPassword(configuredPassword: string | null | undefined, submittedPassword: string | null | undefined): boolean {

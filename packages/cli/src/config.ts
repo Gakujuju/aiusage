@@ -146,6 +146,15 @@ export interface NotificationConfig {
 /** Credential key holding the Discord webhook. Never stored in `notifications`. */
 export const DISCORD_WEBHOOK_CREDENTIAL = 'discordWebhook'
 
+/**
+ * Credential key holding the dashboard password.
+ *
+ * Stored beside the webhook rather than in the plain config section, so it
+ * inherits the same 0600 file and the same rule about never being returned
+ * by the API. The environment variable still wins when both are set.
+ */
+export const DASHBOARD_PASSWORD_CREDENTIAL = 'dashboardPassword'
+
 export function loadConfig(): Config | null {
   if (!existsSync(CONFIG_PATH)) return null
   try {

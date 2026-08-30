@@ -192,6 +192,37 @@ CLI の既定動作を走らせるのと同じで、AIUSAGE_HOME を設定して
   [migration] applying vN to <path>
 を出すので、誤って本番を開いた場合はその場で気づける。
 
+## Tailscale 経由でスマホから見る
+
+端末:
+  desktop-qos4c85   100.82.102.59   Windows 11
+  nothing-phone-3a  100.101.3.31    Android 16
+
+手順:
+
+1. パスワードを設定する（未設定なら serve が起動を拒否する）
+     aiusage set-dashboard-password
+   値は stdin から読むのでシェル履歴に残らない。
+   設定済みかどうかは `aiusage dashboard-password-status` で分かる。
+   値は表示しない。
+
+2. 両方のアドレスで起動する
+     aiusage serve --host 127.0.0.1,100.82.102.59
+   127.0.0.1 は書かなくても必ず listen するが、書いておくと意図が読める。
+
+3. スマホのブラウザで http://100.82.102.59:3847 を開き、ログインする
+   cookie はホスト単位なので、PC で入れたログインは引き継がれない。
+   スマホ側で1回ログインする。
+
+同じ Wi-Fi の他の機器からは見えない。listen しているのは loopback と
+Tailscale のアドレスだけで、LAN の IP にはバインドしていない。
+
+Tailscale が落ちているとき:
+  100.82.102.59 の listen が EADDRNOTAVAIL で失敗し、warn が1行出る。
+  serve は 127.0.0.1 で動き続け、hook も通知も止まらない。
+  ただしパスワードは要求されたままになる（要求した時点で公開の意図が
+  あったと読むため）。ローカルだけで使う日は --host を外して起動する。
+
 ## ユーザー環境
 
 - `~/.claude/settings.json` は自動で書き換えない。

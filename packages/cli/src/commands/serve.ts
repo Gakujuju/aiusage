@@ -10,7 +10,7 @@ import { cleanOldData } from './clean.js'
 import { uploadLeaderboardData } from './leaderboard-upload.js'
 import { ensureAiusageDir, getState } from '../init.js'
 import { AIUSAGE_DIR, loadConfig, saveConfig } from '../config.js'
-import { isLoopbackHost } from '../auth.js'
+import { getDashboardPassword, isLoopbackHost } from '../auth.js'
 import { SyncRuntimeController } from '../sync/runtime.js'
 import { getSyncTarget } from '../sync/target.js'
 import { RuntimeSettingsController } from '../runtime/settings-controller.js'
@@ -37,16 +37,39 @@ export interface ServeOptions {
 
 export const DEFAULT_SERVE_HOST = '127.0.0.1'
 
-/** Priority: --host, then AIUSAGE_HOST, then loopback. */
+/**
+ * Interfaces to listen on. Priority: --host, then AIUSAGE_HOST, then loopback.
+ *
+ * A comma-separated list, because reaching the dashboard from a phone over
+ * Tailscale means binding that interface *as well as* loopback — not instead
+ * of it. agent-event reads .serve-port and posts to 127.0.0.1, and the widget
+ * connects to localhost; binding only the Tailscale address makes both
+ * unreachable, and agent-event spools what it cannot send, so the failure is
+ * silent. Hence 127.0.0.1 is always in the list whether it was asked for or
+ * not.
+ */
+export function resolveServeHosts(
+  hostOption?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const raw = hostOption?.trim() || env.AIUSAGE_HOST?.trim() || DEFAULT_SERVE_HOST
+  const requested = raw
+    .split(',')
+    .map((host) => host.trim())
+    .filter((host) => host !== '')
+
+  // Loopback first: it is the one that must work, so it is the one whose
+  // port-in-use retry decides the port for everybody else.
+  const hosts = [DEFAULT_SERVE_HOST, ...requested.filter((h) => h !== DEFAULT_SERVE_HOST)]
+  return [...new Set(hosts)]
+}
+
+/** Kept for callers that only care about the primary interface. */
 export function resolveServeHost(
   hostOption?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const explicit = hostOption?.trim()
-  if (explicit) return explicit
-  const fromEnv = env.AIUSAGE_HOST?.trim()
-  if (fromEnv) return fromEnv
-  return DEFAULT_SERVE_HOST
+  return resolveServeHosts(hostOption, env)[0]
 }
 
 export interface HostSafetyVerdict {
@@ -66,12 +89,19 @@ export interface HostSafetyVerdict {
  * default bind is local and anything wider has to say so.
  */
 export function checkHostSafety(
-  host: string,
+  host: string | readonly string[],
   env: NodeJS.ProcessEnv = process.env,
 ): HostSafetyVerdict {
-  if (isLoopbackHost(host)) return { allowed: true, insecure: false, message: null }
+  const hosts = typeof host === 'string' ? [host] : [...host]
+  // One reachable interface is enough to require a password; the loopback
+  // listener sitting beside it does not make the other one private.
+  const exposed = hosts.filter((h) => !isLoopbackHost(h))
+  if (exposed.length === 0) return { allowed: true, insecure: false, message: null }
+  const named = exposed.join(', ')
 
-  if (env.AIUSAGE_DASHBOARD_PASSWORD) {
+  // The injected env first, so a test can describe a machine other than
+  // this one; then the stored credential, which has no env to inject.
+  if (env.AIUSAGE_DASHBOARD_PASSWORD?.trim() || getDashboardPassword()) {
     return { allowed: true, insecure: false, message: null }
   }
 
@@ -82,7 +112,7 @@ export function checkHostSafety(
       allowed: true,
       insecure: true,
       message:
-        `aiusage serve: listening on ${host} without a password ` +
+        `aiusage serve: listening on ${named} without a password ` +
         '(AIUSAGE_ALLOW_INSECURE_HOST=1). Anyone who can reach this port can ' +
         'read your usage data, costs and project names.',
     }
@@ -92,9 +122,11 @@ export function checkHostSafety(
     allowed: false,
     insecure: true,
     message:
-      `aiusage serve: refusing to listen on ${host} without a password.\n` +
+      `aiusage serve: refusing to listen on ${named} without a password.\n` +
       'This exposes your usage data, costs and project names to your network.\n' +
-      'Set AIUSAGE_DASHBOARD_PASSWORD, or use the default local-only bind,\n' +
+      'Set a password (aiusage set-dashboard-password, or the\n' +
+      'AIUSAGE_DASHBOARD_PASSWORD environment variable), use the default\n' +
+      'local-only bind,\n' +
       'or set AIUSAGE_ALLOW_INSECURE_HOST=1 if this host is already\n' +
       'protected by something else (a reverse proxy, a private network).',
   }
@@ -124,8 +156,8 @@ export function runServeCommand(
   options: { port: number; host?: string },
   deps: ServeCommandDeps,
 ): void {
-  const host = resolveServeHost(options.host, deps.env)
-  const safety = checkHostSafety(host, deps.env)
+  const hosts = resolveServeHosts(options.host, deps.env)
+  const safety = checkHostSafety(hosts, deps.env)
   if (!safety.allowed) {
     // The same message serve() would print. Kept in checkHostSafety rather
     // than written out at each call site so the two cannot drift.
@@ -135,7 +167,9 @@ export function runServeCommand(
   }
 
   const db = deps.createDatabase(deps.dbPath)
-  deps.serve({ port: options.port, host, db })
+  // Passed as a list, not just the primary: resolving again inside serve()
+  // is idempotent, and handing over one address would drop the rest.
+  deps.serve({ port: options.port, host: hosts.join(','), db })
 }
 
 /**
@@ -178,9 +212,12 @@ export function serve(options: ServeOptions): void {
   // is exported and gets called directly by tests and by anything embedding
   // it, and it has to be safe on its own. resolveServeHost is idempotent, so
   // running it again over an already-resolved host is a no-op.
-  const host = resolveServeHost(options.host)
-  const isLoopback = isLoopbackHost(host)
-  const hostSafety = checkHostSafety(host)
+  const hosts = resolveServeHosts(options.host)
+  // Every listener has to be loopback for the two open endpoints to stay
+  // open: one reachable interface makes /api/summary and /api/quotas the
+  // whole payload rather than a convenience.
+  const isLoopback = hosts.every(isLoopbackHost)
+  const hostSafety = checkHostSafety(hosts)
   if (!hostSafety.allowed) {
     console.error(hostSafety.message)
     process.exit(1)
@@ -458,7 +495,11 @@ export function serve(options: ServeOptions): void {
     process.exit(1)
   }
 
-  const server = http.createServer(async (req, res) => {
+  /**
+   * One handler, several listeners. Everything behind it — the database, the
+   * write queue, the pollers — stays single; only the sockets differ.
+   */
+  const handleRequest: http.RequestListener = async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
 
     // API routes go to API server
@@ -497,14 +538,45 @@ export function serve(options: ServeOptions): void {
     // No web build available
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Web dashboard not found. Reinstall the package: npm install -g @juliantanx/aiusage' } }))
-  })
+  }
+
+  const server = http.createServer(handleRequest)
+  /** Listeners beyond loopback, so shutdown can close them too. */
+  const extraServers: http.Server[] = []
 
   let currentPort = options.port
   let started = false
 
+  const scopeLabel = isLoopback
+    ? 'local only'
+    : (hostSafety.insecure ? 'network, NO PASSWORD — insecure' : 'network, password required')
+
+  /**
+   * Bind the remaining interfaces on the port loopback settled on.
+   *
+   * A failure here is reported and stepped over. The usual cause is an
+   * address that is not up yet — Tailscale not running, most likely — and
+   * losing the hook pipeline and the notifier because a VPN is down would
+   * cost far more than the dashboard being unreachable from a phone.
+   */
+  const listenSecondary = (host: string): void => {
+    const extra = http.createServer(handleRequest)
+    extra.on('error', (error: NodeJS.ErrnoException) => {
+      console.warn(
+        `[serve] could not listen on ${host}:${currentPort} (${error.code ?? error.message}); ` +
+        'the other addresses are unaffected'
+      )
+    })
+    extra.on('listening', () => {
+      console.log(`aiusage serve also listening on http://${host}:${currentPort} (${scopeLabel})`)
+    })
+    extraServers.push(extra)
+    extra.listen(currentPort, host)
+  }
+
   const listenOnPort = (port: number): void => {
     currentPort = port
-    server.listen(port, host)
+    server.listen(port, DEFAULT_SERVE_HOST)
   }
 
   server.on('listening', () => {
@@ -512,10 +584,9 @@ export function serve(options: ServeOptions): void {
     writeFileSync(PORT_FILE, String(currentPort), 'utf-8')
     // Say what was actually bound and whether it is protected. "listening on
     // localhost" was true of the URL and false of the bind.
-    const scope = isLoopback
-      ? 'local only'
-      : (hostSafety.insecure ? 'network, NO PASSWORD — insecure' : 'network, password required')
-    console.log(`aiusage serve listening on http://${host}:${currentPort} (${scope})`)
+    console.log(`aiusage serve listening on http://${DEFAULT_SERVE_HOST}:${currentPort} (${scopeLabel})`)
+    // Only now: the port is settled, so every interface gets the same one.
+    for (const host of hosts.filter((h) => h !== DEFAULT_SERVE_HOST)) listenSecondary(host)
   })
 
   server.on('error', (error: NodeJS.ErrnoException) => {
@@ -549,6 +620,7 @@ export function serve(options: ServeOptions): void {
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
     notificationSender.stop()
+    for (const extra of extraServers) extra.close()
     server.close(() => {
       process.exit(0)
     })
@@ -560,6 +632,7 @@ export function serve(options: ServeOptions): void {
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
     notificationSender.stop()
+    for (const extra of extraServers) extra.close()
     server.close(() => {
       process.exit(0)
     })

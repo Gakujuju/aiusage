@@ -5,7 +5,8 @@ import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
 import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
-import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
+import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL,
+  DASHBOARD_PASSWORD_CREDENTIAL, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent, getIngestToken } from '../init.js'
 import { generateConsentFingerprint } from '../sync/consent.js'
@@ -757,7 +758,22 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       return
     }
 
-    if (dashboardPassword && shouldProtectApiPath(url.pathname, options?.isLoopbackBind !== false) && !isAuthenticated(dashboardPassword, req.headers.cookie)) {
+    // The ingest token stands in for the dashboard password. Hooks run as
+    // separate processes with no cookie jar, so once a password was set every
+    // agent-event POST answered 401 — and because agent-event spools what it
+    // cannot send, that failed silently: no error anywhere, events piling up,
+    // notifications simply stopping.
+    //
+    // The substitution goes one way only. A dashboard cookie does not satisfy
+    // the ingest check further down; the token is still required there. One
+    // says "you may read this dashboard", the other "you are this machine's
+    // hook", and only the second is enough to write events.
+    if (
+      dashboardPassword
+      && !hasValidIngestToken(req)
+      && shouldProtectApiPath(url.pathname, options?.isLoopbackBind !== false)
+      && !isAuthenticated(dashboardPassword, req.headers.cookie)
+    ) {
       json(res, { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }, 401)
       return
     }
@@ -2378,6 +2394,9 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             notifications: rest.notifications ?? null,
             // Whether a webhook exists, never what it is.
             notificationWebhookConfigured: loadCredential(DISCORD_WEBHOOK_CREDENTIAL) != null,
+            // Same shape as the webhook above: the name may appear in
+            // credentialKeys, the value never leaves the machine.
+            dashboardPasswordConfigured: loadCredential(DASHBOARD_PASSWORD_CREDENTIAL) != null,
             hostname: hostname(),
             platform: osPlatform,
           })
