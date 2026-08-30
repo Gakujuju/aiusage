@@ -14,7 +14,7 @@
   export let points = []
   /** @type {number | null} */
   export let resetsAt = null
-  export let color = 'var(--color-accent, oklch(0.55 0.12 175))'
+  export let color = 'var(--accent)'
   export let ariaLabel = ''
 
   // viewBox space. Not pixels: the element is width:100% and scales.
@@ -137,7 +137,7 @@
   .axis {
     fill: var(--color-text-muted);
     font-size: 10px;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
   }
 
   .reset-label {

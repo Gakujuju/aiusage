@@ -44,9 +44,9 @@
     align-items: flex-start;
     /* The error hue at low opacity, as DESIGN.md prescribes for badges. Loud
        enough to stop the eye, quiet enough not to look like a failure. */
-    background: oklch(0.58 0.2 25 / 0.08);
-    color: oklch(0.42 0.15 25);
-    border-radius: 8px;
+    background: var(--danger-soft-bg);
+    color: var(--danger-soft-fg);
+    border-radius: var(--radius-card);
     padding: 0.6rem 0.75rem;
     margin-bottom: 1rem;
     font-size: 0.8125rem;

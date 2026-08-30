@@ -425,7 +425,7 @@
     margin-bottom: 1.25rem;
     padding: 0.5rem 0.75rem;
     background: var(--raised);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
   }
 
   .live-indicator {
@@ -433,7 +433,7 @@
     align-items: center;
     gap: 0.375rem;
     padding: 0.125rem 0.5rem;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     background: var(--green-dim);
     flex-shrink: 0;
   }
@@ -459,7 +459,7 @@
     text-transform: uppercase;
     color: var(--accent);
     background: var(--accent-dim);
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     padding: 0.125rem 0.5rem;
   }
 
@@ -491,8 +491,8 @@
     justify-content: center;
     width: 28px;
     height: 28px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -510,7 +510,7 @@
     padding: 2.5rem 2rem 1.5rem;
     margin-bottom: 1rem;
     background: var(--surface);
-    border-radius: 12px;
+    border-radius: var(--radius-panel);
   }
 
   .counter-label {
@@ -597,8 +597,8 @@
   .now-btn {
     margin-left: auto;
     padding: 0.125rem 0.5rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-badge);
     background: transparent;
     font-family: var(--mono);
     font-size: 0.75rem;
@@ -613,7 +613,7 @@
   .stats-strip {
     display: flex;
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     margin-bottom: 1rem;
     overflow: hidden;
   }
@@ -626,7 +626,7 @@
     transition: background 0.1s;
   }
   .stat-block:not(:last-child) {
-    border-right: 1px solid var(--border-subtle);
+    border-right: var(--border-width) solid var(--border-subtle);
   }
   .stat-block:hover { background: var(--raised); }
   .stat-label {
@@ -653,7 +653,7 @@
   .comp-bar {
     display: flex;
     height: 24px;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     overflow: hidden;
     background: var(--raised);
   }
@@ -725,7 +725,7 @@
     transform: translate(-50%, -50%);
     width: min(400px, 90vw);
     background: var(--surface);
-    border-radius: 12px;
+    border-radius: var(--radius-panel);
     padding: 1.25rem;
     box-shadow: var(--shadow-lg);
   }
@@ -750,8 +750,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-badge);
     background: transparent;
     color: var(--text-muted);
     font-size: 0.75rem;
@@ -773,7 +773,7 @@
   .cfg-pills { display: flex; gap: 0.25rem; flex-wrap: wrap; }
   .pill {
     padding: 0.25rem 0.625rem;
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
     border-radius: 5px;
     background: transparent;
     font-family: var(--mono);
@@ -791,7 +791,7 @@
   .cfg-refresh-info {
     margin-top: 0.5rem;
     padding: 0.5rem 0.625rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--raised);
   }
   .refresh-info-text {
@@ -821,23 +821,20 @@
     padding: 0.5rem 0.875rem;
     border-radius: 7px;
     font-size: 0.8rem;
-    border: 1px solid transparent;
+    border: var(--border-width) solid transparent;
   }
 
+  /* Its dark variant lives in --notice-* now, so this is one rule instead of
+     two and a theme has a single place to reach. */
   .quota-orange {
-    background: oklch(0.97 0.03 60);
-    border-color: oklch(0.87 0.08 60);
-    color: oklch(0.45 0.14 55);
-  }
-  :global(:root[data-theme="dark"]) .quota-orange {
-    background: oklch(0.2 0.04 55);
-    border-color: oklch(0.35 0.1 55);
-    color: oklch(0.78 0.14 60);
+    background: var(--notice-bg);
+    border-color: var(--notice-border);
+    color: var(--notice-fg);
   }
 
   .quota-red {
     background: var(--rose-dim);
-    border-color: oklch(0.7 0.12 25);
+    border-color: var(--danger-border);
     color: var(--rose);
   }
 
@@ -884,8 +881,8 @@
   .retry-btn {
     margin-top: 0.25rem;
     padding: 0.375rem 1rem;
-    border: 1px solid var(--rose);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--rose);
+    border-radius: var(--radius-input);
     background: transparent;
     font-family: var(--mono);
     font-size: 0.75rem;
@@ -908,7 +905,7 @@
     .counter-section { padding: 2rem 1rem 1.25rem; }
     .counter-sub { gap: 1rem; }
     .stats-strip { flex-direction: column; }
-    .stat-block:not(:last-child) { border-right: none; border-bottom: 1px solid var(--border-subtle); }
+    .stat-block:not(:last-child) { border-right: none; border-bottom: var(--border-width) solid var(--border-subtle); }
     .top-bar {
       display: grid;
       grid-template-columns: auto auto 1fr auto;

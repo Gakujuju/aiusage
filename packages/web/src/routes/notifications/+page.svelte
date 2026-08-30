@@ -218,8 +218,8 @@
     padding: 0.4rem 0.875rem;
     background: var(--accent-dim);
     color: var(--accent);
-    border: 1px solid transparent;
-    border-radius: 6px;
+    border: var(--border-width) solid transparent;
+    border-radius: var(--radius-input);
     font-size: 0.8125rem;
     cursor: pointer;
     white-space: nowrap;
@@ -240,7 +240,7 @@
   }
 
   .count-n {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
   }
@@ -275,11 +275,11 @@
 
   /* Two weights of the same error hue, as elsewhere: failed is the state to
      act on, dropped is one nothing can be done about. */
-  .state-failed { color: oklch(0.48 0.2 25); }
+  .state-failed { color: var(--danger-fg); }
   .state-dropped { color: var(--text-muted, var(--color-text-muted)); }
-  .state-sent { color: oklch(0.5 0.17 155); }
+  .state-sent { color: var(--success-fg); }
   .state-pending,
-  .state-sending { color: oklch(0.45 0.14 250); }
+  .state-sending { color: var(--info-fg); }
 
   .notif-title {
     margin-top: 0.25rem;
@@ -291,7 +291,7 @@
     padding: 0;
     background: none;
     border: none;
-    color: var(--accent, oklch(0.55 0.12 175));
+    color: var(--accent);
     font-size: 0.75rem;
     cursor: pointer;
   }
@@ -300,9 +300,9 @@
     margin: 0.35rem 0 0;
     padding: 0.5rem 0.6rem;
     background: var(--raised, var(--color-raised));
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     font-size: 0.75rem;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -310,7 +310,7 @@
   .notif-error {
     margin-top: 0.35rem;
     font-size: 0.75rem;
-    color: oklch(0.48 0.2 25);
+    color: var(--danger-fg);
     word-break: break-word;
   }
 

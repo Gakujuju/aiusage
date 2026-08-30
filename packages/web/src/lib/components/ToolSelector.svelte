@@ -60,8 +60,8 @@
     align-items: center;
     gap: 0.3rem;
     padding: 0.25rem 0.5rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: transparent;
     color: var(--text-secondary);
     font-family: var(--mono);

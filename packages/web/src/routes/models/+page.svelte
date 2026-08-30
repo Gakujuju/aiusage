@@ -189,7 +189,7 @@
     display: flex;
     gap: 2px;
     background: var(--raised);
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     padding: 2px;
   }
   .mode-btn {
@@ -199,7 +199,7 @@
     letter-spacing: 0.04em;
     padding: 0.22rem 0.65rem;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -227,7 +227,7 @@
   .leg-o        { color: var(--chart-output); }
   .leg-cr       { color: var(--chart-cache-read); }
   .leg-cw       { color: var(--chart-cache-write); }
-  .leg-thinking { color: var(--chart-thinking, #dc2626); }
+  .leg-thinking { color: var(--chart-thinking); }
 
   /* ── Model rows ── */
   .model-list {
@@ -240,7 +240,7 @@
     gap: 1rem 1.5rem;
     align-items: center;
     padding: 0.65rem 0;
-    border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+    border-bottom: var(--border-width) solid var(--row-divider);
   }
   .model-row:last-child { border-bottom: none; }
 
@@ -276,7 +276,7 @@
     display: flex;
     height: 8px;
     background: var(--raised);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     overflow: hidden;
     min-width: 0;
   }
@@ -308,7 +308,7 @@
   .seg-output   { background: var(--chart-output); }
   .seg-cr       { background: var(--chart-cache-read); }
   .seg-cw       { background: var(--chart-cache-write); }
-  .seg-thinking { background: var(--chart-thinking, #dc2626); }
+  .seg-thinking { background: var(--chart-thinking); }
 
   /* ── Stats ── */
   .model-stats {

@@ -32,7 +32,14 @@
   let navSaved = false
   let navError = ''
 
-  /** Nav labels already exist for the sidebar; this reuses them. */
+  /**
+   * Nav labels already exist for the sidebar; this reuses them.
+   *
+   * Typed as a record because the routes come from the server as plain
+   * strings — without it, indexing is an implicit any.
+   *
+   * @type {Record<string, string>}
+   */
   const ROUTE_LABEL_KEYS = {
     '/overview': 'nav.overview',
     '/tokens': 'nav.tokens',
@@ -1393,7 +1400,7 @@
 
   .card {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 1.25rem;
   }
   .sync-card { order: -1; }
@@ -1424,7 +1431,7 @@
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.15rem 0.45rem;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     background: var(--accent-dim);
     color: var(--accent);
     letter-spacing: 0.04em;
@@ -1439,7 +1446,7 @@
   .source-group + .source-group {
     margin-top: 1rem;
     padding-top: 0.875rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
 
   .source-subtitle {
@@ -1476,17 +1483,17 @@
     font-size: 0.75rem;
     background: var(--raised);
     padding: 0.05rem 0.3rem;
-    border-radius: 3px;
-    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xs);
+    border: var(--border-width) solid var(--border-subtle);
     color: var(--text-secondary);
   }
 
   .field-input {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.85rem;
     padding: 0 0.65rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--raised);
     color: var(--text);
     transition: border-color 0.15s;
@@ -1513,7 +1520,7 @@
     justify-content: flex-end;
     margin-top: 0.75rem;
     padding-top: 0.625rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
 
   .btn-save {
@@ -1521,8 +1528,8 @@
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.375rem 1rem;
-    border: 1px solid var(--accent);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--accent);
+    border-radius: var(--radius-input);
     background: var(--accent);
     color: var(--surface);
     cursor: pointer;
@@ -1542,7 +1549,7 @@
   .sync-status-section {
     margin-top: 1rem;
     padding-top: 0.75rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
   .sync-status-section .group-title {
     margin-bottom: 0.5rem;
@@ -1589,10 +1596,10 @@
   .sync-unsaved-warn {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--amber, #f59e0b);
-    background: color-mix(in oklab, var(--amber, #f59e0b) 10%, transparent);
-    border: 1px solid color-mix(in oklab, var(--amber, #f59e0b) 25%, transparent);
-    border-radius: 6px;
+    color: var(--amber);
+    background: color-mix(in oklab, var(--amber) 10%, transparent);
+    border: var(--border-width) solid color-mix(in oklab, var(--amber) 25%, transparent);
+    border-radius: var(--radius-input);
     padding: 0.375rem 0.625rem;
   }
   .btn-sync {
@@ -1600,8 +1607,8 @@
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.375rem 1rem;
-    border: 1px solid var(--border-medium);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-medium);
+    border-radius: var(--radius-input);
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
@@ -1644,8 +1651,8 @@
     position: relative;
     width: 34px;
     height: 20px;
-    border: 1px solid var(--border-medium);
-    border-radius: 999px;
+    border: var(--border-width) solid var(--border-medium);
+    border-radius: var(--radius-pill);
     background: var(--raised);
     transition: background 160ms ease, border-color 160ms ease;
     flex-shrink: 0;
@@ -1669,7 +1676,7 @@
   }
 
   .toggle-row input:checked + .switch::after {
-    background: oklch(0.99 0.002 175);
+    background: var(--on-accent);
     transform: translateX(14px);
   }
 
@@ -1698,8 +1705,8 @@
   .interval-control select {
     min-height: 32px;
     padding: 0 1.875rem 0 0.625rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--surface);
     color: var(--text-secondary);
     font: inherit;
@@ -1711,8 +1718,8 @@
 
   .cloud-setup {
     background: var(--raised);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-card);
     padding: 0.875rem 1rem;
     margin-bottom: 0.75rem;
   }
@@ -1805,7 +1812,7 @@
     font-weight: 600;
     padding: 0.375rem 0.75rem;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
@@ -1843,9 +1850,9 @@
 
   .detected-tool {
     padding: 0.5rem 0.625rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--raised);
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
   }
 
   .detected-tool-header {
@@ -1861,7 +1868,7 @@
     flex-shrink: 0;
   }
   .status-dot.green { background: var(--green); }
-  .status-dot.yellow { background: var(--amber, #f59e0b); }
+  .status-dot.yellow { background: var(--amber); }
   .status-dot.gray { background: var(--text-muted); opacity: 0.4; }
 
   .detected-tool-name {
@@ -1976,7 +1983,7 @@
   }
 
   .webhook-state {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-size: 0.8125rem;
     margin-bottom: 0.15rem;
   }
@@ -1995,12 +2002,12 @@
 
   /* Sending response text off the machine deserves more than the usual grey. */
   .warn-hint {
-    color: oklch(0.48 0.2 25);
+    color: var(--danger-fg);
   }
 
   .history-link {
     font-size: 0.8125rem;
-    color: var(--accent, oklch(0.55 0.12 175));
+    color: var(--accent);
     text-decoration: none;
     margin-right: auto;
   }

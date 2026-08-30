@@ -85,7 +85,7 @@
     gap: 0.75rem;
     padding: 0.65rem 0.85rem;
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     transition: background 0.15s;
   }
   .row:hover {
@@ -117,13 +117,13 @@
   .bar-container {
     height: 6px;
     background: var(--raised);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
   .bar {
     height: 100%;
     background: var(--accent);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     transition: width 0.6s ease;
   }
   .tokens {

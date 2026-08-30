@@ -138,10 +138,10 @@
   }
   button {
     padding: 0.4rem 0.75rem;
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
     background: transparent;
     color: var(--text-secondary);
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     cursor: pointer;
     font-size: 0.78rem;
     font-weight: 500;
@@ -169,8 +169,8 @@
   }
   .month-select {
     padding: 0.38rem 0.6rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     font-family: var(--mono);
     font-size: 0.78rem;
     background: var(--raised);
@@ -207,8 +207,8 @@
   }
   input {
     padding: 0.38rem 0.55rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     font-size: 0.78rem;
     font-family: var(--mono);
     background: var(--raised);

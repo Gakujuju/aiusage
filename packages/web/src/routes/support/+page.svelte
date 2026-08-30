@@ -91,7 +91,7 @@
 
   .support-section {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 1.25rem;
   }
 
@@ -112,7 +112,7 @@
     padding: 0.75rem;
     margin-bottom: 0.25rem;
     background: var(--raised);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
   }
 
   .qr-trigger {
@@ -121,7 +121,7 @@
     border: none;
     background: none;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     transition: opacity 0.15s;
   }
 
@@ -135,7 +135,7 @@
     height: 180px;
     object-fit: contain;
     background: var(--surface);
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
   }
 
   .wechat-block h3 {
@@ -157,7 +157,7 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.625rem 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     text-decoration: none;
     color: var(--text);
     transition: background 0.12s;
@@ -198,19 +198,19 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: oklch(0 0 0 / 0.35);
+    background: var(--overlay-strong);
   }
 
   .qr-card {
     position: relative;
     background: var(--surface);
-    border-radius: 12px;
+    border-radius: var(--radius-panel);
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 0.75rem;
-    box-shadow: 0 4px 8px oklch(0 0 0 / 0.06), 0 12px 32px oklch(0 0 0 / 0.04);
+    box-shadow: var(--shadow-modal);
   }
 
   .qr-card img {
@@ -218,7 +218,7 @@
     width: 280px;
     height: 280px;
     object-fit: contain;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
   }
 
   .qr-card-hint {

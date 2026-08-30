@@ -446,7 +446,7 @@
     font-size: 18px;
   }
   :global(body) {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: var(--font-sans);
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -501,6 +501,83 @@
     --chart-cache-write: oklch(0.65 0.12 310);
     --chart-thinking:   oklch(0.62 0.18 20);
     --chart-total:      oklch(0.55 0.12 175);
+
+    /*
+     * ── Shape and type ──────────────────────────────────────────────────
+     * Named for what they are on, not what they measure, so a theme that
+     * wants square corners sets four values instead of hunting fourteen
+     * literals through the pages.
+     */
+    --font-sans:        'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    /*
+     * Eight places ask for var(--font-mono), and --font-mono has
+     * never existed — so those eight render in the platform's default
+     * monospace rather than Geist Mono. Defined here at the value that is
+     * actually being drawn, which keeps the screen identical and puts the
+     * mistake somewhere a theme can see it. Pointing them at --mono would be
+     * a visible change and is proposed separately.
+     */
+    --font-mono:        monospace;
+    --radius-xs:        3px;
+    --radius-badge:     4px;
+    --radius-input:     6px;
+    --radius-card:      8px;
+    --radius-panel:     12px;
+    --radius-pill:      999px;
+    --border-width:     1px;
+    /* Text drawn on top of an accent fill. */
+    --on-accent:        oklch(0.99 0.002 175);
+
+    /*
+     * ── Status colours ──────────────────────────────────────────────────
+     * These lived as literals in twelve page stylesheets, which is why a
+     * new theme would have left every warning and error looking like the
+     * old one. Each distinct rendered value gets its own name: two roles
+     * that happen to share a colour today still need to be able to differ
+     * in a theme that treats them differently.
+     *
+     * Where a page carried its own dark variant it is repeated in the dark
+     * block below; where it did not, the light value stands in both — which
+     * is what those pages already did.
+     */
+    --warn-solid:       oklch(0.7 0.15 60);
+    --warn-bg:          oklch(0.96 0.02 80);
+    --warn-fg:          oklch(0.5 0.14 60);
+    --notice-bg:        oklch(0.97 0.03 60);
+    --notice-border:    oklch(0.87 0.08 60);
+    --notice-fg:        oklch(0.45 0.14 55);
+    --danger-fg:        oklch(0.48 0.2 25);
+    --danger-bg:        oklch(0.58 0.2 25 / 0.12);
+    --danger-solid:     oklch(0.58 0.2 25);
+    --danger-border:    oklch(0.7 0.12 25);
+    --danger-soft-bg:   oklch(0.58 0.2 25 / 0.08);
+    --danger-soft-fg:   oklch(0.42 0.15 25);
+    /* The one status colour written as sRGB rather than OKLCH. Left at its
+       rendered value; converting it would be a visible change. */
+    --danger-plain:     #f87171;
+    --info-bg:          oklch(0.55 0.14 250 / 0.12);
+    --info-fg:          oklch(0.45 0.14 250);
+    --info-solid:       oklch(0.55 0.14 250);
+    --success-fg:       oklch(0.5 0.17 155);
+    /*
+     * Referenced as var(--amber, #f59e0b) in three places while --amber did
+     * not exist, so the fallback was what rendered. Defining it changes
+     * nothing on screen and makes it reachable from a theme.
+     */
+    --amber:            #f59e0b;
+    /*
+     * Likewise var(--border, rgba(255,255,255,0.06)) on the model table: the
+     * name it asked for has never existed, and this translucent white is
+     * what has always been drawn — barely visible on the light theme. Kept
+     * as-is; pointing it at --border-subtle would be a visible change and
+     * belongs in its own decision.
+     */
+    --row-divider:      rgba(255, 255, 255, 0.06);
+
+    /* Two shadows that were written out by hand rather than reused. */
+    --shadow-dropdown:  0 1px 3px oklch(0 0 0 / 0.08), 0 4px 12px oklch(0 0 0 / 0.04);
+    --shadow-modal:     0 4px 8px oklch(0 0 0 / 0.06), 0 12px 32px oklch(0 0 0 / 0.04);
+    --overlay-strong:   oklch(0 0 0 / 0.35);
   }
 
   /* ── Dark theme ───────────────────────────────────────────────────────── */
@@ -542,6 +619,19 @@
     --chart-cache-write: oklch(0.74 0.11 310);
     --chart-thinking:   oklch(0.73 0.17 20);
     --chart-total:      oklch(0.72 0.12 175);
+
+    /*
+     * Only the two blocks that had a dark variant of their own. Everything
+     * else in the status set inherits the light value, which is exactly what
+     * those pages did before — including the error red, which is dark enough
+     * to be hard to read on the dark theme. That is a real complaint, but
+     * fixing it here would be a visible change, so it stays for now.
+     */
+    --warn-bg:          oklch(0.22 0.04 60);
+    --warn-fg:          oklch(0.75 0.14 60);
+    --notice-bg:        oklch(0.2 0.04 55);
+    --notice-border:    oklch(0.35 0.1 55);
+    --notice-fg:        oklch(0.78 0.14 60);
   }
 
   /* ── App shell ────────────────────────────────────────────────────────── */
@@ -579,8 +669,8 @@
     gap: 0.5rem;
     height: 2.5rem;
     padding: 0 0.85rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-pill);
     background: var(--surface);
     color: var(--text);
     box-shadow: var(--shadow-sm);
@@ -605,10 +695,10 @@
   .public-signin {
     height: 2.5rem;
     padding: 0 1rem;
-    border: 1px solid var(--accent);
-    border-radius: 999px;
+    border: var(--border-width) solid var(--accent);
+    border-radius: var(--radius-pill);
     background: var(--accent);
-    color: oklch(0.99 0.002 175);
+    color: var(--on-accent);
     font: inherit;
     font-size: 0.875rem;
     font-weight: 700;
@@ -628,8 +718,8 @@
     min-width: 2.5rem;
     height: 2.5rem;
     padding: 0;
-    border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-pill);
     background: var(--surface);
     color: var(--text-secondary);
     box-shadow: var(--shadow-sm);
@@ -666,8 +756,8 @@
     right: 0.75rem;
     width: 2rem;
     height: 2rem;
-    border-radius: 999px;
-    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    border: var(--border-width) solid var(--border-subtle);
     background: var(--raised);
     color: var(--text-secondary);
     font-size: 1.25rem;
@@ -693,7 +783,7 @@
   .auth-card {
     width: min(100%, 380px);
     background: var(--surface);
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
     border-radius: 1.25rem;
     box-shadow: var(--shadow-lg);
     padding: 1.5rem;
@@ -726,7 +816,7 @@
     width: 100%;
     height: 2.75rem;
     border-radius: 0.75rem;
-    border: 1px solid var(--border-medium);
+    border: var(--border-width) solid var(--border-medium);
     background: var(--raised);
     color: var(--text);
     padding: 0 0.9rem;
@@ -762,8 +852,8 @@
     width: 2rem;
     height: 2rem;
     padding: 0;
-    border-radius: 999px;
-    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    border: var(--border-width) solid var(--border-subtle);
     background: var(--raised);
     color: var(--text-secondary);
     font-size: 1.25rem;
@@ -888,7 +978,7 @@
     color: var(--text-secondary);
     font-size: 0.8125rem;
     font-weight: 500;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     transition: color 0.12s, background 0.12s;
     position: relative;
     white-space: nowrap;
@@ -919,7 +1009,7 @@
   /* Sidebar footer */
   .sidebar-footer {
     padding: 0.5rem 0;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -934,7 +1024,7 @@
     margin: 0 0.375rem;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     color: var(--text-muted);
     font-size: 0.75rem;
     font-weight: 500;
@@ -995,7 +1085,7 @@
     gap: 0.75rem;
     padding: 0.625rem 1rem;
     background: var(--surface);
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
     position: sticky;
     top: 0;
     z-index: 100;
@@ -1055,7 +1145,7 @@
   /* ── Global design tokens ─────────────────────────────────────────────── */
   :global(.card) {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 1.25rem;
     transition: background 0.2s;
     overflow: hidden;
@@ -1138,7 +1228,7 @@
     flex-wrap: wrap;
     padding: 0.5rem 0.75rem;
     background: var(--raised);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
   }
 
   :global(table) {
@@ -1154,11 +1244,11 @@
     color: var(--text-muted);
     text-align: left;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
   }
   :global(td) {
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
     font-size: 0.8125rem;
     color: var(--text-secondary);
     transition: color 0.2s;
@@ -1195,8 +1285,8 @@
     display: inline-block;
     margin-top: 1rem;
     padding: 0.5rem 1rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--raised);
     color: var(--accent);
     text-decoration: none;
@@ -1208,7 +1298,7 @@
     border-color: var(--accent);
   }
 
-  :global(button) { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+  :global(button) { font-family: var(--font-sans); }
 
   /* ── Reduced motion ───────────────────────────────────────────────────── */
   @media (prefers-reduced-motion: reduce) {

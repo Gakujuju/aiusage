@@ -71,7 +71,7 @@
       <div class="ph-line ph-w40"></div>
       <div class="ph-line ph-w60"></div>
       <div class="ph-line ph-w80"></div>
-      <div class="id-footer" style="margin-top:auto; padding-top:0.5rem; border-top:1px solid var(--border-subtle);">
+      <div class="id-footer" style="margin-top:auto; padding-top:0.5rem; border-top:var(--border-width) solid var(--border-subtle);">
         <div class="ph-line ph-w50"></div>
         <div class="ph-line ph-w20"></div>
       </div>
@@ -85,7 +85,7 @@
           </div>
         {/each}
       </div>
-      <div style="padding-top:0.5rem;border-top:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:0.3rem">
+      <div style="padding-top:0.5rem;border-top:var(--border-width) solid var(--border-subtle);display:flex;flex-direction:column;gap:0.3rem">
         {#each [1,2] as _}
           <div style="display:grid;grid-template-columns:5.5rem 1fr 4.5rem;gap:0.5rem;align-items:center">
             <div class="ph-line ph-w60" style="height:0.5rem"></div>
@@ -308,7 +308,7 @@
     color: var(--accent);
     background: var(--accent-dim);
     padding: 0.125rem 0.4rem;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
   }
   .id-model {
     font-size: 0.8125rem;
@@ -333,7 +333,7 @@
     gap: 0.75rem;
     margin-top: auto;
     padding-top: 0.5rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
   .id-session {
     font-size: 0.6875rem;
@@ -382,7 +382,7 @@
     flex-direction: column;
     gap: 0.3rem;
     padding-top: 0.5rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
   .tb-row {
     display: grid;
@@ -402,13 +402,13 @@
   .tb-bar {
     height: 6px;
     background: var(--raised);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
   .tb-fill {
     display: block;
     height: 100%;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     min-width: 2px;
   }
   .tb-input { background: var(--chart-input); }
@@ -516,7 +516,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
     padding-top: 0.375rem;
   }
   .tool-call {
@@ -524,7 +524,7 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.15rem 0.3rem;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     background: var(--raised);
   }
   .tc-index {
@@ -546,7 +546,7 @@
     font-size: 0.625rem;
     font-weight: 600;
     padding: 0.0625rem 0.3rem;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     font-family: var(--mono);
@@ -568,7 +568,7 @@
   .ph-line {
     height: 0.75rem;
     background: var(--raised);
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
   }
   .ph-w20 { width: 20%; }
   .ph-w40 { width: 40%; }

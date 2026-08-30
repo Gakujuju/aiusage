@@ -368,9 +368,9 @@
   }
 
   .poll-error {
-    background: oklch(0.58 0.2 25 / 0.08);
-    color: oklch(0.42 0.15 25);
-    border-radius: 8px;
+    background: var(--danger-soft-bg);
+    color: var(--danger-soft-fg);
+    border-radius: var(--radius-card);
     padding: 0.5rem 0.75rem;
     margin-bottom: 1rem;
     font-size: 0.8125rem;
@@ -391,7 +391,7 @@
   }
 
   .count-n {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
   }
@@ -417,7 +417,7 @@
   }
 
   .group-count {
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0;
   }
@@ -430,7 +430,7 @@
   /* The one group that is blocked on a person. A left edge rather than a
      background: the row still has to read as the same kind of thing. */
   .agent-row.needs-action {
-    border-left: 3px solid oklch(0.55 0.14 250);
+    border-left: 3px solid var(--info-solid);
     padding-left: 0.6rem;
   }
 
@@ -453,7 +453,7 @@
   }
 
   .agent-stale {
-    color: oklch(0.48 0.2 25);
+    color: var(--danger-fg);
   }
 
   .agent-meta {
@@ -487,7 +487,7 @@
 
   .agent-stats dd {
     margin: 0;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
 
@@ -495,7 +495,7 @@
     display: inline-block;
     margin-top: 0.5rem;
     font-size: 0.75rem;
-    color: var(--accent, oklch(0.55 0.12 175));
+    color: var(--accent);
     text-decoration: none;
   }
 

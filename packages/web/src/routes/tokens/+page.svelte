@@ -267,7 +267,7 @@
     display: flex;
     gap: 2px;
     background: var(--raised);
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     padding: 2px;
   }
   .mode-btn {
@@ -277,7 +277,7 @@
     letter-spacing: 0.04em;
     padding: 0.22rem 0.65rem;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -296,7 +296,7 @@
     position: relative;
     display: flex;
     padding-bottom: 16px;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
   }
   .y-axis {
     position: relative;
@@ -411,8 +411,8 @@
     pointer-events: none;
     z-index: 10;
     background: var(--surface);
-    border: 1px solid var(--border-medium);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-medium);
+    border-radius: var(--radius-input);
     padding: 0.4rem 0.6rem;
     box-shadow: var(--shadow-md);
     transform: translate(-50%, calc(-100% - 10px));
@@ -433,7 +433,7 @@
     margin-bottom: 0.125rem;
   }
   .tooltip-bold {
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
     margin-top: 0.125rem;
     padding-top: 0.2rem;
     font-weight: 600;

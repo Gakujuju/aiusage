@@ -190,7 +190,7 @@
   }
   .hero-card {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 1.25rem 1.5rem;
     display: flex;
     flex-direction: column;
@@ -226,7 +226,7 @@
     flex: 1;
     min-width: 120px;
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 0.75rem 1rem;
     display: flex;
     flex-direction: column;
@@ -269,7 +269,7 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.5rem 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--raised);
     transition: background 0.15s;
     animation: fade 0.2s ease both;
@@ -329,10 +329,10 @@
   }
   .card-tab {
     padding: 0.2rem 0.5rem;
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
     background: transparent;
     color: var(--text-muted);
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     cursor: pointer;
     font-size: 0.75rem;
     font-family: var(--mono);

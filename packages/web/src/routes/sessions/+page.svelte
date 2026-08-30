@@ -146,10 +146,10 @@
   }
   .pagination button {
     padding: 0.4rem 0.85rem;
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
     background: var(--raised);
     color: var(--text-secondary);
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     cursor: pointer;
     font-size: 0.8rem;
     font-weight: 500;

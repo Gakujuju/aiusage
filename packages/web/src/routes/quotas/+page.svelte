@@ -88,7 +88,7 @@
 
   function utilizationBarColor(pct) {
     if (pct >= 90) return 'var(--rose)'
-    if (pct >= 70) return 'oklch(0.7 0.15 60)'
+    if (pct >= 70) return 'var(--warn-solid)'
     return 'var(--green)'
   }
 
@@ -390,8 +390,8 @@
     padding: 0.4rem 0.875rem;
     background: var(--accent-dim);
     color: var(--accent);
-    border: 1px solid transparent;
-    border-radius: 6px;
+    border: var(--border-width) solid transparent;
+    border-radius: var(--radius-input);
     font-size: 0.8125rem;
     font-weight: 500;
     cursor: pointer;
@@ -518,17 +518,15 @@
     align-items: flex-start;
     gap: 0.625rem;
     padding: 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     font-size: 0.8125rem;
   }
 
+  /* The dark variant moved into --warn-bg / --warn-fg, so this rule no longer
+     needs a copy of it — and a theme now has one place to change. */
   .status-warn {
-    background: oklch(0.96 0.02 80);
-    color: oklch(0.5 0.14 60);
-  }
-  :global(:root[data-theme="dark"]) .status-warn {
-    background: oklch(0.22 0.04 60);
-    color: oklch(0.75 0.14 60);
+    background: var(--warn-bg);
+    color: var(--warn-fg);
   }
 
   .status-error {
@@ -600,7 +598,7 @@
   }
 
   .tier-row + .tier-row {
-    border-top: 1px solid var(--color-border-subtle, var(--border));
+    border-top: var(--border-width) solid var(--color-border-subtle, var(--border));
     padding-top: 0.75rem;
   }
 
@@ -610,7 +608,7 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     padding: 0.1rem 0.4rem;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
   }
 
   /* DESIGN.md has no warning colour, and inventing one is not mine to do.
@@ -619,24 +617,24 @@
      already prescribes, critical is the solid one. Two weights of the same
      colour still read as an escalation without adding to the palette. */
   .risk-watch {
-    background: oklch(0.55 0.14 250 / 0.12);
-    color: oklch(0.45 0.14 250);
+    background: var(--info-bg);
+    color: var(--info-fg);
   }
 
   .risk-warn {
-    background: oklch(0.58 0.2 25 / 0.12);
-    color: oklch(0.48 0.2 25);
+    background: var(--danger-bg);
+    color: var(--danger-fg);
   }
 
   .risk-critical {
-    background: oklch(0.58 0.2 25);
+    background: var(--danger-solid);
     color: white;
   }
 
   .tier-stale {
     margin-bottom: 0.6rem;
     font-size: 0.75rem;
-    color: oklch(0.48 0.2 25);
+    color: var(--danger-fg);
   }
 
   .tier-empty {
@@ -665,13 +663,13 @@
 
   .forecast-row dd {
     margin: 0;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     color: var(--text, var(--color-text));
   }
 
   .forecast-row dd.over {
-    color: oklch(0.48 0.2 25);
+    color: var(--danger-fg);
   }
 
   .forecast-note {

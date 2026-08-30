@@ -849,8 +849,8 @@
   }
   .recalc-panel {
     background: var(--accent-dim);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-card);
     margin: -0.5rem 0 1rem;
     padding: 0.85rem 1rem;
   }
@@ -879,7 +879,7 @@
     width: 8px;
     height: 8px;
     margin-top: 0.38rem;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--accent);
   }
   .recalc-panel.done .recalc-dot {
@@ -908,7 +908,7 @@
     width: 28px;
     height: 28px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -937,7 +937,7 @@
   .recalc-track {
     height: 6px;
     overflow: hidden;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--raised);
   }
   .recalc-bar {
@@ -949,8 +949,8 @@
   }
   .currency-toggle {
     display: flex;
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-badge);
     overflow: hidden;
   }
   .toggle-btn {
@@ -1000,8 +1000,8 @@
   .model-filter-input {
     height: 32px;
     width: 100%;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--raised);
     color: var(--text);
     font-family: var(--mono);
@@ -1026,15 +1026,15 @@
     justify-content: space-between;
     gap: 1rem;
     background: var(--surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-card);
     padding: 1rem 1.25rem;
   }
 
   .alias-panel {
     background: var(--surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-card);
     margin-bottom: 1rem;
     padding: 1rem 1.25rem;
   }
@@ -1065,7 +1065,7 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
     padding-top: 0.75rem;
   }
   .alias-section {
@@ -1078,7 +1078,7 @@
     justify-content: space-between;
     gap: 0.75rem;
     min-height: 28px;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
   }
   .alias-section-head h3 {
     margin: 0;
@@ -1128,7 +1128,7 @@
     gap: 0.75rem;
     min-height: 44px;
     padding: 0.5rem 0;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
   }
   .alias-row:last-child { border-bottom: none; }
   .alias-row.auto {
@@ -1165,8 +1165,8 @@
     height: 32px;
     width: 100%;
     min-width: 0;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--raised);
     color: var(--text);
     font-family: var(--mono);
@@ -1188,10 +1188,10 @@
     max-height: 220px;
     overflow-y: auto;
     padding: 0.25rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--surface);
-    box-shadow: 0 1px 3px oklch(0 0 0 / 0.08), 0 4px 12px oklch(0 0 0 / 0.04);
+    box-shadow: var(--shadow-dropdown);
   }
   .alias-option {
     display: flex;
@@ -1202,7 +1202,7 @@
     min-height: 30px;
     padding: 0.35rem 0.45rem;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     background: transparent;
     color: var(--text);
     cursor: pointer;
@@ -1253,7 +1253,7 @@
 
   .card {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 1rem 1.25rem;
     display: flex;
     flex-direction: column;
@@ -1294,7 +1294,7 @@
   }
   .price-row.secondary {
     gap: 1rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
     padding-top: 0.5rem;
   }
   .price-block {
@@ -1342,7 +1342,7 @@
   .badge {
     display: inline-block;
     padding: 0.15rem 0.5rem;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
@@ -1369,8 +1369,8 @@
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.2rem 0.55rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-badge);
     background: var(--raised);
     color: var(--text);
     cursor: pointer;
@@ -1381,7 +1381,7 @@
   .btn-sm:disabled:hover { border-color: var(--border-subtle); color: var(--text); }
   .btn-sm.save { border-color: var(--accent); color: var(--accent); }
   .btn-sm.primary { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-  .btn-sm.reset { border-color: #f87171; color: #f87171; }
+  .btn-sm.reset { border-color: var(--danger-plain); color: var(--danger-plain); }
   .sync-btn { height: 32px; }
 
   .edit-fields {
@@ -1405,8 +1405,8 @@
     font-size: 0.75rem;
     width: 100%;
     padding: 0.3rem 0.4rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--raised);
     color: var(--text);
     text-align: right;

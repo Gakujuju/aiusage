@@ -356,8 +356,8 @@
   .site-link {
     min-height: 32px;
     padding: 0.45rem 0.75rem;
-    border-radius: 6px;
-    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-input);
+    border: var(--border-width) solid var(--border-subtle);
     color: var(--text-secondary);
     text-decoration: none;
     font-size: 0.8125rem;
@@ -384,7 +384,7 @@
   .status-item {
     min-width: 0;
     padding: 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--raised);
   }
 
@@ -429,7 +429,7 @@
     object-fit: cover;
     flex-shrink: 0;
     background: var(--surface);
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
   }
 
   .account-avatar.fallback {
@@ -535,7 +535,7 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.625rem 0 0;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
 
   .auto-upload-meta {
@@ -543,13 +543,13 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.75rem;
     padding-top: 0.625rem;
-    border-top: 1px solid var(--border-subtle);
+    border-top: var(--border-width) solid var(--border-subtle);
   }
 
   .auto-upload-meta div {
     min-width: 0;
     padding: 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--raised);
   }
 
@@ -587,8 +587,8 @@
     position: relative;
     width: 34px;
     height: 20px;
-    border: 1px solid var(--border-medium);
-    border-radius: 999px;
+    border: var(--border-width) solid var(--border-medium);
+    border-radius: var(--radius-pill);
     background: var(--raised);
     transition: background 160ms ease, border-color 160ms ease;
     flex-shrink: 0;
@@ -612,7 +612,7 @@
   }
 
   .toggle-row input:checked + .switch::after {
-    background: oklch(0.99 0.002 175);
+    background: var(--on-accent);
     transform: translateX(14px);
   }
 
@@ -653,8 +653,8 @@
   .interval-control select {
     min-height: 32px;
     padding: 0 1.875rem 0 0.625rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     background: var(--surface);
     color: var(--text-secondary);
     font: inherit;
@@ -671,7 +671,7 @@
     display: grid;
     gap: 0.35rem;
     padding: 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--raised);
     color: var(--text-muted);
   }
@@ -683,7 +683,7 @@
 
   .upload-toast {
     padding: 0.5rem 0.75rem;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: var(--green-dim);
     color: var(--green);
     font-size: 0.8125rem;
@@ -702,8 +702,8 @@
     min-width: 128px;
     min-height: 36px;
     padding: 0 0.875rem;
-    border-radius: 6px;
-    border: 1px solid var(--accent);
+    border-radius: var(--radius-input);
+    border: var(--border-width) solid var(--accent);
     background: var(--accent);
     color: white;
     font-size: 0.8125rem;
@@ -715,7 +715,7 @@
     min-height: 32px;
     padding: 0 0.5rem;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: transparent;
     color: var(--text-muted);
     font-size: 0.75rem;

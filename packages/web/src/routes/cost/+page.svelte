@@ -189,7 +189,7 @@
     flex-direction: column;
     gap: 0.25rem;
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     padding: 1.25rem 2rem;
     margin-bottom: 1.5rem;
   }
@@ -218,7 +218,7 @@
     position: relative;
     display: flex;
     padding-bottom: 16px;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
   }
   .y-axis {
     position: relative;
@@ -291,8 +291,8 @@
     pointer-events: none;
     z-index: 10;
     background: var(--surface);
-    border: 1px solid var(--border-medium);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-medium);
+    border-radius: var(--radius-input);
     padding: 0.35rem 0.6rem;
     box-shadow: var(--shadow-md);
     transform: translate(-50%, calc(-100% - 10px));
@@ -320,7 +320,7 @@
     display: flex;
     justify-content: space-between;
     padding: 0.45rem 0;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: var(--border-width) solid var(--border-subtle);
     font-size: 0.8rem;
     color: var(--text-secondary);
   }

@@ -69,8 +69,8 @@
   }
   select {
     padding: 0.38rem 0.6rem;
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-input);
     font-family: var(--mono);
     font-size: 0.75rem;
     background: var(--raised);

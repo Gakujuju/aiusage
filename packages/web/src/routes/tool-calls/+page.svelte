@@ -134,10 +134,10 @@
   }
   .tab {
     padding: 0.3rem 0.75rem;
-    border: 1px solid var(--border-subtle);
+    border: var(--border-width) solid var(--border-subtle);
     background: var(--raised);
     color: var(--text-secondary);
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     cursor: pointer;
     font-size: 0.75rem;
     font-weight: 500;
@@ -160,8 +160,8 @@
     margin-bottom: 1rem;
     background: var(--blue-dim);
     color: var(--blue);
-    border: 1px solid var(--blue);
-    border-radius: 8px;
+    border: var(--border-width) solid var(--blue);
+    border-radius: var(--radius-card);
     font-size: 0.8rem;
   }
 
@@ -177,7 +177,7 @@
     gap: 0.75rem;
     padding: 0.65rem 0.85rem;
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     transition: background 0.15s;
   }
   .row:hover {
@@ -213,7 +213,7 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     padding: 0.15rem 0.35rem;
-    border-radius: 4px;
+    border-radius: var(--radius-badge);
     flex-shrink: 0;
   }
   .badge-mcp {
@@ -227,13 +227,13 @@
   .bar-container {
     height: 6px;
     background: var(--raised);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
   .bar {
     height: 100%;
     background: var(--accent);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     transition: width 0.6s ease;
   }
   .count {
