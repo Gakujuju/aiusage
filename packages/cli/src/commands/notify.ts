@@ -3,6 +3,7 @@ import { renderDiscordContent } from '@aiusage/core'
 import { hostname } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL, loadConfig, loadCredential, saveCredential } from '../config.js'
+import { readSecretLine, normalizeSecret } from '../secret-input.js'
 import { getState } from '../init.js'
 import { enqueueNotification, summariseNotifications } from '../db/notifications.js'
 import { maskUrls, postToDiscord } from '../notify/discord.js'
@@ -39,19 +40,15 @@ export interface NotifyTestResult {
   error: string | null
 }
 
-/** Read the webhook from stdin, so it never appears in argv or shell history. */
-async function readWebhookFromStdin(): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks).toString('utf-8').trim()
-}
-
 export async function runNotifyTest(options: { setWebhook?: boolean } = {}): Promise<NotifyTestResult> {
   if (options.setWebhook) {
-    if (process.stdin.isTTY) console.log('Paste the Discord webhook URL, then press Ctrl+Z / Ctrl+D:')
-    const url = await readWebhookFromStdin()
+    // Same reader as the dashboard password: one line, Enter, masked when
+    // typed. The EOF-based version could not be completed at all in
+    // PowerShell, which left piping from echo as the only route — putting
+    // the URL in the shell history, which is what stdin was meant to avoid.
+    // A URL has no meaningful leading or trailing whitespace, so it is
+    // trimmed; a password is not.
+    const url = normalizeSecret(await readSecretLine('Discord webhook URL: ')).trim()
     if (!/^https:\/\/\S+$/.test(url)) {
       console.error('That does not look like an https URL. Nothing was saved.')
       return { webhookConfigured: false, enabled: false, notifierDevice: false, sent: false, error: 'invalid url' }
@@ -82,7 +79,7 @@ export async function runNotifyTest(options: { setWebhook?: boolean } = {}): Pro
   if (!webhook) {
     console.log('No webhook set. Store one with either:')
     // Read from stdin rather than argv so the URL never lands in shell history.
-    console.log('  aiusage notify-test --set-webhook     (then paste the URL)')
+    console.log('  aiusage notify-test --set-webhook     (paste the URL, then Enter)')
     console.log(`  or add credentials.${DISCORD_WEBHOOK_CREDENTIAL} to ~/.aiusage/config.json`)
     console.log('')
     console.log(MIGRATION_STEPS)

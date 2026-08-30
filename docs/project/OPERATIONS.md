@@ -192,6 +192,40 @@ CLI の既定動作を走らせるのと同じで、AIUSAGE_HOME を設定して
   [migration] applying vN to <path>
 を出すので、誤って本番を開いた場合はその場で気づける。
 
+## serve の起動と停止
+
+ログオン時にタスクスケジューラが起動する。手で起動する必要はない。
+
+  タスク名   : aiusage-serve
+  実行するもの: %USERPROFILE%\.aiusage\start-serve.cmd
+  ログ       : %USERPROFILE%\.aiusage\serve.log（追記）
+
+バインド先は config.host（現在 127.0.0.1,100.82.102.59）。
+start-serve.cmd に --host は書かれていない。
+
+手で操作する:
+
+  今すぐ起動   schtasks /Run /TN aiusage-serve
+  止める       Stop-Process -Name node の対象を絞るか、
+               タスクマネージャで該当の node を終了する
+  ログを見る   Get-Content "$env:USERPROFILE\.aiusage\serve.log" -Tail 30
+  状態を見る   schtasks /Query /TN aiusage-serve
+
+タスクを消す:
+
+  schtasks /Delete /TN aiusage-serve /F
+
+  消しても start-serve.cmd は残る。手で起動したいときはそれを実行する。
+
+多重起動はしない。start-serve.cmd はポート 3847 が LISTENING なら
+何もせずに終わる。2つ目の serve は失敗せず 3848 に退避し、
+.serve-port を書き換えてしまう。そうなると hook は新しい方を向き、
+古い方も動き続けて、同じDBに対してクォータ取得・通知・Codex カーソルが
+二重に走る。エラーにならないので気づきにくい。
+
+注意: 登録は schtasks ではなく PowerShell の Register-ScheduledTask で
+行った。schtasks /Create /SC ONLOGON は管理者権限を要求して失敗する。
+
 ## Tailscale 経由でスマホから見る
 
 端末:

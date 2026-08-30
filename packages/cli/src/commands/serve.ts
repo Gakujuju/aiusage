@@ -38,7 +38,8 @@ export interface ServeOptions {
 export const DEFAULT_SERVE_HOST = '127.0.0.1'
 
 /**
- * Interfaces to listen on. Priority: --host, then AIUSAGE_HOST, then loopback.
+ * Interfaces to listen on.
+ * Priority: --host, then AIUSAGE_HOST, then config.host, then loopback.
  *
  * A comma-separated list, because reaching the dashboard from a phone over
  * Tailscale means binding that interface *as well as* loopback — not instead
@@ -52,7 +53,12 @@ export function resolveServeHosts(
   hostOption?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  const raw = hostOption?.trim() || env.AIUSAGE_HOST?.trim() || DEFAULT_SERVE_HOST
+  // config last, so a file cannot override what was asked for on the command
+  // line or in the environment for this one run.
+  const raw = hostOption?.trim()
+    || env.AIUSAGE_HOST?.trim()
+    || loadConfig()?.host?.trim()
+    || DEFAULT_SERVE_HOST
   const requested = raw
     .split(',')
     .map((host) => host.trim())

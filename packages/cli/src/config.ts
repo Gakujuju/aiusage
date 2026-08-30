@@ -75,6 +75,15 @@ export interface Config {
   /** Auto-sync interval in milliseconds (0 or undefined = disabled) */
   syncInterval?: number
   /** Subscription quota polling interval in ms. 0 disables it. Defaults to 300000 (5 min). */
+  /**
+   * Interfaces serve should listen on, comma separated.
+   *
+   * Lowest precedence: --host and AIUSAGE_HOST both win. 127.0.0.1 is added
+   * whatever this says. Setting it here does not make the dashboard public
+   * on its own — a non-loopback entry still requires a password, exactly as
+   * the flag does.
+   */
+  host?: string
   quotaSnapshotInterval?: number
   /** Retention for quota history, in days. Independent of retentionDays. Defaults to 180. */
   quotaRetentionDays?: number

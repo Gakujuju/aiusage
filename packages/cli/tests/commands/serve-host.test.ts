@@ -1,12 +1,28 @@
-import { describe, expect, it } from 'vitest'
-import {
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+
+// resolveServeHosts consults config for the lowest-precedence entry, and
+// checkHostSafety falls back to the stored dashboard password. Both are
+// mocked: these tests describe the resolution order, not this machine. With
+// the real lookups a password stored on the developer's box makes every
+// "refuses without a password" case pass for the wrong reason.
+const hostConfig = vi.hoisted(() => ({ value: undefined as any, credential: null as string | null }))
+vi.mock('../../src/config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/config.js')>()
+  return {
+    ...actual,
+    loadConfig: () => hostConfig.value,
+    loadCredential: () => hostConfig.credential,
+  }
+})
+
+const {
   DEFAULT_SERVE_HOST,
   checkHostSafety,
   resolveServeHost,
   resolveServeHosts,
   runServeCommand,
-} from '../../src/commands/serve.js'
-import { isLoopbackHost, shouldProtectApiPath } from '../../src/auth.js'
+} = await import('../../src/commands/serve.js')
+const { isLoopbackHost, shouldProtectApiPath } = await import('../../src/auth.js')
 
 describe('resolveServeHost', () => {
   it('defaults to loopback', () => {
@@ -236,5 +252,48 @@ describe('open endpoints follow the widest listener', () => {
     expect(mixed).toBe(false)
     expect(shouldProtectApiPath('/api/summary', mixed)).toBe(true)
     expect(shouldProtectApiPath('/api/quotas', mixed)).toBe(true)
+  })
+})
+
+describe('config.host', () => {
+  beforeEach(() => { hostConfig.value = undefined })
+  afterEach(() => { hostConfig.value = undefined })
+
+  it('is used when neither the flag nor the environment says otherwise', () => {
+    hostConfig.value = { host: '100.82.102.59' }
+    expect(resolveServeHosts(undefined, {})).toEqual(['127.0.0.1', '100.82.102.59'])
+  })
+
+  it('takes a list, like the flag', () => {
+    hostConfig.value = { host: '127.0.0.1, 100.82.102.59' }
+    expect(resolveServeHosts(undefined, {})).toEqual(['127.0.0.1', '100.82.102.59'])
+  })
+
+  it('loses to AIUSAGE_HOST, which loses to --host', () => {
+    // A file must not override what was asked for on this one run.
+    hostConfig.value = { host: '100.82.102.59' }
+    expect(resolveServeHosts(undefined, { AIUSAGE_HOST: '10.0.0.4' }))
+      .toEqual(['127.0.0.1', '10.0.0.4'])
+    expect(resolveServeHosts('192.168.1.5', { AIUSAGE_HOST: '10.0.0.4' }))
+      .toEqual(['127.0.0.1', '192.168.1.5'])
+  })
+
+  it('still gets loopback added', () => {
+    hostConfig.value = { host: '0.0.0.0' }
+    expect(resolveServeHosts(undefined, {})).toEqual(['127.0.0.1', '0.0.0.0'])
+  })
+
+  it('falls back to loopback when it is blank', () => {
+    hostConfig.value = { host: '   ' }
+    expect(resolveServeHosts(undefined, {})).toEqual(['127.0.0.1'])
+  })
+
+  it('does not make the dashboard public on its own', () => {
+    // Editing a config file must not be a way to publish the data without a
+    // password — the check is on the resolved list, wherever it came from.
+    hostConfig.value = { host: '100.82.102.59' }
+    const hosts = resolveServeHosts(undefined, {})
+    expect(checkHostSafety(hosts, {}).allowed).toBe(false)
+    expect(checkHostSafety(hosts, { AIUSAGE_DASHBOARD_PASSWORD: 'secret' }).allowed).toBe(true)
   })
 })

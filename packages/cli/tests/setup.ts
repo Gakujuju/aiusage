@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { setRuntimePriceTable, type PriceEntry } from '@aiusage/core'
 
 const TEST_PRICE_TABLE: Record<string, PriceEntry> = {
@@ -9,3 +10,24 @@ const TEST_PRICE_TABLE: Record<string, PriceEntry> = {
 }
 
 setRuntimePriceTable(TEST_PRICE_TABLE)
+
+/**
+ * No dashboard password unless a test asks for one.
+ *
+ * getDashboardPassword falls back to config.credentials, and the CLI tests
+ * read the real ~/.aiusage/config.json — so once a password was stored on
+ * this machine, every API test that expects an unauthenticated 200 started
+ * getting 401. The suite was describing the developer's box rather than the
+ * code. Tests that want a password set AIUSAGE_DASHBOARD_PASSWORD, which
+ * still wins.
+ */
+vi.mock('../src/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/auth.js')>()
+  return {
+    ...actual,
+    getDashboardPassword: () => {
+      const fromEnv = process.env.AIUSAGE_DASHBOARD_PASSWORD?.trim()
+      return fromEnv ? fromEnv : null
+    },
+  }
+})

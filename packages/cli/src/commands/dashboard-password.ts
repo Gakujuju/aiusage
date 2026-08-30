@@ -3,6 +3,7 @@ import {
   loadCredential,
   saveCredential,
 } from '../config.js'
+import { readSecretLine, normalizeSecret } from '../secret-input.js'
 
 /**
  * Set or inspect the dashboard password.
@@ -10,7 +11,8 @@ import {
  * Read from stdin rather than argv for the same reason the webhook is: an
  * argument is in the shell history, the process list, and any terminal
  * recording, and this one guards a page that is about to be reachable from
- * another machine.
+ * another machine. One line ended with Enter, masked when a person is
+ * typing it — see readSecretLine for why EOF was the wrong contract.
  */
 
 export interface DashboardPasswordResult {
@@ -22,21 +24,8 @@ export interface DashboardPasswordResult {
 /** The shortest password worth calling one on a network-reachable page. */
 const MIN_LENGTH = 8
 
-async function readFromStdin(): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-  // Only the trailing newline goes; a password may legitimately contain
-  // spaces, and trimming both ends would silently change what was typed.
-  return Buffer.concat(chunks).toString('utf-8').replace(/\r?\n$/, '')
-}
-
 export async function runSetDashboardPassword(): Promise<DashboardPasswordResult> {
-  if (process.stdin.isTTY) {
-    console.log('Type the dashboard password, then press Ctrl+Z / Ctrl+D:')
-  }
-  const password = await readFromStdin()
+  const password = normalizeSecret(await readSecretLine('Dashboard password: '))
 
   if (!password) {
     console.error('Nothing was entered. The password is unchanged.')
