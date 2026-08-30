@@ -564,7 +564,8 @@ describe('recordQuotaSnapshot', () => {
   it('returns an empty summary for an empty round', () => {
     expect(record(db, [], t0)).toEqual({
       attempted: 0, succeeded: 0, inserted: 0, updated: 0,
-      windowsClosed: 0, failedTools: [], errorKinds: [], crossings: [], resets: [],
+      windowsClosed: 0, failedTools: [], errorKinds: [],
+      credentialFailures: [], crossings: [], resets: [],
     })
   })
 

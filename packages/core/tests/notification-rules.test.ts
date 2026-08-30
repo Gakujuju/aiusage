@@ -10,6 +10,7 @@ import {
   pickAssistantSummary,
   ASSISTANT_PREVIEW_MAX,
   formatQuotaMessage,
+  formatCredentialExpiredMessage,
   renderDiscordContent,
   formatDurationJa,
   isQuietHour,
@@ -629,5 +630,75 @@ describe('normalizeAssistantPreview — selection before truncation', () => {
     expect(normalizeAssistantPreview('')).toBeNull()
     expect(normalizeAssistantPreview('   \n ')).toBeNull()
     expect(normalizeAssistantPreview(null)).toBeNull()
+  })
+})
+
+describe('formatCredentialExpiredMessage', () => {
+  const NOW = Date.UTC(2026, 7, 30, 12, 0, 0)
+
+  it('names the device and the tool, and says the numbers stopped', () => {
+    const message = formatCredentialExpiredMessage({
+      device: '自宅PC',
+      tool: 'claude-code',
+      lastSuccessAt: NOW - 90 * 60_000,
+      now: NOW,
+    })
+    expect(message.title).toContain('自宅PC')
+    expect(message.title).toContain('資格情報が失効')
+    expect(message.body).toContain('利用枠の取得が止まっています')
+  })
+
+  it('says how long the numbers have been stale', () => {
+    // Without this the reader cannot tell a credential that died a minute ago
+    // from one that died before lunch.
+    const message = formatCredentialExpiredMessage({
+      device: 'desk',
+      tool: 'claude-code',
+      lastSuccessAt: NOW - 3 * 60 * 60_000,
+      now: NOW,
+    })
+    expect(message.body).toContain('最後に取得できたのは')
+  })
+
+  it('leaves out the elapsed line when the tool never succeeded here', () => {
+    const message = formatCredentialExpiredMessage({
+      device: 'desk',
+      tool: 'claude-code',
+      lastSuccessAt: null,
+      now: NOW,
+    })
+    expect(message.body).not.toContain('最後に取得できたのは')
+    expect(message.body).toContain('claude doctor')
+  })
+
+  it('gives each tool its own recovery step', () => {
+    const claude = formatCredentialExpiredMessage({
+      device: 'desk', tool: 'claude-code', lastSuccessAt: NOW, now: NOW,
+    })
+    const codex = formatCredentialExpiredMessage({
+      device: 'desk', tool: 'codex', lastSuccessAt: NOW, now: NOW,
+    })
+    expect(claude.body).toContain('claude doctor')
+    expect(codex.body).toContain('codex')
+    expect(codex.body).not.toContain('claude doctor')
+  })
+
+  it('omits the recovery line for a tool we have no instructions for', () => {
+    // Better to say nothing than to invent a command that does not exist.
+    const message = formatCredentialExpiredMessage({
+      device: 'desk', tool: 'some-other-agent', lastSuccessAt: NOW, now: NOW,
+    })
+    expect(message.body).not.toContain('復旧:')
+  })
+
+  it('honours the configured prefix', () => {
+    const message = formatCredentialExpiredMessage({
+      device: 'desk',
+      tool: 'claude-code',
+      lastSuccessAt: NOW,
+      now: NOW,
+      config: { enabled: true, prefix: '[test] ' },
+    })
+    expect(message.title.startsWith('[test] ')).toBe(true)
   })
 })

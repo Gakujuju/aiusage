@@ -423,3 +423,50 @@ ja の文言と絵文字が一致することを検証する
 
 なお同テストは packages/web から core を相対パスで import している。
 依存を増やさないための措置で、テスト限定であり本番バンドルには入らない。
+
+## D20. Claude のトークンは aiusage が更新しない。CLI に更新させる
+
+accessToken の寿命は8時間で、デスクトップアプリを使っている限り
+CLI 側の `~/.claude/.credentials.json` は更新されない。
+実際に失効し、quota_current が cred=expired・連続失敗16回になった。
+refreshToken はファイル内にあるので、aiusage が自分で更新することは
+技術的には可能に見える。やらない。
+
+実測した事実（2026-08-30、expiresAt だけを書き換えて測定）:
+
+- accessToken の寿命は8時間。
+- CLI が更新するのは残り5分を切ってから。
+  残り 360 / 240 / 120 / 60 / 30 / 10 / 9 / 8 / 7 / 6 分では更新せず、
+  残り5分と1分、および失効済みでは更新した。閾値は5〜6分の間。
+- 更新するのは `claude doctor` と `claude mcp list`。
+  `claude --version`、`claude auth status`、`claude --help`、
+  `claude plugin list`、`claude project --help` は失効状態でも更新しない。
+- **refreshToken は更新のたびにローテーションする。**
+  ハッシュで観測: cf66f85cce94 → fa674029af76 → 2a55b7db75f1 →
+  b786f5603012 → 4e3eb9a62753。
+- refreshTokenExpiresAt はログインから28日で固定され、更新では延びない
+  （2026-09-27 01:20:24 のまま動かなかった）。
+
+やらない理由:
+
+1. トークンエンドポイントと client_id が非公開で、リバースエンジニアリング
+   になる。
+2. **refreshToken がローテーションすることを実測した。** aiusage が更新して
+   ファイルに書き戻さなければ、CLI 側の refreshToken は無効になり、
+   ユーザーは Claude Code からログアウトされる。推測ではなく観測である。
+3. 書き戻すなら他ツールの認証ファイルを書き換えることになる。破損すれば
+   Claude Code 全体が使えなくなる。settings.json で同種の前例がある。
+
+代わりにやること: 10分ごとに expiresAt を読み、残り15分を切っていたら
+`claude doctor` を起動する。更新は CLI 自身が行い、ファイルの所有権は
+CLI に残る。aiusage 側のコードは `readFileSync` するだけで、
+`.credentials.json` への書き込みは1行も無い（packages/cli/src/quota.ts）。
+
+窓を CLI の閾値（5分）より広い15分にしてあるのは、10分間隔のタスクが
+「気づいたときには手遅れ」にならないようにするため。5〜15分の帯では
+doctor が空振りするが、それはログに1行残るだけで害はない。
+
+補足: 更新は `~/.claude/.oauth_refresh.lock` という mkdir 方式のロックで
+直列化されている。短時間に連続で更新を起こすとロックが残り、
+約90秒間はどのコマンドも黙って更新しなくなる。空振りを失敗と扱わない
+理由がこれで、更新タスク側にも5分の間隔ガードを入れてある。

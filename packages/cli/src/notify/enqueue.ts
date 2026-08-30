@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import {
   escalationDue,
   forecastQuota,
+  formatCredentialExpiredMessage,
   formatQuotaMessage,
   formatSessionMessage,
   notifyStateFor,
@@ -261,6 +262,36 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
       title: message.title,
       body: message.body,
       payload: { threshold: crossing.threshold, utilization: crossing.utilization },
+      deviceInstanceId: ctx.deviceInstanceId,
+      drop: !ctx.isNotifier,
+    }, ctx.now)
+    enqueued++
+  }
+
+  // Say once that the credential died. The scheduled refresh normally fixes
+  // this before anyone notices, so a message arriving here is really a report
+  // that the refresh is not working.
+  for (const failure of summary.credentialFailures) {
+    const message = formatCredentialExpiredMessage({
+      device: ctx.device,
+      tool: failure.tool,
+      lastSuccessAt: failure.lastSuccessAt,
+      now: ctx.now,
+      config: ctx.config,
+    })
+
+    enqueueNotification(ctx.db, {
+      eventType: 'quota_credential',
+      subjectKind: 'quota',
+      subjectId: failure.tool,
+      // The last success is the identity of the outage. It holds still through
+      // eight hours of five-minute retries, so the unique index on dedupe_key
+      // silently swallows every repeat; it moves as soon as a poll works
+      // again, so the next outage announces itself.
+      dedupeKey: `quotaauth:${failure.tool}:${failure.lastSuccessAt ?? 'never'}`,
+      title: message.title,
+      body: message.body,
+      payload: { lastSuccessAt: failure.lastSuccessAt },
       deviceInstanceId: ctx.deviceInstanceId,
       drop: !ctx.isNotifier,
     }, ctx.now)

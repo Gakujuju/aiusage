@@ -343,3 +343,117 @@ dev サーバは `aiusage serve` で、ビルド済みの `packages/cli/dist/web
 （フィルタ名は `@aiusage/web`。npm 公開名 `@juliantanx/aiusage-web` を
  指定しても pnpm は「一致なし」で終了コード0を返すので、
  `&&` で繋いだ後続コマンドが走ってしまい、直したつもりで直っていない）
+
+## Claude のトークンを切らさない
+
+デスクトップアプリを使っている限り、CLI の
+`~/.claude/.credentials.json` は更新されない。accessToken の寿命は8時間なので、
+放っておくと毎日必ず失効し、aiusage の Claude クォータが止まる。
+理由と実測値は D20。
+
+  タスク名   : aiusage-claude-token-refresh
+  間隔       : 10分ごと ＋ ログオン時
+  実体       : ~/.aiusage/claude-token-refresh.cjs
+  起動        : ~/.aiusage/run-token-refresh.vbs（ウィンドウを出さないため）
+  ログ       : ~/.aiusage/claude-token-refresh.log
+
+スクリプトは expiresAt を読むだけで、残りが15分を超えていれば
+何もせず 90ms 程度で終わる。ログにも書かない。
+残り15分を切ったときだけ `claude doctor` を起動する。
+更新するのは CLI 自身であり、aiusage は認証ファイルに書き込まない。
+
+削除するには:
+
+    Unregister-ScheduledTask -TaskName aiusage-claude-token-refresh -Confirm:$false
+
+止めると8時間ごとに失効する。失効したこと自体は Discord に1通通知が飛ぶので
+（後述）、通知が来たらこのタスクが動いていないと考えてよい。
+
+### 更新ロックの残留
+
+更新は `~/.claude/.oauth_refresh.lock`（mkdir 方式のロック）で直列化される。
+短時間に連続して更新を起こすとロックが残り、約90秒のあいだ
+`claude doctor` も `claude mcp list` も黙って更新しなくなる。
+放っておけば CLI 側が期限切れとみなして解放する。
+ログの「expiry did not move」はこれで、失敗ではない。次の10分で再試行される。
+手で連打しないこと。スクリプト側にも5分の間隔ガードを入れてある。
+
+### 認証ファイルを触るときは事前に承認を取る
+
+`.credentials.json` の値そのものを触らない書き換え（expiresAt だけを
+過去にする等）であっても、他ツールの認証ファイルの改変は事前に承認を取ること。
+またバックアップからの復元をしてはいけない。refreshToken はローテーションするので、
+古いファイルを書き戻すと無効な refreshToken に戻り、ログアウトさせてしまう。
+壊した場合は CLI 自身に書き直させること（expiresAt を過去にして `claude doctor`）。
+
+## serve は自分で復帰する
+
+aiusage-serve タスクは、ログオン時に加えて10分ごとに実行される。
+start-serve.cmd は 3847 が LISTENING なら何もせずに終わるので、
+繰り返し実行そのものが watchdog になっている。監視の仕組みは足していない。
+
+  実測: 20:19:57 に serve を kill → 20:21:01 にタスクが起動
+        → 20:21:04 に listen 再開。停止時間 67秒。
+
+落ちたことを通知で知らせることはできない。落ちているのだから送れない。
+だから監視ではなく自動復帰にしてある。
+
+ログは起動した回だけ書く。10分ごとに「既に動いている」と書くと、
+意味のある行が埋まる。
+
+前回が異常終了だった場合は1行残る:
+
+    aiusage: previous serve left .serve-port behind - it was killed, not stopped
+
+serve は graceful shutdown で `.serve-port` を消す。残っていれば
+kill されたということで、それがこの死に方の唯一の痕跡になる。
+
+### コンソールを作らない起動はできなかった
+
+2026-08-30 に serve が STATUS_CONTROL_C_EXIT (0xC000013A) で終了し、
+14分間停止していた。タスクは `cmd.exe /c start-serve.cmd` を
+InteractiveToken で実行するので、そのコンソールに Ctrl+C 相当が届けば
+serve ごと死ぬ。根本的にはコンソールを持たない実行にしたい。
+
+「ユーザーがログオンしているかどうかにかかわらず実行する」(S4U) が
+その方法だが、このアカウントでは登録に管理者権限が要る:
+
+    Register-ScheduledTask -LogonType S4U  →  Access is denied.
+
+したがって10分間隔の繰り返しで吸収する方を採った。
+昇格できる状況になったら S4U に変えるのが根本に近い。
+
+### 実行中のバッチファイルを書き換えないこと
+
+cmd.exe は .cmd をバイト位置で読み進める。実行中に中身を差し替えると、
+次の行を読むときに新しいファイルの同じバイト位置から再開する。
+start-serve.cmd を差し替えた直後にこれが起き、node が終了した時点で
+cmd が「起動」の行に戻って serve をもう一度立ち上げた。
+watchdog が効いたように見えて、実際は編集の副作用だった。
+書き換えたら、走っている cmd.exe を終わらせてからタスクに任せること。
+
+## 資格情報が失効したら1通だけ通知する
+
+クォータ取得が認証エラーで失敗したとき、Discord に1通送る。
+更新タスクが効いていれば普通は届かないので、
+**この通知が来ること自体が「更新タスクが動いていない」の合図**になる。
+
+  イベント種別 : quota_credential
+  条件         : classifyQuotaError が 'auth' を返したとき
+                 （= 資格情報が expired）
+  送らない場合 : not_found。そのツールを使っていないだけであり、
+                 壊れているのとは違う（D15 と同じ原則）
+
+繰り返さない仕組み: dedupe_key に「そのツールが最後に取得できた時刻」を
+入れている。
+
+    quotaauth:<tool>:<last_success_at>
+
+`last_success_at` は失敗では動かない（markFailure が触らない）ので、
+5分ごとに96回失敗してもキーは同じで、notifications の dedupe_key の
+UNIQUE 制約が2通目以降を捨てる。復旧して取得が成功した瞬間に値が動くので、
+次に失効したときは別のキーになり、改めて1通届く。
+
+文言には復旧方法を入れてある。claude-code なら
+「claude を起動するか claude doctor を実行すると更新されます」。
+回復手段の書いていない警告は、受け取った側には故障の報告でしかない。

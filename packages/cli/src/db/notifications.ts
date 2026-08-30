@@ -15,6 +15,9 @@ const TTL_MS: Record<string, number> = {
   session_escalation: 15 * 60_000,
   quota_threshold: 60 * 60_000,
   quota_reset: 60 * 60_000,
+  // Sent once per outage, so it has no second chance if delivery keeps
+  // failing. An hour covers the whole retry ladder.
+  quota_credential: 60 * 60_000,
   test: 15 * 60_000,
 }
 

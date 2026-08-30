@@ -17,6 +17,7 @@ export type NotificationEventType =
   | 'session_escalation'
   | 'quota_threshold'
   | 'quota_reset'
+  | 'quota_credential'
   | 'test'
 
 export interface NotificationEventsConfig {
@@ -502,6 +503,56 @@ export function formatQuotaMessage(input: QuotaMessageInput): DiscordMessage {
   if (input.exhaustAt != null && input.confidence !== 'low') {
     lines.push(`このペースだと ${clockHHMM(input.exhaustAt)} 頃に上限`)
   }
+
+  return capMessage(title, lines.join('\n'))
+}
+
+/**
+ * How each tool's credentials get renewed, for the recovery line.
+ *
+ * The Claude wording names `claude doctor` because that is what the scheduled
+ * refresh runs; if this notification arrives at all, that task is the first
+ * thing to check.
+ */
+const CREDENTIAL_RECOVERY: Record<string, string> = {
+  'claude-code': '復旧: claude を起動するか claude doctor を実行すると更新されます',
+  codex: '復旧: codex にログインし直してください',
+}
+
+export interface CredentialExpiredInput {
+  device: string
+  tool: string
+  /** When this tool last answered, or null if it never has on this machine. */
+  lastSuccessAt: number | null
+  now: number
+  config?: NotificationRulesConfig
+}
+
+/**
+ * "The credentials went stale and the numbers stopped moving."
+ *
+ * Worth saying out loud because the failure is silent otherwise: the dashboard
+ * keeps showing the last good utilisation, which looks like a quota that
+ * stopped changing rather than a fetch that stopped working.
+ */
+export function formatCredentialExpiredMessage(input: CredentialExpiredInput): DiscordMessage {
+  const prefix = input.config?.prefix ?? DEFAULT_NOTIFICATION_PREFIX
+  const device = input.device || 'unknown'
+  const tool = toolDisplayName(input.tool)
+
+  const title = `${prefix}🔑 ${device}｜${tool}｜資格情報が失効`
+
+  const lines: string[] = ['利用枠の取得が止まっています。']
+  if (input.lastSuccessAt != null) {
+    const elapsed = input.now - input.lastSuccessAt
+    lines.push(
+      elapsed > 0
+        ? `最後に取得できたのは ${clockHHMM(input.lastSuccessAt)}（${formatDurationJa(elapsed)}前）`
+        : `最後に取得できたのは ${clockHHMM(input.lastSuccessAt)}`,
+    )
+  }
+  const recovery = CREDENTIAL_RECOVERY[input.tool]
+  if (recovery) lines.push(recovery)
 
   return capMessage(title, lines.join('\n'))
 }

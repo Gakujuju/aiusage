@@ -107,6 +107,17 @@ export interface RecordSummary {
    * log: these are category names, never the error text, a URL or a token.
    */
   errorKinds: string[]
+  /**
+   * Tools whose poll failed because the credential itself is no longer usable,
+   * paired with the time that tool last answered.
+   *
+   * That timestamp is what keeps this to one notification per outage: it does
+   * not move while the credential is broken — markFailure never touches
+   * last_success_at — and it moves the moment the credential works again. A
+   * dedupe key built on it therefore repeats for eight hours of five-minute
+   * failures, and stops repeating the instant the outage is a different one.
+   */
+  credentialFailures: Array<{ tool: string; lastSuccessAt: number | null }>
   /** Thresholds crossed this round, for the notifier to act on. */
   crossings: Array<{
     tool: string
@@ -214,7 +225,7 @@ export function recordQuotaSnapshot(
   const summary: RecordSummary = {
     attempted: 0, succeeded: 0, inserted: 0, updated: 0,
     windowsClosed: 0, failedTools: [], errorKinds: [],
-    crossings: [], resets: [],
+    credentialFailures: [], crossings: [], resets: [],
   }
   if (!Array.isArray(results) || results.length === 0) return summary
   const errorKinds = new Set<string>()
@@ -325,6 +336,17 @@ export function recordQuotaSnapshot(
         if (lastErrorKind) {
           summary.attempted++
           errorKinds.add(lastErrorKind)
+        }
+        // 'auth' is the one failure the user can actually fix, and the only
+        // one classifyQuotaError returns for an expired credential. A tool
+        // that is simply not set up here classifies as '' and says nothing —
+        // "not installed" is not "broken".
+        if (lastErrorKind === 'auth') {
+          const lastSuccessAt = rows.reduce<number | null>((latest, row) => {
+            if (row.last_success_at == null) return latest
+            return latest == null || row.last_success_at > latest ? row.last_success_at : latest
+          }, null)
+          summary.credentialFailures.push({ tool: result.tool, lastSuccessAt })
         }
         for (const row of rows) {
           markFailure.run({
