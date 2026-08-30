@@ -768,9 +768,17 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
     // the ingest check further down; the token is still required there. One
     // says "you may read this dashboard", the other "you are this machine's
     // hook", and only the second is enough to write events.
+    //
+    // And it is only good for /api/agent/. The token travels the network on
+    // every hook POST — over Tailscale once the bind is not loopback — while
+    // cache.db never leaves the disk, so a leaked token must not become a
+    // read key for everything the dashboard shows. Narrowing costs nothing:
+    // agent-event only ever POSTs here, and the widget stays inside
+    // isPublicPath.
+    const tokenExempt = url.pathname.startsWith('/api/agent/') && hasValidIngestToken(req)
     if (
       dashboardPassword
-      && !hasValidIngestToken(req)
+      && !tokenExempt
       && shouldProtectApiPath(url.pathname, options?.isLoopbackBind !== false)
       && !isAuthenticated(dashboardPassword, req.headers.cookie)
     ) {

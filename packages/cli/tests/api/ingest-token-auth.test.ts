@@ -127,19 +127,35 @@ describe('the ingest token satisfies the dashboard password', () => {
     expect(response.status).not.toBe(401)
   })
 
-  it('lets a token holder read the dashboard API too, which is accepted', async () => {
-    // Stated rather than hedged: the token satisfies the password gate for
-    // every protected path, not only the agent endpoints. That is a widening,
-    // and it is acceptable because the token lives in state.json inside the
-    // 0700 data directory — anyone who can read it can already read the
-    // database the dashboard is a view of. The password keeps out the network,
-    // not the local filesystem.
+  it('does not let the token read anything outside /api/agent/', async () => {
+    // The token is a write credential for the hooks, not a login. It travels
+    // the network on every POST, so letting it also unlock the dashboard's
+    // data would make a leaked header as bad as a leaked password.
     const withToken = await request(server(), '/api/summary', {
       headers: { 'x-aiusage-token': TOKEN },
     })
-    expect(withToken.status).toBe(200)
+    expect(withToken.status).toBe(401)
 
     const without = await request(server(), '/api/summary')
     expect(without.status).toBe(401)
+  })
+
+  it('opens the agent endpoints and nothing else', async () => {
+    const agent = await request(server(), '/api/agent/sessions', {
+      headers: { 'x-aiusage-token': TOKEN },
+    })
+    expect(agent.status).toBe(200)
+
+    for (const path of ['/api/quotas', '/api/cost', '/api/sessions', '/api/config']) {
+      const response = await request(server(), path, { headers: { 'x-aiusage-token': TOKEN } })
+      expect(response.status, path).toBe(401)
+    }
+  })
+
+  it('lets the cookie holder read the dashboard, as before', async () => {
+    const { buildAuthCookie } = await import('../../src/auth.js')
+    const cookie = buildAuthCookie(PASSWORD).split(';')[0]
+    const response = await request(server(), '/api/summary', { headers: { cookie } })
+    expect(response.status).toBe(200)
   })
 })
