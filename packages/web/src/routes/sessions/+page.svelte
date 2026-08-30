@@ -85,36 +85,38 @@
   </div>
 {:else}
   <div class="card">
-    <table>
-      <thead>
-        <tr>
-          <th>{$t('sessions.time')}</th>
-          <th>{$t('sessions.tool')}</th>
-          <th>{$t('sessions.model')}</th>
-          <th>{$t('sessions.duration')}</th>
-          <th>{$t('sessions.toolCalls')}</th>
-          <th>{$t('sessions.input')}</th>
-          <th>{$t('sessions.output')}</th>
-          <th>{$t('sessions.cost')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each data.sessions as session}
-          <!-- svelte-ignore a11y-click-events-have-key-events -->
-          <!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
-          <tr class="clickable" on:click={() => goToDetail(session)}>
-            <td class="mono">{formatDateTime(session.ts)}</td>
-            <td>{session.tool}</td>
-            <td class="mono model">{session.model}</td>
-            <td class="mono muted">{formatDuration(session.duration)}</td>
-            <td class="mono">{session.toolCallCount ?? 0}</td>
-            <td class="mono green">{formatTokens(session.inputTokens)}</td>
-            <td class="mono blue">{formatTokens(session.outputTokens)}</td>
-            <td class="mono accent">{formatCost(session.cost)}</td>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>{$t('sessions.time')}</th>
+            <th>{$t('sessions.tool')}</th>
+            <th>{$t('sessions.model')}</th>
+            <th>{$t('sessions.duration')}</th>
+            <th>{$t('sessions.toolCalls')}</th>
+            <th>{$t('sessions.input')}</th>
+            <th>{$t('sessions.output')}</th>
+            <th>{$t('sessions.cost')}</th>
           </tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each data.sessions as session}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
+            <tr class="clickable" on:click={() => goToDetail(session)}>
+              <td class="mono">{formatDateTime(session.ts)}</td>
+              <td>{session.tool}</td>
+              <td class="mono model">{session.model}</td>
+              <td class="mono muted">{formatDuration(session.duration)}</td>
+              <td class="mono">{session.toolCallCount ?? 0}</td>
+              <td class="mono green">{formatTokens(session.inputTokens)}</td>
+              <td class="mono blue">{formatTokens(session.outputTokens)}</td>
+              <td class="mono accent">{formatCost(session.cost)}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="pagination">

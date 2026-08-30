@@ -272,3 +272,45 @@ Tailscale が落ちているとき:
 - Discord webhook は `config.credentials.discordWebhook` に置く。
   `notifications` セクションには置かない。API は設定済みか否かだけを返す。
   エラー文言は保存・ログ出力の前に URL をマスクする（`maskUrls`）。
+
+## 狭い画面のレイアウト
+
+判定は思い込みではなく実測で行う。dev サーバ（4847）に対して
+viewport を 360x800 / 412x900 にし、ページごとに次を測る。
+
+  documentElement.scrollWidth - clientWidth   … body の横スクロール量
+  viewport 右端を超える要素のうち、overflow-x が auto/scroll の祖先を
+  持たないもの                                … 横に引っぱっている犯人
+  高さ 44px 未満の操作部品                    … タップ領域
+
+SPA なので、`<a href>` を作って click() すればページを再読み込みせずに
+全ルートを1回の評価で回れる。ルートごとに navigate すると16回の再読込に
+なり、その間にデータが変わって前後比較が濁る。
+
+守る条件:
+
+- body そのものは横に動かさない。広い内容は自分の容器の中で動かす。
+- 列は隠さない。狭いから消す、はデータが無いのと同じ。
+- `.card` は角丸のために `overflow: hidden` を持つ。表を直下に置くと
+  はみ出した列が切り落とされ、スクロールもできなくなる。
+  表は `.table-scroll` で包む。card 側は触らない。
+- タップ領域の拡大は `@media (pointer: coarse)` の中だけで行う。
+  幅で分岐させると、狭くしたデスクトップのウィンドウまで変わる。
+- 本文中に並ぶリンクやボタン（/notifications の行ごとの「本文を表示」など）は
+  44px にしない。一覧が縦に間延びして読めなくなる方が害が大きい。
+
+デスクトップの退行確認は目視ではなく数値で行う。
+変更を `git stash` して再ビルドし、同じ probe を 1280px で流して
+主要要素の矩形を突き合わせる。データ量で変わる箇所があるので、
+行数も一緒に記録しておくとレイアウト差と区別できる。
+実際にこれで1件見つかった: /overview の `.tc-name` に
+`white-space: nowrap` を足したところ、デスクトップで2行だった行が
+1行になり card が 15px 縮んだ。`min-width: 0` だけに戻して解決した。
+
+dev サーバは `aiusage serve` で、ビルド済みの `packages/cli/dist/web` を
+配る。ソースを直しただけでは反映されない。
+`pnpm --filter @aiusage/web build` の後に
+`node packages/cli/scripts/copy-web.js` を実行し、dev サーバを再起動する。
+（フィルタ名は `@aiusage/web`。npm 公開名 `@juliantanx/aiusage-web` を
+ 指定しても pnpm は「一致なし」で終了コード0を返すので、
+ `&&` で繋いだ後続コマンドが走ってしまい、直したつもりで直っていない）

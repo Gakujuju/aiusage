@@ -217,34 +217,36 @@
   </div>
 
   <div class="card" style="margin-top: 1rem;">
-    <table>
-      <thead>
-        <tr>
-          <th>{$t('tokens.date')}</th>
-          <th>{$t('tokens.input')}</th>
-          <th>{$t('tokens.output')}</th>
-          <th>{$t('tokens.cacheRead')}</th>
-          <th>{$t('tokens.cacheWrite')}</th>
-          <th>{$t('tokens.thinking')}</th>
-          <th>{$t('tokens.total')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each data.data as day}
+    <div class="table-scroll">
+      <table>
+        <thead>
           <tr>
-            <td class="mono">{day.date}</td>
-            <td class="mono" style="color:var(--chart-input)">{formatTokens(day.inputTokens)}</td>
-            <td class="mono" style="color:var(--chart-output)">{formatTokens(day.outputTokens)}</td>
-            <td class="mono" style="color:var(--chart-cache-read)">{formatTokens(day.cacheReadTokens || 0)}</td>
-            <td class="mono" style="color:var(--chart-cache-write)">{formatTokens(day.cacheWriteTokens || 0)}</td>
-            <td class="mono" style="color:var(--chart-thinking)">{formatTokens(day.thinkingTokens || 0)}</td>
-            <td class="mono" style="color:var(--text); font-weight:600">
-              {formatTokens(getTotal(day))}
-            </td>
+            <th>{$t('tokens.date')}</th>
+            <th>{$t('tokens.input')}</th>
+            <th>{$t('tokens.output')}</th>
+            <th>{$t('tokens.cacheRead')}</th>
+            <th>{$t('tokens.cacheWrite')}</th>
+            <th>{$t('tokens.thinking')}</th>
+            <th>{$t('tokens.total')}</th>
           </tr>
-        {/each}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {#each data.data as day}
+            <tr>
+              <td class="mono">{day.date}</td>
+              <td class="mono" style="color:var(--chart-input)">{formatTokens(day.inputTokens)}</td>
+              <td class="mono" style="color:var(--chart-output)">{formatTokens(day.outputTokens)}</td>
+              <td class="mono" style="color:var(--chart-cache-read)">{formatTokens(day.cacheReadTokens || 0)}</td>
+              <td class="mono" style="color:var(--chart-cache-write)">{formatTokens(day.cacheWriteTokens || 0)}</td>
+              <td class="mono" style="color:var(--chart-thinking)">{formatTokens(day.thinkingTokens || 0)}</td>
+              <td class="mono" style="color:var(--text); font-weight:600">
+                {formatTokens(getTotal(day))}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </div>
 {/if}
 
@@ -370,9 +372,15 @@
     color: var(--text-muted);
     margin-top: 6px;
   }
+  /* Without wrapping, the five items were squeezed onto one line on a phone
+     and each label broke a character at a time — "キャッシュ読み取り" became a
+     vertical column of glyphs. Wrapping by item keeps each label whole. The
+     column gap is unchanged, so a desktop legend still fits on one line and
+     the row gap never comes into play. */
   .legend {
     display: flex;
-    gap: 1.25rem;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
     margin-top: 1rem;
     justify-content: center;
   }
@@ -382,11 +390,13 @@
     gap: 0.35rem;
     font-size: 0.75rem;
     color: var(--text-secondary);
+    white-space: nowrap;
   }
   .dot {
     width: 8px;
     height: 8px;
     border-radius: 2px;
+    flex-shrink: 0;
   }
   .dot.input { background: var(--chart-input); }
   .dot.output { background: var(--chart-output); }

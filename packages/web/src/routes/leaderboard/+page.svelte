@@ -495,6 +495,13 @@
     min-width: 0;
   }
 
+  /* The flex item holding the two lines of text has no min-width of its own,
+     so it refused to shrink below its content and its right edge was cut off
+     by the card. A flex item's default min-width: auto is the whole cause. */
+  .auth-panel > div {
+    min-width: 0;
+  }
+
   .status-dot {
     width: 8px;
     height: 8px;
@@ -724,6 +731,17 @@
   .primary-action:disabled {
     cursor: progress;
     opacity: 0.65;
+  }
+
+  /* Both controls below already carry a min-height, at a specificity the
+     layout's global touch-target rule cannot reach, so the coarse-pointer
+     size is raised here instead. Mouse pointers are unaffected. */
+  @media (pointer: coarse) {
+    .primary-action,
+    .text-action,
+    .interval-control select {
+      min-height: 44px;
+    }
   }
 
   .text-action:disabled {

@@ -966,6 +966,43 @@
     overflow: hidden;
   }
 
+  /*
+   * .card clips its overflow so the rounded corners hold, which silently cut
+   * the right-hand columns off every wide table on a phone — and because it
+   * clips rather than scrolls, those columns could not be reached at all.
+   * Wrapping the table in its own scroller fixes that without touching the
+   * card, so no column is ever hidden and the desktop layout is untouched.
+   *
+   * The edge cue is the Komarov shadow trick: two covers painted in the card
+   * colour scroll away with the content (attachment: local) and uncover two
+   * shadows pinned to the visible edges (attachment: scroll). When nothing
+   * overflows, both covers sit on top of both shadows and nothing shows —
+   * which is why a desktop-width table looks exactly as it did before.
+   *
+   * The shadow is --border-medium rather than a black overlay: black is
+   * invisible against the dark theme's surface, and the edge cue has to
+   * work in both themes. Both colours are existing tokens; no new design
+   * value is introduced.
+   */
+  :global(.table-scroll) {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-medium) transparent;
+    background:
+      linear-gradient(to right, var(--surface) 40%, transparent) 0 0 / 24px 100% no-repeat local,
+      linear-gradient(to left, var(--surface) 40%, transparent) 100% 0 / 24px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, var(--border-medium), transparent) 0 0 / 14px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, var(--border-medium), transparent) 100% 0 / 14px 100% no-repeat scroll;
+  }
+
+  /* Once the table can scroll there is no reason to squeeze a header into a
+     narrow column, and squeezing one broke Japanese labels a character at a
+     time — "キャッシュ読み取り" came out as a vertical strip of glyphs. On a
+     desktop the headers already fit on one line, so nothing changes there. */
+  :global(.table-scroll th) {
+    white-space: nowrap;
+  }
+
   :global(.section-title) {
     font-family: var(--mono);
     font-size: 0.75rem;
@@ -1131,5 +1168,75 @@
 
   @media (min-width: 801px) {
     .mobile-backdrop { display: none !important; }
+  }
+
+  /*
+   * ── Touch targets ─────────────────────────────────────────────────────
+   * Everything here is gated on a coarse pointer, so a mouse-driven browser
+   * at any width — including a narrow desktop window — renders exactly as it
+   * did before. Only the icon's hit area grows; the drawn size is untouched.
+   *
+   * This is deliberately limited to controls. Links sitting inside body text
+   * (the per-row "show body" links on /notifications, the cloud-setup links
+   * in settings) are left alone: padding them out to 44px would space a
+   * hundred-row list into something you cannot read, and the surrounding
+   * line height already keeps them apart.
+   */
+  @media (pointer: coarse) {
+    /* The only way to open navigation on a phone was a 24x19px button. */
+    .hamburger {
+      min-width: 44px;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+    }
+    .nav-item {
+      min-height: 44px;
+    }
+    .ctrl-btn {
+      min-height: 44px;
+    }
+    .mobile-controls .ctrl-btn {
+      min-width: 44px;
+      justify-content: center;
+    }
+
+    /* Shared page controls. Global selectors because each of these lives in
+       a component whose styles are scoped, and the policy belongs in one
+       place rather than copied into six files. */
+    :global(.date-range button),
+    :global(.date-range select),
+    :global(.date-range input),
+    :global(.tool-btn),
+    :global(.device-selector select),
+    :global(.field-input),
+    :global(.card-tab),
+    :global(.pagination button),
+    :global(.btn-save),
+    :global(.btn-ghost),
+    :global(.cfg-btn),
+    :global(.now-btn),
+    :global(.mode-btn),
+    :global(.refresh-btn),
+    :global(.type-tabs button),
+    :global(.btn-sm),
+    :global(.toggle-btn),
+    :global(.model-filter-input),
+    :global(.not-found-toggle) {
+      min-height: 44px;
+    }
+    /* /leaderboard's two controls set their own min-height at a higher
+       specificity than a :global() selector can reach, so they are raised
+       in that page's own stylesheet instead. */
+    /* Height alone does not help a checkbox; it is the box that is small. */
+    :global(.toggle input[type='checkbox']),
+    :global(.show-all input[type='checkbox']) {
+      width: 22px;
+      height: 22px;
+    }
+    :global(.toggle),
+    :global(.show-all) {
+      min-height: 44px;
+    }
   }
 </style>

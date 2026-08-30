@@ -109,7 +109,7 @@
       <div class="row animate-row">
         <span class="rank mono">#{i + 1}</span>
         <span class="name mono">
-          {tc.displayName}
+          <span class="name-text">{tc.displayName}</span>
           {#if tc.type === 'mcp'}
             <span class="badge badge-mcp">{$t('toolCalls.badgeMcp')}</span>
           {:else if tc.type === 'skill'}
@@ -194,6 +194,15 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* .name is a flex row, so the bare text node was an anonymous flex item
+     that could not shrink and pushed the badge past the clipped edge. Giving
+     the text its own element lets it truncate and keeps the badge visible. */
+  .name-text {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

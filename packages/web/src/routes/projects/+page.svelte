@@ -150,4 +150,41 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+
+  /*
+   * The desktop row is a six-column grid whose fixed columns alone need
+   * 572px, so on a phone it dragged the whole page sideways. Unlike the
+   * tables on /sessions and /tokens this list has no header row, so the
+   * columns that scrolled out of view would have come back as three bare
+   * numbers with nothing naming them — that is why this one page stacks
+   * instead of scrolling. 640px is where the row stops fitting (viewport
+   * minus the 1rem page padding at the mobile breakpoint), not a new
+   * design breakpoint; above it the grid above is untouched.
+   */
+  @media (max-width: 640px) {
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.6rem;
+    }
+    .rank {
+      flex: 0 0 auto;
+    }
+    .name {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+    .bar-container {
+      flex: 1 0 100%;
+    }
+    .tokens {
+      flex: 1 1 auto;
+      text-align: left;
+    }
+    .cost,
+    .pct {
+      flex: 0 0 auto;
+    }
+  }
 </style>

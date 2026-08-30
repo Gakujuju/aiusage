@@ -284,13 +284,20 @@
     width: 2rem;
     flex-shrink: 0;
   }
+  /* A flex item defaults to min-width: auto, so a long tool name refused to
+     shrink and pushed the call count past the card's clipped edge — the
+     number simply was not there on a phone. min-width alone is the fix;
+     truncating instead of wrapping was tried and rejected, because it made
+     an already-wrapping desktop row one line shorter. */
   .tc-name {
     flex: 1;
+    min-width: 0;
     font-size: 0.8rem;
     font-weight: 500;
     color: var(--text);
   }
   .tc-count {
+    flex-shrink: 0;
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--accent);
