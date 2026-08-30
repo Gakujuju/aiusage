@@ -24,7 +24,7 @@ import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../n
 import { drainAgentEventSpool } from './agent-event.js'
 import { runCodexLogTick } from '../agent/codex-log-watcher.js'
 import { queryAllQuotas } from '../quota.js'
-import { hostname } from 'node:os'
+import { hostname, platform } from 'node:os'
 import { fetchExchangeRate, CACHE_TTL_MS } from '@aiusage/core'
 import type Database from 'better-sqlite3'
 
@@ -365,14 +365,18 @@ export function serve(options: ServeOptions): void {
   const codexLogWatcher = setInterval(() => {
     if (runtimeSettings.isParseInFlight()) return
     const now = Date.now()
+    // Read per tick rather than captured once: the same resolution the hook
+    // client uses, so both tools name this machine the same way. Reading it
+    // here also means a device rename takes effect without a restart.
+    const watcherConfig = loadConfig()
     void runDbWrite(() => runCodexLogTick({
       db: options.db,
       now,
       applyEvents: (events) => applyAgentEvents(options.db, events, {
-        projectRoots: loadConfig()?.projectRoots,
-        device: hostname(),
+        projectRoots: watcherConfig?.projectRoots,
+        device: watcherConfig?.device || hostname() || '',
         deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? 'unknown',
-        platform: process.platform,
+        platform: watcherConfig?.platform || platform(),
         now,
       }, agentEmitter).applied,
     })).catch((err) => console.error('[serve] codex log watcher failed:', err))

@@ -408,3 +408,30 @@ describe('formatting helpers', () => {
     expect(renderDiscordContent({ title: 'a', body: '' })).toBe('a')
   })
 })
+
+describe('formatSessionMessage — project line', () => {
+  const base = {
+    status: 'waiting_for_user' as const,
+    lastEventKind: 'stop' as const,
+    device: '自宅PC',
+    tool: 'codex',
+    statusSince: T0,
+    now: T0 + 3000,
+    config: { enabled: true },
+  }
+
+  it('names the project when there is one', () => {
+    const message = formatSessionMessage({ ...base, project: 'aiusage' })
+    expect(message?.body).toContain('プロジェクト: aiusage')
+  })
+
+  it('omits the line entirely when there is no project', () => {
+    // Codex Desktop's scratch directory is not a project, so the watcher
+    // leaves cwd unset for it. An empty 'プロジェクト:' would read worse than
+    // no line at all.
+    const message = formatSessionMessage({ ...base, project: '' })
+    expect(message?.body).not.toContain('プロジェクト')
+    // The rest of the message is unaffected.
+    expect(message?.body).toContain('経過:')
+  })
+})

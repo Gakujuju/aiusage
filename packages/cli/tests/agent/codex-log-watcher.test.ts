@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import Database from 'better-sqlite3'
 import { initializeDatabase } from '../../src/db/index.js'
 import { applyAgentEvents } from '../../src/db/agent-sessions.js'
@@ -15,6 +15,8 @@ import {
   readSessionHeader,
   runCodexLogTick,
   loadCursors,
+  sessionStartFromFilename,
+  isCodexScratchCwd,
   type CodexLogLine,
 } from '../../src/agent/codex-log-watcher.js'
 
@@ -436,5 +438,227 @@ describe('readNewEvents', () => {
     const result = readNewEvents(join(dir, 'gone.jsonl'), undefined, NOW)
     expect(result.events).toEqual([])
     expect(result.firstSight).toBe(false)
+  })
+})
+
+describe('sessionStartFromFilename', () => {
+  it('reads the stamp Codex puts at the front of the name', () => {
+    expect(sessionStartFromFilename(`/a/b/rollout-${SESSION_STAMP}.jsonl`))
+      .toBe(new Date(2026, 7, 30, 1, 27, 17).getTime())
+    expect(sessionStartFromFilename('C:\\dir\\rollout-2026-08-30T11-19-25-01a05076.jsonl'))
+      .toBe(new Date(2026, 7, 30, 11, 19, 25).getTime())
+  })
+
+  it('returns null for anything it cannot read, so the caller tails', () => {
+    expect(sessionStartFromFilename('/a/rollout-nope.jsonl')).toBeNull()
+    expect(sessionStartFromFilename('/a/session.jsonl')).toBeNull()
+    expect(sessionStartFromFilename('')).toBeNull()
+  })
+})
+
+describe('isCodexScratchCwd', () => {
+  const home = 'C:\\Users\\me'
+
+  it('recognises the Desktop scratch directory', () => {
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30\\1', home)).toBe(true)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30\\12', home)).toBe(true)
+    expect(isCodexScratchCwd('/home/me/Documents/Codex/2026-08-30/1', '/home/me')).toBe(true)
+    // What the real one looked like: the leaf carries a sub-index.
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30\\1-1', home)).toBe(true)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30\\12-3', home)).toBe(true)
+  })
+
+  it('leaves a real project under Documents/Codex alone', () => {
+    // Both the date and the numeric leaf are required, or someone who keeps
+    // their work at Documents/Codex loses their project name.
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex', home)).toBe(false)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\my-app', home)).toBe(false)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30', home)).toBe(false)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30\\1\\src', home)).toBe(false)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\notes\\1', home)).toBe(false)
+    expect(isCodexScratchCwd('C:\\Users\\me\\Documents\\Codex\\2026-08-30\\draft-1', home)).toBe(false)
+  })
+
+  it('requires the path to be under the home directory', () => {
+    expect(isCodexScratchCwd('D:\\Documents\\Codex\\2026-08-30\\1', home)).toBe(false)
+    expect(isCodexScratchCwd('C:\\Users\\other\\Documents\\Codex\\2026-08-30\\1', home)).toBe(false)
+  })
+
+  it('leaves an ordinary project directory alone', () => {
+    expect(isCodexScratchCwd('C:\\Users\\me\\Desktop\\shijo-parking-guide', home)).toBe(false)
+  })
+})
+
+describe('a session that just started', () => {
+  let dir: string
+  let db: Database.Database
+  let warn: string[]
+  let now: number
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'codex-fresh-'))
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    warn = []
+    now = Date.now()
+  })
+
+  afterEach(() => {
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** A rollout file whose name says the session started agoMs ago. */
+  function fileStartedAgo(agoMs: number, lines: string[], pad = 0): string {
+    const at = new Date(now - agoMs)
+    const two = (n: number) => String(n).padStart(2, '0')
+    const stamp =
+      `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())}T` +
+      `${two(at.getHours())}-${two(at.getMinutes())}-${two(at.getSeconds())}`
+    const dayDir = dayDirFor(dir, now)
+    mkdirSync(dayDir, { recursive: true })
+    const file = join(dayDir, `rollout-${stamp}-01a04e58-cafe.jsonl`)
+    let body = lines.join('\n') + '\n'
+    if (pad > 0) {
+      // Padding goes in as complete lines the mapper ignores, so the file grows
+      // without changing which events it would produce.
+      const filler = JSON.stringify({
+        timestamp: at.toISOString(),
+        type: 'response_item',
+        payload: { type: 'x', pad: 'y'.repeat(500) },
+      })
+      while (body.length < pad) body += filler + '\n'
+    }
+    writeFileSync(file, body)
+    return file
+  }
+
+  function tick(config?: { device?: string; platform?: string }) {
+    return runCodexLogTick({
+      db,
+      now,
+      sessionsDir: dir,
+      activeWindowMs: Number.MAX_SAFE_INTEGER,
+      onWarn: (m) => warn.push(m),
+      applyEvents: (events) => applyAgentEvents(db, events, {
+        // Matching this machine's config, where Desktop holds the projects.
+        projectRoots: ['Desktop'],
+        device: config?.device ?? 'dev',
+        deviceInstanceId: 'dii',
+        platform: config?.platform ?? 'win32',
+        now,
+      }).applied,
+    })
+  }
+
+  function sessionRow() {
+    return db.prepare("SELECT * FROM agent_sessions WHERE tool = 'codex'").get() as any
+  }
+
+  function kinds(): string[] {
+    return (db.prepare('SELECT kind FROM agent_session_events ORDER BY rowid').all() as Array<{ kind: string }>)
+      .map((r) => r.kind)
+  }
+
+  const TURN = [metaLine(), TASK_STARTED_LINE, USER_LINE, TASK_COMPLETE_LINE]
+
+  it('reads a file from the start when its name says it began minutes ago', () => {
+    // Tailing a brand-new file loses its opening turn every time: measured on
+    // a real session, session_meta and user_message were skipped and the row
+    // sat at turn_count 0 with only task_complete recorded.
+    fileStartedAgo(60_000, TURN)
+
+    const result = tick()
+
+    expect(result.firstSeen).toBe(1)
+    expect(kinds()).toEqual(['session_start', 'user_prompt', 'user_prompt', 'stop'])
+    expect(sessionRow().turn_count).toBe(1)
+    expect(sessionRow().status).toBe('waiting_for_user')
+  })
+
+  it('tails a file whose session started before the window', () => {
+    fileStartedAgo(11 * 60_000, TURN)
+
+    const result = tick()
+
+    expect(result.firstSeen).toBe(1)
+    expect(kinds()).toEqual(['process_scan'])
+    expect(sessionRow().status).toBe('unknown')
+    expect(sessionRow().turn_count).toBe(0)
+  })
+
+  it('tails a fresh file that is already too large, and says so', () => {
+    // Ten minutes does not produce five megabytes in normal use, so whatever
+    // this is, it is not the case the exception was written for.
+    fileStartedAgo(60_000, TURN, 6 * 1024 * 1024)
+
+    tick()
+
+    expect(kinds()).toEqual(['process_scan'])
+    expect(warn).toHaveLength(1)
+    expect(warn[0]).toContain('MB')
+  })
+
+  it('tails a file whose name carries no timestamp', () => {
+    // An unreadable name means unknown age, and unknown age counts as old.
+    const dayDir = dayDirFor(dir, now)
+    mkdirSync(dayDir, { recursive: true })
+    writeFileSync(join(dayDir, 'rollout-mystery.jsonl'), TURN.join('\n') + '\n')
+
+    tick()
+
+    expect(kinds()).toEqual(['process_scan'])
+  })
+
+  it('does not re-read a fresh file on the next tick', () => {
+    const file = fileStartedAgo(60_000, TURN)
+    tick()
+    const after = kinds().length
+
+    tick()
+    expect(kinds()).toHaveLength(after)
+    expect(loadCursors(db, 'codex').get(file)!.byte_offset).toBe(statSync(file).size)
+  })
+
+  it('names the device from config rather than the host', () => {
+    fileStartedAgo(60_000, TURN)
+    tick({ device: '自宅PC' })
+    expect(sessionRow().device).toBe('自宅PC')
+  })
+
+  it('lets a later event correct a device recorded under the wrong name', () => {
+    // The watcher shipped filling this with hostname(), so an existing row can
+    // hold a name the user never chose. It has to be able to change.
+    const file = fileStartedAgo(60_000, [metaLine()])
+    tick({ device: 'DESKTOP-QOS4C85' })
+    expect(sessionRow().device).toBe('DESKTOP-QOS4C85')
+
+    appendFileSync(file, [TASK_STARTED_LINE, USER_LINE].join('\n') + '\n')
+    tick({ device: '自宅PC' })
+    expect(sessionRow().device).toBe('自宅PC')
+  })
+
+  it('leaves the project empty for the Codex Desktop scratch directory', () => {
+    const scratch = join(homedir(), 'Documents', 'Codex', '2026-08-30', '1-1')
+    fileStartedAgo(60_000, [metaLine(scratch), TASK_STARTED_LINE, USER_LINE, TASK_COMPLETE_LINE])
+
+    tick()
+
+    const row = sessionRow()
+    expect(row.project).toBe('')
+    // cwd goes with it: recording it would only name a project that is not
+    // one, and it is an absolute path nothing else needs.
+    expect(row.cwd).toBe('')
+  })
+
+  it('still resolves the project when Codex runs in a real one', () => {
+    const real = join(homedir(), 'Desktop', 'shijo-parking-guide')
+    fileStartedAgo(60_000, [metaLine(real), TASK_STARTED_LINE, USER_LINE])
+
+    tick()
+
+    const row = sessionRow()
+    expect(row.cwd).toBe(real)
+    expect(row.project).toBe('shijo-parking-guide')
   })
 })

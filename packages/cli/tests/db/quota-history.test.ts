@@ -404,6 +404,9 @@ describe('recordQuotaSnapshot', () => {
   })
 
   it('starts announcing again in a new window', () => {
+    // The first reading is only a baseline — we did not watch it cross
+    // anything — so the announcement comes on the second.
+    record(db, [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: RESET_A }])], t0 - 60_000)
     record(db, [success('codex', [{ name: 'five_hour', utilization: 90, resetsAt: RESET_A }])], t0)
     expect((db.prepare('SELECT notified_level FROM quota_current').get() as any).notified_level).toBe(80)
 

@@ -33,6 +33,26 @@ export const ACTIVE_WINDOW_MS = 30 * 60 * 1000
  */
 export const SCAN_DAYS = 7
 
+/**
+ * How new a session has to be for its whole file to be read on first sight.
+ *
+ * A session that started seconds ago has no backlog to replay, and starting
+ * at the end of it loses the opening turn every time — measured: a session
+ * whose session_meta and user_message were skipped ended up at turn_count 0.
+ * Within ten minutes the cost of missing the first turn outweighs the risk of
+ * replaying: ten minutes can be thousands of lines, but they are lines from
+ * work happening right now, which is what there is to report.
+ */
+export const FRESH_SESSION_MS = 10 * 60 * 1000
+
+/**
+ * Size past which even a fresh file is tailed instead.
+ *
+ * Ten minutes does not produce five megabytes of rollout in normal use, so a
+ * file this large is something other than what the rule was written for.
+ */
+export const FRESH_SESSION_MAX_BYTES = 5 * 1024 * 1024
+
 /** Bytes to read per file per tick. A tail should never be a full read. */
 const MAX_READ_BYTES = 1 << 20
 
@@ -87,7 +107,7 @@ export function eventForLine(line: CodexLogLine, sessionId: string): AgentEventI
 
   switch (line.eventType) {
     case 'session_meta':
-      return { ...base, kind: 'session_start', cwd: readCwd(line.payload) }
+      return { ...base, kind: 'session_start', cwd: projectCwd(readCwd(line.payload)) }
     case 'user_message':
       // The only line that begins a turn as far as the counter is concerned.
       return { ...base, kind: 'user_prompt', countsAsTurn: true }
@@ -106,6 +126,18 @@ export function eventForLine(line: CodexLogLine, sessionId: string): AgentEventI
 function readCwd(payload: Record<string, unknown>): string | undefined {
   const cwd = payload.cwd
   return typeof cwd === 'string' && cwd ? cwd : undefined
+}
+
+/**
+ * The cwd to record, or undefined when it names no project.
+ *
+ * The scratch directory is still the real working directory, but recording it
+ * would name a project that does not exist. Leaving it unset leaves project
+ * empty, and the notification simply omits the line.
+ */
+function projectCwd(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined
+  return isCodexScratchCwd(cwd) ? undefined : cwd
 }
 
 /**
@@ -140,6 +172,57 @@ export function sanitizePayload(
 
   if (dropped.length > 0) kept._droppedKeys = dropped
   return kept
+}
+
+/**
+ * When the session began, from the rollout filename.
+ *
+ * `rollout-2026-08-30T11-19-25-<uuid>.jsonl` — the leading stamp is the
+ * session start. Deliberately not the file's birthtime: copying, syncing or
+ * restoring from a backup rewrites birthtime, and a file that looks newly
+ * created would then have its whole history replayed as live events. The name
+ * survives all of that.
+ *
+ * Returns null when the name does not carry a stamp, which the caller reads
+ * as "not known to be fresh" — the safe direction.
+ */
+export function sessionStartFromFilename(file: string): number | null {
+  const name = file.split(/[\\/]/).pop() ?? ''
+  const match = name.match(/^rollout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-/)
+  if (!match) return null
+  const [, y, mo, d, h, mi, sec] = match
+  // Local time: Codex writes the name from the local clock, and the whole
+  // comparison is against Date.now() on the same machine.
+  const ms = new Date(
+    Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec),
+  ).getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
+/**
+ * Codex Desktop's ad-hoc scratch directory, which is not a project.
+ *
+ * `<home>/Documents/Codex/<YYYY-MM-DD>/<n>` is where Codex Desktop puts a
+ * session started without a folder. Named after the tool, it otherwise
+ * resolves to the project "Codex" and the notification reads "プロジェクト:
+ * Codex", as though such a project existed.
+ *
+ * Both the date and the numeric leaf are required, and the path has to be
+ * under the home directory — someone with a real project at
+ * Documents/Codex should keep it. Codex-specific, so it lives here rather
+ * than in the shared extractProjectFromCwd.
+ */
+export function isCodexScratchCwd(cwd: string, home: string = homedir()): boolean {
+  if (!cwd || !home) return false
+  const norm = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '')
+  const path = norm(cwd)
+  const base = norm(home)
+  if (!path.toLowerCase().startsWith(base.toLowerCase() + '/')) return false
+  const rest = path.slice(base.length + 1)
+  // The leaf is a sequence number, sometimes with a sub-index: the observed
+  // value was '1-1', not '1'. Digits and hyphens only, so a directory with a
+  // name someone chose still reads as a project.
+  return /^Documents\/Codex\/\d{4}-\d{2}-\d{2}\/\d+(?:-\d+)*$/i.test(rest)
 }
 
 /** One JSONL line, reduced to the three things that matter. */
@@ -256,8 +339,16 @@ export interface ReadResult {
   size: number
   /** True when the file shrank and the tail was skipped rather than replayed. */
   truncated: boolean
-  /** True the first time this file is seen; no events are produced. */
+  /**
+   * True the first time this file is seen.
+   *
+   * Usually means no events were produced. A file whose name says the session
+   * started within FRESH_SESSION_MS is read from the start instead, so it can
+   * be both first sight and carry events.
+   */
   firstSight: boolean
+  /** Fresh enough to read whole, but too large to be worth it. */
+  oversizedFresh?: boolean
   sessionId: string
 }
 
@@ -284,20 +375,34 @@ export function readNewEvents(
   }
 
   if (!cursor) {
-    return { events: [], offset: size, size, truncated: false, firstSight: true, sessionId }
+    const startedAt = sessionStartFromFilename(file)
+    const fresh = startedAt != null && now - startedAt <= FRESH_SESSION_MS && now >= startedAt
+    if (!fresh) {
+      return { events: [], offset: size, size, truncated: false, firstSight: true, sessionId }
+    }
+    if (size > FRESH_SESSION_MAX_BYTES) {
+      return {
+        events: [], offset: size, size, truncated: false, firstSight: true,
+        oversizedFresh: true, sessionId,
+      }
+    }
+    // Fall through and read from 0: a session this new has no backlog, and
+    // starting at the end would drop its opening turn.
   }
 
-  if (size < cursor.last_size) {
+  // Both checks are about a cursor we already hold; a fresh first sight falls
+  // through to read from zero and has neither an offset nor a previous size.
+  if (cursor && size < cursor.last_size) {
     // Truncated or replaced. The stored offset points into a file that no
     // longer exists in that shape; resuming at 0 would replay what is left.
     return { events: [], offset: size, size, truncated: true, firstSight: false, sessionId }
   }
 
-  if (size <= cursor.byte_offset) {
+  if (cursor && size <= cursor.byte_offset) {
     return { events: [], offset: cursor.byte_offset, size, truncated: false, firstSight: false, sessionId }
   }
 
-  const start = cursor.byte_offset
+  const start = cursor?.byte_offset ?? 0
   const wanted = Math.min(size - start, MAX_READ_BYTES)
   const buffer = Buffer.allocUnsafe(wanted)
   let read = 0
@@ -306,7 +411,7 @@ export function readNewEvents(
     fd = openSync(file, 'r')
     read = readSync(fd, buffer, 0, wanted, start)
   } catch {
-    return { events: [], offset: start, size, truncated: false, firstSight: false, sessionId }
+    return { events: [], offset: start, size, truncated: false, firstSight: cursor == null, sessionId }
   } finally {
     if (fd != null) closeSync(fd)
   }
@@ -316,7 +421,7 @@ export function readNewEvents(
   // written. Leaving it behind means the offset resumes at its start.
   const lastNewline = chunk.lastIndexOf('\n')
   if (lastNewline === -1) {
-    return { events: [], offset: start, size, truncated: false, firstSight: false, sessionId }
+    return { events: [], offset: start, size, truncated: false, firstSight: cursor == null, sessionId }
   }
 
   const complete = chunk.slice(0, lastNewline)
@@ -330,7 +435,7 @@ export function readNewEvents(
     if (event) events.push(event)
   }
 
-  return { events, offset: start + consumed, size, truncated: false, firstSight: false, sessionId }
+  return { events, offset: start + consumed, size, truncated: false, firstSight: cursor == null, sessionId }
 }
 
 export function loadCursors(db: Database.Database, tool: string): Map<string, CursorRow> {
@@ -443,22 +548,41 @@ export function runCodexLogTick(options: TickOptions): TickResult {
     const cursor = cursors.get(file)
     const read = readNewEvents(file, cursor, now)
 
+    if (read.oversizedFresh) {
+      warn(
+        `[codex-log] ${file} claims to have started within ` +
+        `${Math.round(FRESH_SESSION_MS / 60000)} minutes but is already ` +
+        `${Math.round(read.size / 1024 / 1024)} MB; tailing it instead of ` +
+        'reading it whole'
+      )
+    }
+
     if (read.firstSight) {
       result.firstSeen++
-      const header = readSessionHeader(file)
-      // No status: this registers the session, it does not describe it.
-      result.eventsApplied += options.applyEvents([{
-        sessionId: read.sessionId,
-        tool: 'codex',
-        kind: 'process_scan',
-        ts: now,
-        source: 'log',
-        detail: 'first_sight',
-        cwd: header ? readCwd(header.payload) : undefined,
-        payload: header
-          ? sanitizePayload('session_meta', header.payload)
-          : { event_type: 'first_sight' },
-      }])
+
+      // A fresh session was read from the start, so its own session_meta is
+      // already among the events. Registering it again would only overwrite
+      // what those events said with a status-less placeholder.
+      if (read.events.length === 0) {
+        const header = readSessionHeader(file)
+        // No status: this registers the session, it does not describe it.
+        result.eventsApplied += options.applyEvents([{
+          sessionId: read.sessionId,
+          tool: 'codex',
+          kind: 'process_scan',
+          ts: now,
+          source: 'log',
+          detail: 'first_sight',
+          cwd: header ? projectCwd(readCwd(header.payload)) : undefined,
+          payload: header
+            ? sanitizePayload('session_meta', header.payload)
+            : { event_type: 'first_sight' },
+        }])
+      } else {
+        result.filesRead++
+        result.eventsApplied += options.applyEvents(read.events)
+      }
+
       saveCursor(db, file, 'codex', read.offset, read.size, now)
       continue
     }

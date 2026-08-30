@@ -10,7 +10,7 @@
 | 2 | 日本語化 | 完了・main マージ済み |
 | 3 | 端末識別 | 完了（device / deviceInstanceId） |
 | 4 | Claude Code Hook 取り込み | 完了（8イベント、実データ確認済み） |
-| 5 | Codex の状態取得 | 完了（rollout ログ追尾・D18） |
+| 5 | Codex の状態取得 | 完了・実データ確認済み（rollout ログ追尾・D18） |
 | 6-A | クォータ履歴・枯渇予測 | 完了（Claude / Codex で稼働中） |
 | 6-B | 状態管理・作業時間計測 | 完了 |
 | 7 | Discord 通知統合 | 完了（段階2 併走中） |

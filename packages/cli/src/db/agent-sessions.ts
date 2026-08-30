@@ -392,8 +392,12 @@ export function applyAgentEvents(
         cwd: cwd || row.cwd,
         project: cwd ? extractProjectFromCwd(cwd, ctx.projectRoots) : row.project,
         pid: Number.isFinite(event.pid) ? event.pid : row.pid,
-        device: event.device || row.device,
-        platform: event.platform || row.platform,
+        // ctx before the stored row, matching the insert. A session first seen
+        // under the wrong device name — a producer that had not read config
+        // yet — would otherwise keep it for the rest of its life, and the same
+        // machine would show up twice in the notification feed.
+        device: event.device || ctx.device || row.device,
+        platform: event.platform || ctx.platform || row.platform,
         lastPromptAt: event.kind === 'user_prompt' ? ts : row.last_prompt_at,
         lastPromptPreview: ctx.storePromptPreview && promptText
           ? truncate(promptText, MAX_PROMPT_PREVIEW_CHARS)
