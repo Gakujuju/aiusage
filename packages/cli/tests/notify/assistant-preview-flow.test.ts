@@ -152,3 +152,129 @@ describe('preview reaches the notification body', () => {
     expect(payloads).toContain('assistant_preview')
   })
 })
+
+describe('stage-3 prerequisites, end to end', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    config.value = { notifications: NOTIFY_ON }
+  })
+
+  afterEach(() => {
+    db.close()
+    config.value = undefined
+  })
+
+  function apply(events: Parameters<typeof applyAgentEvents>[1], now: number, ctx: any = {}) {
+    return applyAgentEvents(db, events, {
+      device: '自宅PC', deviceInstanceId: 'dii', platform: 'win32', now, ...ctx,
+    })
+  }
+
+  function notify(sessionPk: string, now: number, ctx: any = {}) {
+    return notifySessionChange({ db, config: NOTIFY_ON, now, ...ctx }, sessionPk)
+  }
+
+  function lastBody(): string {
+    const row = db.prepare('SELECT body FROM notifications ORDER BY rowid DESC LIMIT 1')
+      .get() as { body: string } | undefined
+    return row?.body ?? ''
+  }
+
+  function lastTitle(): string {
+    const row = db.prepare('SELECT title FROM notifications ORDER BY rowid DESC LIMIT 1')
+      .get() as { title: string } | undefined
+    return row?.title ?? ''
+  }
+
+  it('says nothing when a session merely opened', () => {
+    const result = apply([{
+      sessionId: 's-start', tool: 'claude-code', kind: 'session_start',
+      ts: T0, source: 'hook',
+    }], T0)
+    const pk = result.sessions[0].id
+
+    // The session is at waiting_for_user, which is correct — it is waiting
+    // for the first prompt — but nothing is announced.
+    expect((db.prepare('SELECT status FROM agent_sessions WHERE id = ?').get(pk) as any).status)
+      .toBe('waiting_for_user')
+    const decision = notify(pk, T0 + 1000)
+    expect(decision).toEqual({ enqueued: false, reason: 'no_label' })
+    expect((db.prepare('SELECT COUNT(*) AS n FROM notifications').get() as any).n).toBe(0)
+  })
+
+  it('still announces a turn that finished', () => {
+    apply([{ sessionId: 's-stop', tool: 'claude-code', kind: 'user_prompt', ts: T0, source: 'hook' }], T0)
+    const result = apply([{
+      sessionId: 's-stop', tool: 'claude-code', kind: 'stop', ts: T0 + 60_000, source: 'hook',
+      payload: { event_type: 'stop', assistant_preview: '完了報告: 直しました' },
+    }], T0 + 60_000)
+    const pk = result.sessions[result.sessions.length - 1].id
+
+    expect(notify(pk, T0 + 61_000).enqueued).toBe(true)
+    expect(lastTitle()).toContain('作業完了')
+    expect(lastBody()).toContain('応答: 完了報告: 直しました')
+  })
+
+  it('shows the project under its configured name', () => {
+    apply([{
+      sessionId: 's-alias', tool: 'claude-code', kind: 'user_prompt', ts: T0, source: 'hook',
+      cwd: 'C:\\Users\\me\\Desktop\\shijo-parking-guide',
+    }], T0, { projectRoots: ['Desktop'] })
+    const result = apply([{
+      sessionId: 's-alias', tool: 'claude-code', kind: 'stop', ts: T0 + 60_000, source: 'hook',
+    }], T0 + 60_000, { projectRoots: ['Desktop'] })
+    const pk = result.sessions[result.sessions.length - 1].id
+
+    // Without the alias this reads "shijo-parking-guide", which is what
+    // removing the PowerShell notifier would otherwise have caused.
+    expect(notify(pk, T0 + 61_000, {
+      projectAliases: { 'shijo-parking-guide': '四条駐車場プロジェクト' },
+    }).enqueued).toBe(true)
+    expect(lastBody()).toContain('プロジェクト: 四条駐車場プロジェクト')
+  })
+
+  it('reports throttling when two kinds land on one status in quick succession', () => {
+    // Worth stating what throttling can and cannot catch. applyAgentEvents
+    // clears notify_state and notified_at whenever the *status* changes, so a
+    // new status is always announced however fast it arrives. The interval
+    // only bites when the status held and the kind changed — Stop followed by
+    // StopFailure, which both sit at waiting_for_user.
+    apply([{ sessionId: 's-throttle', tool: 'claude-code', kind: 'user_prompt', ts: T0, source: 'hook' }], T0)
+    const first = apply([{
+      sessionId: 's-throttle', tool: 'claude-code', kind: 'stop', ts: T0 + 60_000, source: 'hook',
+    }], T0 + 60_000)
+    const pk = first.sessions[first.sessions.length - 1].id
+    expect(notify(pk, T0 + 60_000).enqueued).toBe(true)
+
+    apply([{
+      sessionId: 's-throttle', tool: 'claude-code', kind: 'stop_failure', ts: T0 + 62_000, source: 'hook',
+    }], T0 + 62_000)
+
+    const decision = notifySessionChange(
+      { db, config: { ...NOTIFY_ON, minIntervalMs: 30_000 }, now: T0 + 62_000 },
+      pk,
+    )
+    expect(decision).toEqual({ enqueued: false, reason: 'throttled' })
+  })
+
+  it('always announces a new status, however fast it arrives', () => {
+    // The other half of the same rule, stated on purpose: back-to-back turns
+    // are each announced, because each is a status change.
+    apply([{ sessionId: 's-fast', tool: 'claude-code', kind: 'user_prompt', ts: T0, source: 'hook' }], T0)
+    const first = apply([{
+      sessionId: 's-fast', tool: 'claude-code', kind: 'stop', ts: T0 + 1_000, source: 'hook',
+    }], T0 + 1_000)
+    const pk = first.sessions[first.sessions.length - 1].id
+    expect(notifySessionChange({ db, config: { ...NOTIFY_ON, minIntervalMs: 30_000 }, now: T0 + 1_000 }, pk).enqueued)
+      .toBe(true)
+
+    apply([{ sessionId: 's-fast', tool: 'claude-code', kind: 'user_prompt', ts: T0 + 2_000, source: 'hook' }], T0 + 2_000)
+    apply([{ sessionId: 's-fast', tool: 'claude-code', kind: 'stop', ts: T0 + 3_000, source: 'hook' }], T0 + 3_000)
+
+    expect(notifySessionChange({ db, config: { ...NOTIFY_ON, minIntervalMs: 30_000 }, now: T0 + 3_000 }, pk).enqueued)
+      .toBe(true)
+  })
+})

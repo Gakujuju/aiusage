@@ -70,13 +70,26 @@ describe('assistant preview capture (Claude Code hooks)', () => {
     expect((event?.payload?.assistant_preview as string).length).toBe(201)
   })
 
-  it('folds newlines and runs of spaces into single spaces', () => {
+  it('captures the one line worth showing, not the whole reply flattened', () => {
     config.value = { notifications: { includeAssistantMessage: true } }
     const event = buildAgentEvent(stopHook({
       last_assistant_message: '  done.\n\n  next:   two   things\n',
     }), {})
 
-    expect(event?.payload?.assistant_preview).toBe('done. next: two things')
+    expect(event?.payload?.assistant_preview).toBe('done.')
+  })
+
+  it('reaches past the cap for the line that states the outcome', () => {
+    // The selection runs on the whole message before anything is trimmed, so
+    // a conclusion buried after a long preamble still makes it into the
+    // notification — while only that line is stored.
+    config.value = { notifications: { includeAssistantMessage: true } }
+    const event = buildAgentEvent(stopHook({
+      last_assistant_message: 'あ'.repeat(400) + '\n完了報告: 直しました',
+    }), {})
+
+    expect(event?.payload?.assistant_preview).toBe('完了報告: 直しました')
+    expect(JSON.stringify(event?.payload)).not.toContain('あああ')
   })
 
   it('keeps nothing for an empty or whitespace-only reply', () => {

@@ -87,6 +87,16 @@ export function notificationLabel(
 ): NotificationLabel | null {
   if (lastEventKind === 'stop_failure') return { emoji: '🔴', label: '処理エラー終了' }
 
+  // Opening a session is not news. statusForKind puts a new session at
+  // waiting_for_user, which is true — it is waiting for the first prompt —
+  // but the label for that status is 作業完了, so starting Claude Code
+  // announced that work had finished. Measured: five such messages in one
+  // day, four of them when a spool replay re-delivered the backlog.
+  //
+  // No "session started" label either: the existing PowerShell notifier never
+  // sent one, and adding a message the user does not get today is not a fix.
+  if (lastEventKind === 'session_start') return null
+
   switch (status) {
     case 'waiting_for_permission': return { emoji: '🟡', label: '確認・入力待ち' }
     case 'waiting_for_user': return { emoji: '🟢', label: '作業完了' }
@@ -322,6 +332,53 @@ function truncate(value: string | null | undefined, max: number): string {
 /** As long as the notification will ever show; see normalizeAssistantPreview. */
 export const ASSISTANT_PREVIEW_MAX = 200
 
+/** Lines that are only markdown scaffolding, never content. */
+const SCAFFOLD_LINES = new Set(['```', '`'])
+
+/** A line announcing a result, which is what a completion notice wants. */
+const CONCLUSION_LINE = /完了報告|完了：|完了:|対応完了|実装完了/
+
+/** Metadata lines that open a report but say nothing about what happened. */
+const METADATA_LINE = /^(?:ブランチ|コミット|種別)\s/
+
+/**
+ * The one line of a reply worth putting in a notification.
+ *
+ * Ported from the PowerShell notifier this replaces, which did not take the
+ * opening characters — it looked for the line that states the outcome. On a
+ * long report those are different things: the first 200 characters are the
+ * preamble, and the conclusion is somewhere in the middle.
+ *
+ * The rules are heuristics tuned to one person's report format, not a general
+ * summariser. They are allowed to miss; when nothing matches, the first
+ * content line is returned, which is what a naive read would have given
+ * anyway. It never returns nothing for a non-empty message.
+ */
+export function pickAssistantSummary(text: unknown): string | null {
+  if (typeof text !== 'string') return null
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !SCAFFOLD_LINES.has(line))
+  if (lines.length === 0) return null
+
+  const chosen =
+    lines.find((line) => CONCLUSION_LINE.test(line))
+    ?? lines.find((line) => !METADATA_LINE.test(line))
+    ?? lines[0]
+
+  // Markdown emphasis and bullet markers are noise in a chat message: they
+  // were formatting for a terminal, and Discord renders the leftovers oddly.
+  const cleaned = chosen
+    .replace(/^[#>*\-\s`]+/, '')
+    .replace(/\*\*/g, '')
+    .replace(/^■\s*/, '')
+    .trim()
+
+  return cleaned || null
+}
+
 /**
  * An assistant reply reduced to what a notification can use.
  *
@@ -330,13 +387,17 @@ export const ASSISTANT_PREVIEW_MAX = 200
  * database for the sake of two lines of Discord message — and the database is
  * synced, backed up and read by other tools, none of which need it.
  *
- * Newlines and runs of spaces collapse to one space: a reply is many lines,
- * a notification is one, and a multi-line value in a payload column is
- * awkward for everything downstream.
+ * The order matters: pick the line from the *whole* reply, then shorten.
+ * Truncating first would leave pickAssistantSummary choosing between the
+ * first few lines of the preamble, which is the problem it exists to solve.
+ * Only the chosen line is ever returned, so the full text still never
+ * reaches the database (D10).
  */
 export function normalizeAssistantPreview(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const collapsed = value.replace(/\s+/g, ' ').trim()
+  const summary = pickAssistantSummary(value)
+  if (summary == null) return null
+  // A chosen line can still wrap, and a payload column wants one line.
+  const collapsed = summary.replace(/\s+/g, ' ').trim()
   if (!collapsed) return null
   return truncate(collapsed, ASSISTANT_PREVIEW_MAX)
 }

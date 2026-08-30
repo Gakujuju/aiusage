@@ -7,6 +7,7 @@ import {
   escalationDue,
   formatSessionMessage,
   normalizeAssistantPreview,
+  pickAssistantSummary,
   ASSISTANT_PREVIEW_MAX,
   formatQuotaMessage,
   renderDiscordContent,
@@ -439,8 +440,14 @@ describe('formatSessionMessage — project line', () => {
 })
 
 describe('normalizeAssistantPreview', () => {
-  it('folds every run of whitespace into one space', () => {
+  it('returns one chosen line, not every line joined together', () => {
+    // It used to flatten the whole reply into a single run of text. Now a
+    // line is picked first, so a multi-line reply contributes one line —
+    // which is the point: the notification shows a statement, not a digest.
     expect(normalizeAssistantPreview('  done.\n\n  next:   two   things\n'))
+      .toBe('done.')
+    // Runs of whitespace inside the chosen line still collapse.
+    expect(normalizeAssistantPreview('done.   next:   two   things'))
       .toBe('done. next: two things')
   })
 
@@ -495,5 +502,132 @@ describe('formatSessionMessage — assistant reply line', () => {
       })
       expect(message?.body).not.toContain('応答')
     }
+  })
+})
+
+describe('notificationLabel — session_start', () => {
+  it('says nothing when a session merely opened', () => {
+    // statusForKind puts a new session at waiting_for_user, whose label is
+    // 作業完了 — so opening Claude Code announced that work had finished.
+    expect(notificationLabel('waiting_for_user', 'session_start')).toBeNull()
+    expect(notificationLabel('running', 'session_start')).toBeNull()
+  })
+
+  it('leaves every other reason for that status alone', () => {
+    expect(notificationLabel('waiting_for_user', 'stop')?.label).toBe('作業完了')
+    expect(notificationLabel('waiting_for_user', 'stop_failure')?.label).toBe('処理エラー終了')
+    expect(notificationLabel('waiting_for_permission', 'permission_request')?.label).toBe('確認・入力待ち')
+    expect(notificationLabel('completed', 'session_end')?.label).toBe('セッション終了')
+    expect(notificationLabel('failed', 'session_end')?.label).toBe('異常終了')
+  })
+
+  it('is dropped by shouldNotifySession as having nothing to say', () => {
+    const decision = shouldNotifySession({
+      status: 'waiting_for_user',
+      lastEventKind: 'session_start',
+      previousNotifyState: null,
+      statusSince: T0,
+      lastNotifiedAt: null,
+      now: T0 + MIN,
+      config: { enabled: true },
+    })
+    expect(decision).toEqual({ notify: false, reason: 'no_label' })
+  })
+})
+
+describe('pickAssistantSummary', () => {
+  it('prefers the line that states the outcome', () => {
+    const text = [
+      'いくつか確認しました。',
+      '前置きが続きます。',
+      '完了報告: マイグレーションを適用しました',
+      'その後の補足。',
+    ].join('\n')
+    expect(pickAssistantSummary(text)).toBe('完了報告: マイグレーションを適用しました')
+  })
+
+  it('recognises each spelling of the outcome line', () => {
+    for (const marker of ['完了報告', '完了：', '完了:', '対応完了', '実装完了']) {
+      const text = `前置き\n${marker} 中身`
+      expect(pickAssistantSummary(text), marker).toBe(`${marker} 中身`)
+    }
+  })
+
+  it('skips the metadata lines a report opens with', () => {
+    const text = [
+      'ブランチ feat/x',
+      'コミット abc1234',
+      '種別 修正',
+      'テストを追加しました',
+    ].join('\n')
+    expect(pickAssistantSummary(text)).toBe('テストを追加しました')
+  })
+
+  it('only skips those words when they label a field', () => {
+    // "ブランチ" followed by whitespace is a metadata line; a sentence that
+    // happens to begin with the word is not.
+    expect(pickAssistantSummary('ブランチを切りました')).toBe('ブランチを切りました')
+  })
+
+  it('falls back to the first line for ordinary prose', () => {
+    const text = '調べた結果を書きます。\n二行目。'
+    expect(pickAssistantSummary(text)).toBe('調べた結果を書きます。')
+  })
+
+  it('ignores blank lines and bare code fences', () => {
+    expect(pickAssistantSummary('\n\n```\n`\n本文です\n```')).toBe('本文です')
+  })
+
+  it('strips the markdown that was formatting for a terminal', () => {
+    expect(pickAssistantSummary('## 見出し')).toBe('見出し')
+    expect(pickAssistantSummary('- 箇条書き')).toBe('箇条書き')
+    expect(pickAssistantSummary('> 引用')).toBe('引用')
+    expect(pickAssistantSummary('**強調** のある行')).toBe('強調 のある行')
+    expect(pickAssistantSummary('■ 見出し記号')).toBe('見出し記号')
+  })
+
+  it('returns nothing only when there is nothing', () => {
+    expect(pickAssistantSummary('')).toBeNull()
+    expect(pickAssistantSummary('   \n\n  ')).toBeNull()
+    expect(pickAssistantSummary('```')).toBeNull()
+    expect(pickAssistantSummary(null)).toBeNull()
+    expect(pickAssistantSummary(42)).toBeNull()
+    // A line that is only markdown leaves nothing behind.
+    expect(pickAssistantSummary('###')).toBeNull()
+  })
+
+  it('always returns something for a message that has content', () => {
+    // The rules are heuristics and are allowed to miss; missing must not mean
+    // returning nothing.
+    for (const text of ['x', '普通の文', '1. 番号付き', '   前後に空白   ']) {
+      expect(pickAssistantSummary(text), text).not.toBeNull()
+    }
+  })
+})
+
+describe('normalizeAssistantPreview — selection before truncation', () => {
+  it('finds the outcome line even when it is past the cap', () => {
+    // The reason the order matters: truncating first would leave only the
+    // preamble to choose from.
+    const text = 'あ'.repeat(400) + '\n完了報告: 直しました'
+    expect(normalizeAssistantPreview(text)).toBe('完了報告: 直しました')
+  })
+
+  it('still caps the line it chose', () => {
+    const long = '完了報告: ' + 'x'.repeat(400)
+    const out = normalizeAssistantPreview(long)!
+    expect(out.length).toBe(ASSISTANT_PREVIEW_MAX + 1)
+    expect(out.endsWith('…')).toBe(true)
+  })
+
+  it('returns one line even when the chosen one wrapped', () => {
+    expect(normalizeAssistantPreview('  done.   next:   two   things  '))
+      .toBe('done. next: two things')
+  })
+
+  it('keeps returning null for an empty reply', () => {
+    expect(normalizeAssistantPreview('')).toBeNull()
+    expect(normalizeAssistantPreview('   \n ')).toBeNull()
+    expect(normalizeAssistantPreview(null)).toBeNull()
   })
 })

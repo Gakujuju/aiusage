@@ -138,6 +138,19 @@ export function runServeCommand(
   deps.serve({ port: options.port, host, db })
 }
 
+/**
+ * Skip reasons worth a log line.
+ *
+ * 'no_label' is missing on purpose: running and idle produce one on every
+ * turn, which is dozens an hour and would bury the rest. 'not_found' is a
+ * lookup miss, not a decision. What is left is the set that answers "the
+ * notification I expected did not arrive".
+ */
+const LOGGED_SKIP_REASONS: ReadonlySet<string> = new Set([
+  'disabled', 'event_disabled', 'tool_disabled',
+  'duplicate', 'throttled', 'quiet_hours',
+])
+
 const MAX_PORT_ATTEMPTS = 10
 const AGENT_REAPER_INTERVAL_MS = 15_000
 const CODEX_LOG_INTERVAL_MS = 5_000
@@ -353,6 +366,16 @@ export function serve(options: ServeOptions): void {
     // the final say, and its duplicate check keys on the kind too.
     if (!session.changed && !session.kindChanged) return
     void runDbWrite(() => notifySessionChange(notifyContext(), session.id))
+      .then((result) => {
+        // The decision was being thrown away, so "why did I not get a
+        // notification" could only be answered by re-deriving it from the
+        // event table afterwards. One line at the moment it happens is
+        // enough; there is no case for a table.
+        if (result.enqueued || !LOGGED_SKIP_REASONS.has(result.reason)) return
+        console.log(
+          `[serve] notification skipped: ${result.reason} (session=${session.id.slice(0, 8)})`
+        )
+      })
       .catch((err) => console.error('[serve] notification enqueue failed:', err))
   })
 
