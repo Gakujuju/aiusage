@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import type Database from 'better-sqlite3'
 import type { AgentEventInput } from '../db/agent-sessions.js'
 import { extractSessionId } from '../commands/parse.js'
+import { loadConfig } from '../config.js'
+import { normalizeAssistantPreview } from '@aiusage/core'
 
 /**
  * Follow Codex rollout logs and turn their lifecycle lines into agent events.
@@ -74,6 +76,14 @@ const PAYLOAD_WHITELIST: Record<string, readonly string[]> = {
 /** Keys consumed into columns rather than dropped, so they are not reported. */
 const CONSUMED_KEYS = new Set(['type', 'cwd', 'session_id', 'id', 'timestamp'])
 
+/**
+ * The reply text, kept only when the user has asked for it.
+ *
+ * Deliberately outside PAYLOAD_WHITELIST: everything there is safe by
+ * construction, and this is the one field that is the conversation itself.
+ */
+const ASSISTANT_MESSAGE_FIELD: Record<string, string> = { task_complete: 'last_agent_message' }
+
 export interface CodexLogLine {
   /** 'session_meta', or 'event_msg/<payload.type>' collapsed to the inner type. */
   eventType: string
@@ -95,13 +105,17 @@ export interface CursorRow {
  * Everything else — response_item, agent_message, token_count — is either
  * conversation content or accounting we already get from the parser.
  */
-export function eventForLine(line: CodexLogLine, sessionId: string): AgentEventInput | null {
+export function eventForLine(
+  line: CodexLogLine,
+  sessionId: string,
+  includeAssistantMessage = false,
+): AgentEventInput | null {
   const base = {
     sessionId,
     tool: 'codex',
     ts: line.ts,
     source: 'log' as const,
-    payload: sanitizePayload(line.eventType, line.payload),
+    payload: sanitizePayload(line.eventType, line.payload, includeAssistantMessage),
     detail: line.eventType,
   }
 
@@ -150,12 +164,23 @@ function projectCwd(cwd: string | undefined): string | undefined {
 export function sanitizePayload(
   eventType: string,
   payload: Record<string, unknown>,
+  includeAssistantMessage = false,
 ): Record<string, unknown> {
   const allowed = PAYLOAD_WHITELIST[eventType] ?? []
   const kept: Record<string, unknown> = { event_type: eventType }
   const dropped: string[] = []
 
+  // Normalised at capture, so the full reply never reaches the database,
+  // and stored under the same name the Claude Code hook client uses.
+  const assistantField = includeAssistantMessage ? ASSISTANT_MESSAGE_FIELD[eventType] : undefined
+  if (assistantField) {
+    const preview = normalizeAssistantPreview(payload[assistantField])
+    if (preview) kept.assistant_preview = preview
+  }
+
   for (const [key, value] of Object.entries(payload)) {
+    // Recorded as dropped when the preview is off, which is what it is.
+    if (key === assistantField && kept.assistant_preview != null) continue
     if (allowed.includes(key)) {
       // Only scalars. A whitelisted key that turns into an object one day
       // would otherwise smuggle whatever the object contains.
@@ -427,11 +452,13 @@ export function readNewEvents(
   const complete = chunk.slice(0, lastNewline)
   const consumed = Buffer.byteLength(complete, 'utf-8') + 1
 
+  // Read once per file rather than per line.
+  const includeAssistantMessage = loadConfig()?.notifications?.includeAssistantMessage === true
   const events: AgentEventInput[] = []
   for (const raw of complete.split('\n')) {
     const line = parseLine(raw)
     if (!line) continue
-    const event = eventForLine(line, sessionId)
+    const event = eventForLine(line, sessionId, includeAssistantMessage)
     if (event) events.push(event)
   }
 

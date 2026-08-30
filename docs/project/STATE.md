@@ -16,6 +16,20 @@
 | 7 | Discord 通知統合 | 完了（段階2 併走中） |
 | 8 | Android/PWA 化 | 未着手 |
 
+## 未消化の作業
+
+- Phase 5 のクローズ確認（次に Codex が使われた時点で実施）
+- 段階3 の材料収集（既存 PowerShell 通知との併走データを数日分）
+
+ルール:
+
+- 指示を受け取ったら、着手前にここへ1行足す
+- 完了したら消す
+- 指示役はここを見て、渡したはずの指示が載っていなければ再送する
+
+（指示が1件、話題が移った際に渡らないまま流れた。
+  双方が突き合わせられる場所として作った）
+
 ## スキーマ
 
 - v13 quota_snapshots / quota_current / quota_windows
@@ -118,23 +132,27 @@ project="Codex" / turn_count=0 で記録されている。
 
 ## upstream への PR 候補
 
-※ この一覧は実装役が作業内容から再構成したもの。
-  指示役の手元の一覧と食い違う場合はそちらが正。
+1. `extractSessionId` が Windows パスを分割できない
+   （'/' でしか split せず、session_id にフルパスが入る）
+2. cost_source を価格の有無で判定していない
+   （claude-code.ts / codex.ts だけが model === 'unknown' で判定し、
+     価格表に無いモデルでも cost=0 / cost_source='pricing' になる。D15）
+3. `extractProjectFromCwd` がドライブレターを返す
+   （C:\work\myproj → project='C:'）
+4. `serve` が無条件に 0.0.0.0 で listen する（D16）
+   ※ 挙動変更を伴うため、PR より先に issue で意図を確認すべき。
+     upstream が LAN ダッシュボードを意図している可能性がある
+5. `ensureAiusageDir` に呼び出し元が無く state.json が作られない
+   ※ upstream に対しては ingest トークンではなく
+     deviceInstanceId が 'unknown' になる問題として説明すること。
+     ingest トークンは我々の追加機能であり upstream には無い
+6. cli のテストが core のビルド済み dist を参照する
+   （core を変更してもビルドするまで反映されず、落ちるべきテストが通る。
+     package.json に pretest を1行）
 
-1. `extractSessionId` が '/' でしか分割せず、Windows では
-   session_id にフルパスが入る（packages/cli/src/commands/parse.ts）。
-   fork では v17 でバックフィルも行った。
-2. `claude-code.ts` と `codex.ts` だけが cost_source を
-   `model === 'unknown'` で判定しており、価格表に無いモデルでも
-   `cost=0 / cost_source='pricing'` になる。総コスト $0 の原因（D15）。
-3. `serve` が無条件に 0.0.0.0 で listen し、ダッシュボードの
-   パスワードは任意。既定でネットワークに露出する（D16）。
-4. `ensureAiusageDir` に呼び出し元が無く state.json が作られないため、
-   ingest トークンが null になり hook の POST が全て 401 になる。
-5. cli のテストが core のビルド済み dist を参照するため、
-   core を変更してもビルドするまで反映されず、落ちるべきテストが通る。
-   packages/cli/package.json に pretest を1行足すだけで塞げる。
-
+方針: 1・2・3・6 は挙動を壊さない明確なバグ修正なので1つの PR に
+まとめてよい。4・5 は影響が大きいので個別に issue から始める。
+まだ作成していない。
 ## バックアップ
 
 - `~/.aiusage/backup-v12-20260829/` プロジェクト開始前

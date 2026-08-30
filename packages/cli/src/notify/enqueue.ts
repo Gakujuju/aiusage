@@ -59,6 +59,33 @@ function loadSession(db: Database.Database, id: string): SessionRow | undefined 
   `).get(id) as SessionRow | undefined
 }
 
+/**
+ * The reply preview captured with this session's most recent stop, if any.
+ *
+ * Restricted to stop by the query, which is what keeps the reply out of the
+ * other notifications: session end, escalation and quota messages describe
+ * something other than a finished turn and have no reply to show.
+ *
+ * The value is already normalised and capped where it was captured — this
+ * only reads it back.
+ */
+function assistantPreview(db: Database.Database, sessionPk: string): string | null {
+  const row = db.prepare(`
+    SELECT payload FROM agent_session_events
+    WHERE session_pk = ? AND kind = 'stop'
+    ORDER BY ts DESC LIMIT 1
+  `).get(sessionPk) as { payload: string } | undefined
+  if (!row) return null
+  try {
+    const payload = JSON.parse(row.payload) as { assistant_preview?: unknown }
+    return typeof payload.assistant_preview === 'string' && payload.assistant_preview
+      ? payload.assistant_preview
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** The most recent error_type recorded for this session, for stop_failure. */
 function lastErrorType(db: Database.Database, sessionPk: string): string | null {
   const row = db.prepare(`
@@ -113,6 +140,9 @@ export function notifySessionChange(ctx: NotifyContext, sessionPk: string): Sess
     runningMs: durations?.runningMs,
     statusDetail: session.status_detail,
     errorType: session.last_event_kind === 'stop_failure' ? lastErrorType(ctx.db, sessionPk) : null,
+    // Only for a turn that actually finished. formatSessionMessage also
+    // requires config.includeAssistantMessage, so this is two gates, not one.
+    assistantMessage: session.last_event_kind === 'stop' ? assistantPreview(ctx.db, sessionPk) : null,
     config: ctx.config,
   })
   if (!message) return { enqueued: false, reason: 'no_label' }

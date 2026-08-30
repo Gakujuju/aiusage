@@ -109,6 +109,22 @@ DB を開くより前に行う。createDatabase は runMigrations を伴うた�
 serve --host の安全確認をこの順序に直した経緯がある（D16 関連）。
 新しいコマンドやオプションを足すときも同じ順序を守ること。
 
+## 調査で CLI のエントリを実行しない
+
+`node -e "require('.../dist/index.js')"` のような調査は、
+CLI の既定動作を走らせるのと同じで、AIUSAGE_HOME を設定していなければ
+本番DBを開き runMigrations まで到達する。実際に v19 がこの経路で
+本番に適用された（指示役も同じ操作をしていた）。
+
+調査は以下のいずれかで行う:
+  ・packages/cli/tests 配下に一時テストを置いて vitest で走らせる
+  ・AIUSAGE_HOME を設定した隔離環境で実行する
+  ・better-sqlite3 で readonly: true を指定して直接開く
+
+マイグレーションは適用時に
+  [migration] applying vN to <path>
+を出すので、誤って本番を開いた場合はその場で気づける。
+
 ## ユーザー環境
 
 - `~/.claude/settings.json` は自動で書き換えない。

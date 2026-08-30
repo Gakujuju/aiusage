@@ -53,6 +53,16 @@ export function runMigrations(db: Database.Database): void {
 
   for (const migration of MIGRATIONS) {
     if (migration.version > current) {
+      // Unconditional, and it names the file. The point is not the version —
+      // it is that a command run without AIUSAGE_HOME set puts the production
+      // path in front of you at the moment it starts changing it. v19 reached
+      // production through a `node -e "require('.../dist/index.js')"` meant as
+      // a read-only look at the bundle's exports, and said nothing at all.
+      //
+      // Separate from whatever the migration itself logs: "a migration ran"
+      // and "here is what it did" are different facts, and seeing both is
+      // fine.
+      console.log(`[migration] applying v${migration.version} to ${db.name}`)
       db.transaction(() => {
         migration.migrate(db)
       })()

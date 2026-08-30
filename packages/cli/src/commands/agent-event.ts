@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3'
 import { AIUSAGE_DIR, loadConfig } from '../config.js'
 import { getIngestToken, getState } from '../init.js'
 import { applyAgentEvents, type AgentEventInput, type AgentSessionEmitter } from '../db/agent-sessions.js'
+import { normalizeAssistantPreview } from '@aiusage/core'
 
 /**
  * The client a Claude Code hook runs.
@@ -51,6 +52,16 @@ const PAYLOAD_FIELDS = new Set([
   // Permission events.
   'permission_suggestion', 'tool_use_id', 'agent_type',
 ])
+
+/**
+ * The reply text, per tool, kept only when the user has asked for it.
+ *
+ * Never whitelisted outright: this is the conversation, and it is the one
+ * field in the payload that is worth being careful about. When
+ * notifications.includeAssistantMessage is off it stays in _droppedKeys
+ * like anything else the whitelist does not cover.
+ */
+const ASSISTANT_MESSAGE_FIELD: Record<string, string> = { stop: 'last_assistant_message' }
 
 /**
  * Read into a column of their own rather than the payload. Not "dropped" —
@@ -116,6 +127,15 @@ export function buildAgentEvent(
   // Names only, never values. Enough to notice the whitelist has fallen behind
   // an upstream change without having to capture a raw dump to find out.
   if (dropped.length > 0) payload._droppedKeys = dropped.sort()
+
+  // Normalised here, at capture, so the full reply never reaches the
+  // database. Stored under one name regardless of tool so nothing
+  // downstream has to know which hook it came from.
+  if (loadConfig()?.notifications?.includeAssistantMessage === true) {
+    const field = ASSISTANT_MESSAGE_FIELD[kind]
+    const preview = field ? normalizeAssistantPreview(hook[field]) : null
+    if (preview) payload.assistant_preview = preview
+  }
 
   const detail = options.detail
     ?? (typeof hook.tool_name === 'string' ? hook.tool_name : undefined)

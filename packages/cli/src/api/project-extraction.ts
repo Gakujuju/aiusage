@@ -2,6 +2,9 @@ import path from 'node:path'
 
 // Workspace root directories that sit between the home dir and the actual project.
 // The first path segment that is NOT in this set is treated as the project name.
+/** `C:`, `D:` — a volume, not a project. */
+const DRIVE_LETTER = /^[A-Za-z]:$/
+
 const CWD_WORKSPACE_ROOTS = new Set([
   'WebstormProjects', 'Documents', 'Projects', 'workspace', 'Workspace',
   'dev', 'code', 'repos', 'Developer', 'src',
@@ -26,7 +29,12 @@ export function extractProjectFromCwd(cwd: string, extraRoots?: string[]): strin
     .replace(/^[A-Za-z]:\/(?:Users|home)\/[^/]+\//, '')
     .replace(/^\/(Users|home)\/[^/]+\//, '')
     .replace(/^\/root\//, '')
-  const parts = withoutHome.split('/').filter(Boolean)
+  // A drive letter is never a project. It survives the home strip whenever the
+  // path is not under the home directory, and C:\work\myproj was reported as
+  // the project "C:". Dropped here rather than inside the loop so the
+  // last-resort return below cannot fall back to one either.
+  const parts = withoutHome.split('/').filter(Boolean).filter((p) => !DRIVE_LETTER.test(p))
+  if (parts.length === 0) return 'unknown'
   // config.projectRoots adds to the built-in set rather than replacing it.
   // Leaving the default alone matters: someone with a single project directly
   // under Desktop is correctly served by grouping on "Desktop" today, and

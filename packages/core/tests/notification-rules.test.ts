@@ -6,6 +6,8 @@ import {
   quotaThresholdCrossings,
   escalationDue,
   formatSessionMessage,
+  normalizeAssistantPreview,
+  ASSISTANT_PREVIEW_MAX,
   formatQuotaMessage,
   renderDiscordContent,
   formatDurationJa,
@@ -433,5 +435,65 @@ describe('formatSessionMessage — project line', () => {
     expect(message?.body).not.toContain('プロジェクト')
     // The rest of the message is unaffected.
     expect(message?.body).toContain('経過:')
+  })
+})
+
+describe('normalizeAssistantPreview', () => {
+  it('folds every run of whitespace into one space', () => {
+    expect(normalizeAssistantPreview('  done.\n\n  next:   two   things\n'))
+      .toBe('done. next: two things')
+  })
+
+  it('cuts at the cap and marks the cut', () => {
+    const out = normalizeAssistantPreview('x'.repeat(500))!
+    expect(out.length).toBe(ASSISTANT_PREVIEW_MAX + 1)
+    expect(out.endsWith('…')).toBe(true)
+  })
+
+  it('leaves a short reply alone', () => {
+    expect(normalizeAssistantPreview('done')).toBe('done')
+  })
+
+  it('returns null for anything that is not text', () => {
+    expect(normalizeAssistantPreview('')).toBeNull()
+    expect(normalizeAssistantPreview('   \n\t ')).toBeNull()
+    expect(normalizeAssistantPreview(null)).toBeNull()
+    expect(normalizeAssistantPreview(undefined)).toBeNull()
+    expect(normalizeAssistantPreview(42)).toBeNull()
+    expect(normalizeAssistantPreview({ text: 'x' })).toBeNull()
+  })
+})
+
+describe('formatSessionMessage — assistant reply line', () => {
+  const base = {
+    status: 'waiting_for_user' as const,
+    lastEventKind: 'stop' as const,
+    device: '自宅PC',
+    tool: 'claude-code',
+    project: 'aiusage',
+    statusSince: T0,
+    now: T0 + 3000,
+  }
+
+  it('shows the reply only when the setting is on', () => {
+    const off = formatSessionMessage({ ...base, assistantMessage: 'done', config: { enabled: true } })
+    expect(off?.body).not.toContain('応答')
+
+    const on = formatSessionMessage({
+      ...base, assistantMessage: 'done',
+      config: { enabled: true, includeAssistantMessage: true },
+    })
+    expect(on?.body).toContain('応答: done')
+  })
+
+  it('omits the line when there is no reply to show', () => {
+    // Every notification other than a finished turn arrives without one.
+    for (const assistantMessage of [null, undefined, '']) {
+      const message = formatSessionMessage({
+        ...base, assistantMessage,
+        config: { enabled: true, includeAssistantMessage: true },
+      })
+      expect(message?.body).not.toContain('応答')
+    }
   })
 })

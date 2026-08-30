@@ -319,6 +319,28 @@ function truncate(value: string | null | undefined, max: number): string {
   return value.length <= max ? value : value.slice(0, max) + '…'
 }
 
+/** As long as the notification will ever show; see normalizeAssistantPreview. */
+export const ASSISTANT_PREVIEW_MAX = 200
+
+/**
+ * An assistant reply reduced to what a notification can use.
+ *
+ * Applied where the text is *captured*, not where it is displayed. Storing the
+ * whole reply and trimming it later would put entire conversations in the
+ * database for the sake of two lines of Discord message — and the database is
+ * synced, backed up and read by other tools, none of which need it.
+ *
+ * Newlines and runs of spaces collapse to one space: a reply is many lines,
+ * a notification is one, and a multi-line value in a payload column is
+ * awkward for everything downstream.
+ */
+export function normalizeAssistantPreview(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const collapsed = value.replace(/\s+/g, ' ').trim()
+  if (!collapsed) return null
+  return truncate(collapsed, ASSISTANT_PREVIEW_MAX)
+}
+
 export interface SessionMessageInput {
   status: AgentStatus
   lastEventKind: AgentEventKind | string

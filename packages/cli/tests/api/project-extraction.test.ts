@@ -134,3 +134,38 @@ describe('extractProjectFromCwd — configured workspace roots', () => {
     expect(extractProjectFromCwd('C:/Users/x/Desktop/aiusage', [])).toBe('Desktop')
   })
 })
+
+describe('extractProjectFromCwd — Windows drive letters', () => {
+  // The home-directory strip only fires for paths under Users/home, so a
+  // project anywhere else kept its drive letter as the first segment and was
+  // reported as the project "C:".
+  it('never reports a drive letter as the project', () => {
+    expect(extractProjectFromCwd('C:\\work\\myproj')).toBe('work')
+    expect(extractProjectFromCwd('D:\\myproj')).toBe('myproj')
+    expect(extractProjectFromCwd('C:/work/myproj')).toBe('work')
+  })
+
+  it('skips the drive and then applies the workspace roots as usual', () => {
+    expect(extractProjectFromCwd('D:\\src\\myproj')).toBe('myproj')
+    expect(extractProjectFromCwd('D:\\src\\myproj\\packages\\cli')).toBe('myproj')
+    expect(extractProjectFromCwd('E:\\Projects\\thing', ['Projects'])).toBe('thing')
+  })
+
+  it('has nothing to report for a bare drive root', () => {
+    expect(extractProjectFromCwd('C:\\')).toBe('unknown')
+    expect(extractProjectFromCwd('C:')).toBe('unknown')
+  })
+
+  it('leaves home-relative paths exactly as they were', () => {
+    expect(extractProjectFromCwd('C:\\Users\\me\\src\\myproj')).toBe('myproj')
+    expect(extractProjectFromCwd('C:\\Users\\me\\Desktop\\myproj')).toBe('Desktop')
+    expect(extractProjectFromCwd('C:\\Users\\me\\Desktop\\myproj', ['Desktop'])).toBe('myproj')
+    expect(extractProjectFromCwd('/Users/alice/WebstormProjects/my-project')).toBe('my-project')
+  })
+
+  it('does not mistake a directory that merely starts with a letter and colon', () => {
+    // Only an exact single-letter drive spec is skipped.
+    expect(extractProjectFromCwd('/CD:notes/app')).toBe('CD:notes')
+    expect(extractProjectFromCwd('/C:extra/app')).toBe('C:extra')
+  })
+})
