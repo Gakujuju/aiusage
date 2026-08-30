@@ -1,11 +1,12 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { t } from '$lib/i18n.js'
-  import { fetchConfig, saveConfig, fetchCredential, fetchDetectedTools, importKelivoBackup, notifySettingsUpdated, refreshExchangeRate, fetchSyncStatus, triggerSync, fetchCloudSyncStatus } from '$lib/api.js'
+  import { fetchConfig, saveConfig, fetchCredential, fetchDetectedTools, importKelivoBackup, notifySettingsUpdated, refreshExchangeRate, fetchSyncStatus, triggerSync, fetchCloudSyncStatus, sendNotificationTest } from '$lib/api.js'
   import { displayCurrency, exchangeRate } from '$lib/stores.js'
   import { splitSettingsSources } from '$lib/settings-sources.js'
 
   let loading = true
+  /** @type {any} */
   let loadError = null
 
   // Unified form state for General + Data + Currency
@@ -14,6 +15,7 @@
     retentionDays: '',
     displayCurrency: 'USD', exchangeRate: '',
   }
+  /** @type {any} */
   let detectedTools = []
   let showNotFound = false
   let currentPlatform = ''
@@ -21,7 +23,9 @@
   let kelivoFileInput
   let kelivoImporting = false
   let kelivoImportError = ''
+  /** @type {any} */
   let kelivoImportedCount = null
+  /** @type {any} */
   let kelivoAddedCount = null
 
   const PLATFORM_LABEL = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' }
@@ -38,6 +42,7 @@
   let syncIntervalMinutes = '30'
 
   // Sync status
+  /** @type {any} */
   let syncStatusData = null
   let syncRunning = false
   let cloudSyncAvailable = true
@@ -193,6 +198,7 @@
         displayCurrency: cfg.displayCurrency || 'USD',
         exchangeRate: cfg.exchangeRate ? (1 / cfg.exchangeRate).toFixed(4) : '',
       }
+      loadNotifications(cfg)
       detectedTools = toolsResult.tools ?? []
       currentPlatform = cfg.platform ?? ''
       currentHostname = cfg.hostname ?? ''
@@ -553,6 +559,172 @@
     if (saved) return t_saved
     return t_save
   }
+
+  // ── Notifications ───────────────────────────────────────────────────
+  //
+  // The webhook is deliberately absent from this form. It is a secret, this
+  // page may be served on a LAN once 8-B lands, and `aiusage notify-test
+  // --set-webhook` already reads it from stdin so it never reaches shell
+  // history. All the UI does is report whether one is configured.
+
+  /** Statuses the notifier knows how to announce, in the order they matter. */
+  /** The same names /quotas and /agents use for the tools. */
+  const TOOL_LABEL_KEYS = {
+    'claude-code': 'quotas.toolLabels.claude-code',
+    codex: 'quotas.toolLabels.codex',
+  }
+
+  /** @param {string} tool */
+  function toolLabelFor(tool) {
+    const key = TOOL_LABEL_KEYS[tool]
+    return key ? $t(key) : tool
+  }
+
+  /**
+   * Statuses the notifier can announce, and what it does when unset.
+   *
+   * Mirrors core's DEFAULT_NOTIFICATION_EVENTS. Reading every unset key as
+   * "on" showed running and idle as enabled when they are not — and saving
+   * the form then actually turned them on, so opening this page and pressing
+   * Save would have subscribed the reader to the two noisiest events without
+   * ever saying so.
+   */
+  const NOTIFY_EVENT_DEFAULTS = {
+    waiting_for_permission: true,
+    waiting_for_user: true,
+    failed: true,
+    completed: true,
+    running: false,
+    idle: false,
+  }
+  const NOTIFY_EVENTS = Object.keys(NOTIFY_EVENT_DEFAULTS)
+
+  /** @type {any} */
+  let notif = {
+    enabled: false,
+    prefix: '',
+    notifierDevice: true,
+    includeAssistantMessage: false,
+    events: {},
+    tools: {},
+    thresholds: '',
+    quietStart: '',
+    quietEnd: '',
+    quietHoursAllow: {},
+    escalation: '',
+  }
+  let notifSaving = false
+  let notifSaved = false
+  let notifError = ''
+  let webhookConfigured = false
+  let testSending = false
+  /** @type {string} */
+  let testResult = ''
+
+  /** Tools that could be announced: whatever config knows, plus what it can. */
+  const KNOWN_TOOLS = ['claude-code', 'codex']
+
+  /** @param {any} cfg */
+  function loadNotifications(cfg) {
+    const n = cfg?.notifications ?? {}
+    webhookConfigured = cfg?.notificationWebhookConfigured === true
+
+    const events = {}
+    for (const key of NOTIFY_EVENTS) {
+      // Unset means that event's default, not "on": an untouched config has
+      // to show the behaviour it actually has.
+      events[key] = n.events?.[key] ?? NOTIFY_EVENT_DEFAULTS[key]
+    }
+
+    // Driven by what came back rather than a fixed list, so a tool added to
+    // the config later appears here without an edit.
+    const tools = {}
+    for (const key of [...new Set([...KNOWN_TOOLS, ...Object.keys(n.tools ?? {})])]) {
+      tools[key] = n.tools?.[key] !== false
+    }
+
+    const allow = {}
+    const allowList = n.quietHoursAllow ?? ['waiting_for_permission', 'failed']
+    for (const key of NOTIFY_EVENTS) allow[key] = allowList.includes(key)
+
+    notif = {
+      enabled: n.enabled === true,
+      prefix: n.prefix ?? '',
+      notifierDevice: n.notifierDevice !== false,
+      includeAssistantMessage: n.includeAssistantMessage === true,
+      events,
+      tools,
+      thresholds: (n.quota?.thresholds ?? [80, 95, 100]).join(', '),
+      quietStart: n.quietHours?.start ?? '',
+      quietEnd: n.quietHours?.end ?? '',
+      quietHoursAllow: allow,
+      // Stored in milliseconds; shown in minutes, because that is how a
+      // person thinks about "re-tell me in 10 minutes".
+      escalation: (n.escalation?.waiting_for_permission ?? [600000, 1800000])
+        .map((/** @type {number} */ ms) => Math.round(ms / 60000)).join(', '),
+    }
+  }
+
+  /** "80, 95, 100" → [80, 95, 100]; anything unparseable is dropped. */
+  function parseNumberList(value) {
+    return String(value ?? '')
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  }
+
+  async function saveNotifications() {
+    notifSaving = true; notifError = ''
+    try {
+      const events = {}
+      for (const key of NOTIFY_EVENTS) events[key] = notif.events[key] === true
+      const tools = {}
+      for (const key of Object.keys(notif.tools)) tools[key] = notif.tools[key] === true
+
+      const quietHours = notif.quietStart && notif.quietEnd
+        ? { start: notif.quietStart, end: notif.quietEnd }
+        : undefined
+
+      // Sent whole, not piecemeal: the server merges the notifications object
+      // shallowly, so a partial `events` would replace the rest of it.
+      await saveConfig({
+        notifications: {
+          enabled: notif.enabled === true,
+          prefix: notif.prefix || undefined,
+          notifierDevice: notif.notifierDevice === true,
+          includeAssistantMessage: notif.includeAssistantMessage === true,
+          events,
+          tools,
+          quota: { thresholds: parseNumberList(notif.thresholds) },
+          quietHours,
+          quietHoursAllow: NOTIFY_EVENTS.filter((k) => notif.quietHoursAllow[k]),
+          escalation: {
+            waiting_for_permission: parseNumberList(notif.escalation).map((m) => m * 60000),
+          },
+        },
+      })
+      notifSaved = true
+      setTimeout(() => { notifSaved = false }, 2000)
+    } catch (e) {
+      notifError = e instanceof Error ? e.message : 'Failed to save'
+    } finally {
+      notifSaving = false
+    }
+  }
+
+  async function sendTestNotification() {
+    testSending = true; testResult = ''
+    try {
+      const result = await sendNotificationTest()
+      testResult = result?.enqueued
+        ? $t('settings.notifications.testQueued')
+        : $t('settings.notifications.testSkipped')
+    } catch (e) {
+      testResult = e instanceof Error ? e.message : 'Failed'
+    } finally {
+      testSending = false
+    }
+  }
 </script>
 
 <svelte:head>
@@ -629,6 +801,126 @@
       <div class="section-footer">
         <button class="btn-save" class:saved={generalSaved} on:click={saveGeneral} disabled={generalSaving}>
           {btnLabel(generalSaving, generalSaved, $t('settings.save'), $t('settings.saved'))}
+        </button>
+      </div>
+    </div>
+
+
+    <!-- Notifications -->
+    <div class="card">
+      <div class="group-title">{$t('settings.notifications.title')}</div>
+      <div class="fields">
+        <div class="field">
+          <label class="toggle">
+            <input type="checkbox" bind:checked={notif.enabled} />
+            {$t('settings.notifications.enabled')}
+          </label>
+          <div class="field-hint">{$t('settings.notifications.enabledHint')}</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">{$t('settings.notifications.webhook')}</div>
+          <div class="webhook-state">
+            {webhookConfigured
+              ? $t('settings.notifications.webhookSet')
+              : $t('settings.notifications.webhookUnset')}
+          </div>
+          <!-- No input: a secret does not belong on a page that may be served
+               over the network, and the CLI reads it from stdin. -->
+          <div class="field-hint">{$t('settings.notifications.webhookHint')}</div>
+          <div class="test-row">
+            <button type="button" class="btn-ghost" on:click={sendTestNotification}
+              disabled={testSending || !webhookConfigured}>
+              {testSending ? '...' : $t('settings.notifications.sendTest')}
+            </button>
+            {#if testResult}<span class="test-result">{testResult}</span>{/if}
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="field-notif-prefix">{$t('settings.notifications.prefix')}</label>
+          <input id="field-notif-prefix" type="text" bind:value={notif.prefix} class="field-input" placeholder="[aiusage] " />
+        </div>
+
+        <div class="field">
+          <label class="toggle">
+            <input type="checkbox" bind:checked={notif.notifierDevice} />
+            {$t('settings.notifications.notifierDevice')}
+          </label>
+          <div class="field-hint">{$t('settings.notifications.notifierDeviceHint')}</div>
+        </div>
+
+        <div class="field">
+          <label class="toggle">
+            <input type="checkbox" bind:checked={notif.includeAssistantMessage} />
+            {$t('settings.notifications.includeAssistant')}
+          </label>
+          <!-- D10: this sends response text to a third party. The setting is
+               off by default and the consequence belongs next to the switch,
+               not in a decision record nobody reading this will open. -->
+          <div class="field-hint warn-hint">{$t('settings.notifications.includeAssistantHint')}</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">{$t('settings.notifications.events')}</div>
+          <div class="toggle-grid">
+            {#each NOTIFY_EVENTS as key (key)}
+              <label class="toggle">
+                <input type="checkbox" bind:checked={notif.events[key]} />
+                {$t(`agents.status.${key === 'waiting_for_permission' ? 'waitingForPermission' : key === 'waiting_for_user' ? 'waitingForUser' : key}`)}
+              </label>
+            {/each}
+          </div>
+          <div class="field-hint">{$t('settings.notifications.eventsHint')}</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">{$t('settings.notifications.tools')}</div>
+          <div class="toggle-grid">
+            {#each Object.keys(notif.tools) as key (key)}
+              <label class="toggle">
+                <input type="checkbox" bind:checked={notif.tools[key]} />
+                {toolLabelFor(key)}
+              </label>
+            {/each}
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="field-notif-thresholds">{$t('settings.notifications.thresholds')}</label>
+          <input id="field-notif-thresholds" type="text" bind:value={notif.thresholds} class="field-input" placeholder="80, 95, 100" />
+          <div class="field-hint">{$t('settings.notifications.thresholdsHint')}</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">{$t('settings.notifications.quietHours')}</div>
+          <div class="rate-row">
+            <input type="time" bind:value={notif.quietStart} class="field-input" aria-label={$t('settings.notifications.quietStart')} />
+            <input type="time" bind:value={notif.quietEnd} class="field-input" aria-label={$t('settings.notifications.quietEnd')} />
+          </div>
+          <div class="field-hint">{$t('settings.notifications.quietHoursHint')}</div>
+          <div class="toggle-grid">
+            {#each NOTIFY_EVENTS as key (key)}
+              <label class="toggle">
+                <input type="checkbox" bind:checked={notif.quietHoursAllow[key]} />
+                {$t(`agents.status.${key === 'waiting_for_permission' ? 'waitingForPermission' : key === 'waiting_for_user' ? 'waitingForUser' : key}`)}
+              </label>
+            {/each}
+          </div>
+          <div class="field-hint">{$t('settings.notifications.quietAllowHint')}</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="field-notif-escalation">{$t('settings.notifications.escalation')}</label>
+          <input id="field-notif-escalation" type="text" bind:value={notif.escalation} class="field-input" placeholder="10, 30" />
+          <div class="field-hint">{$t('settings.notifications.escalationHint')}</div>
+        </div>
+      </div>
+      {#if notifError}<p class="section-error">{notifError}</p>{/if}
+      <div class="section-footer">
+        <a class="history-link" href="/notifications">{$t('settings.notifications.openHistory')}</a>
+        <button class="btn-save" class:saved={notifSaved} on:click={saveNotifications} disabled={notifSaving}>
+          {btnLabel(notifSaving, notifSaved, $t('settings.save'), $t('settings.saved'))}
         </button>
       </div>
     </div>
@@ -1583,5 +1875,56 @@
       flex-direction: column;
       gap: 0.25rem;
     }
+  }
+
+  /* ── Notifications section ─────────────────────────────────────────── */
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.8125rem;
+    cursor: pointer;
+  }
+
+  .toggle-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+    margin-top: 0.35rem;
+  }
+
+  .webhook-state {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8125rem;
+    margin-bottom: 0.15rem;
+  }
+
+  .test-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+
+  .test-result {
+    font-size: 0.75rem;
+    color: var(--text-secondary, var(--color-text-secondary));
+  }
+
+  /* Sending response text off the machine deserves more than the usual grey. */
+  .warn-hint {
+    color: oklch(0.48 0.2 25);
+  }
+
+  .history-link {
+    font-size: 0.8125rem;
+    color: var(--accent, oklch(0.55 0.12 175));
+    text-decoration: none;
+    margin-right: auto;
+  }
+
+  .history-link:hover {
+    text-decoration: underline;
   }
 </style>

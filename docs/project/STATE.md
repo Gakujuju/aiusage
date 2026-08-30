@@ -16,13 +16,13 @@
 | 7 | Discord 通知統合 | 完了（段階2 併走中） |
 | 8-A-1 | クォータ推移・枯渇予測の UI | 完了 |
 | 8-A-2 | エージェント状態ボード /agents | 完了 |
-| 8 | Android/PWA 化 | 未着手（8-A-3 / 8-B が残り） |
+| 8-A-3 | 通知の設定と送信履歴 | 完了 |
+| 8 | Android/PWA 化 | 未着手（8-B が残り） |
 
 ## 未消化の作業
 
 - Phase 5 のクローズ確認のうち、スクラッチ作業での通知1点
   （実プロジェクトでの動作は 2026-08-30 13:27 のセッションで確認済み）
-- Phase 8-A-3: 通知の設定と送信履歴（着手中・§1 調査から）
 - 段階3 の材料収集（既存 PowerShell 通知との併走データを数日分）
 
 ルール:
@@ -103,6 +103,8 @@
 - Codex ログ追尾: 5秒間隔。~/.codex/sessions 配下の rollout-*.jsonl のうち、
   直近7日分のディレクトリ＋カーソル済みファイルで、mtime が直近30分以内のもの。
 - Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）。
+  設定は /settings の通知セクション、送信履歴は /notifications。
+  webhook は画面から編集できない（CLI の notify-test --set-webhook のみ）。
   Codex のターン完了でも通知が出るようになった。
   tool 別に切るなら config の notifications.tools（例 { "codex": false }）。
 - 応答プレビュー: 有効（notifications.includeAssistantMessage = true）。

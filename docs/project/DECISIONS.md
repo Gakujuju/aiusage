@@ -335,3 +335,34 @@ hostname() で埋めていたため、同じ端末が Claude Code では「自�
 Codex では「DESKTOP-...」として同じ通知チャンネルに並んでいた。
 applyAgentEvents の更新も ctx.device を行の値より優先するようにした。
 優先しないと、最初に間違った名前で登録された行が一生そのまま残る。
+
+## D19. 通知ラベルは core と UI で二重管理している（現状の記録）
+
+core の `notificationLabel` が (status, lastEventKind) から
+「🟢 作業完了」のようなラベルを返す。Discord 通知はこれを使う。
+UI（/agents）は同じ対応関係を `agent-status.js` に持ち、
+文言は web の i18n から引く。同じ知識が2箇所にある。
+
+なぜそうなっているか: core のラベルは日本語固定で en / zh を持たない。
+UI は3ロケールを出す必要がある。core をそのまま import しても
+日本語しか得られず、packages/web に core への依存も増える。
+
+一本化するならこうする（今はやらない）:
+core の notificationLabel を2つに割る。
+  labelKeyFor(status, lastEventKind) → 'waiting_for_user' のような
+  安定した識別子を返す。これはドメインの判断。
+  文言は core 内の ja 辞書に置き、Discord 側はそこから引く。
+UI は同じ識別子で web の i18n を引く。
+判断は1箇所、文言は表示先ごと、という分担になる。
+混ざっているのが問題の本体で、
+「ドメインの判断」と「表示の都合」を分ければ解ける。
+
+なぜ今やらないか: テストで一致が縛られており、実害が出ていない。
+`packages/web/tests/agent-status.test.ts` が core の関数を実際に呼び、
+ja の文言と絵文字が一致することを検証する
+（stop_failure が status より優先される規則を含む）。
+ラベルがずれたらテストが落ちる。
+将来ずれる事故が起きたら、この記録から着手すること。
+
+なお同テストは packages/web から core を相対パスで import している。
+依存を増やさないための措置で、テスト限定であり本番バンドルには入らない。

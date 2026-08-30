@@ -258,6 +258,28 @@ export async function fetchAgentSummary() {
 }
 
 /** @param {Record<string, string | undefined>} params */
+export async function fetchNotifications(params = {}) {
+  return apiFetch(buildUrl('/api/notifications', params))
+}
+
+export async function fetchNotificationSummary() {
+  return apiFetch('/api/notifications/summary')
+}
+
+export async function sendNotificationTest() {
+  const response = await fetch('/api/notifications/test', { method: 'POST' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+/** @param {string} id */
+export async function retryNotification(id) {
+  const response = await fetch(`/api/notifications/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+/** @param {Record<string, string | undefined>} params */
 export async function fetchAgentSessions(params = {}) {
   return apiFetch(buildUrl('/api/agent/sessions', params))
 }

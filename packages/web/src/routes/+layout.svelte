@@ -11,7 +11,7 @@
   import { getAuthShellState } from '$lib/auth-shell.js'
   import {
     House, LayoutDashboard, Coins, DollarSign, Box,
-    MessageSquare, FolderKanban, Wrench, Activity,
+    MessageSquare, FolderKanban, Wrench, Activity, Bell,
     Gauge, Tag, Trophy, Settings, HelpCircle,
     Sun, Moon, MonitorCog,
     Languages, PanelLeftClose, PanelLeftOpen, ExternalLink
@@ -46,6 +46,7 @@
       key: 'nav.group.system',
       items: [
         { path: '/quotas',     key: 'nav.quotas',    icon: Gauge },
+        { path: '/notifications', key: 'nav.notifications', icon: Bell },
         { path: '/pricing',    key: 'nav.pricing',   icon: Tag },
         { path: '/leaderboard', key: 'nav.leaderboard', icon: Trophy },
         { path: '/settings',   key: 'nav.settings',  icon: Settings },
