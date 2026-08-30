@@ -11,7 +11,7 @@
   import { getAuthShellState } from '$lib/auth-shell.js'
   import {
     House, LayoutDashboard, Coins, DollarSign, Box,
-    MessageSquare, FolderKanban, Wrench,
+    MessageSquare, FolderKanban, Wrench, Activity,
     Gauge, Tag, Trophy, Settings, HelpCircle,
     Sun, Moon, MonitorCog,
     Languages, PanelLeftClose, PanelLeftOpen, ExternalLink
@@ -36,6 +36,7 @@
     {
       key: 'nav.group.activity',
       items: [
+        { path: '/agents',     key: 'nav.agents',    icon: Activity },
         { path: '/sessions',   key: 'nav.sessions',  icon: MessageSquare },
         { path: '/projects',   key: 'nav.projects',  icon: FolderKanban },
         { path: '/tool-calls', key: 'nav.toolCalls', icon: Wrench },

@@ -312,9 +312,17 @@ export function serve(options: ServeOptions): void {
     // APIs' 10-second fetch timeout to expire unserviced — the snapshot then
     // failed silently on exactly the large-install first run it exists for.
     // Still never awaited, so startup does not wait on third-party network.
-    void runQuotaSnapshot().catch((err) => {
-      console.error('[serve] initial quota snapshot failed:', err)
-    })
+    //
+    // quotaSnapshotInterval: 0 turns the poller off, and it has to turn this
+    // off too: a second serve started for development would otherwise still
+    // reach the usage APIs once per launch. Two processes polling the same
+    // endpoint is what produced a 429 — and the failure was recorded against
+    // the production quota_current, not the development one.
+    if ((loadConfig()?.quotaSnapshotInterval ?? 1) !== 0) {
+      void runQuotaSnapshot().catch((err) => {
+        console.error('[serve] initial quota snapshot failed:', err)
+      })
+    }
   })
 
   // Age out sessions nothing has reported on. No network here, so unlike the

@@ -15,13 +15,13 @@
 | 6-B | 状態管理・作業時間計測 | 完了 |
 | 7 | Discord 通知統合 | 完了（段階2 併走中） |
 | 8-A-1 | クォータ推移・枯渇予測の UI | 完了 |
-| 8 | Android/PWA 化 | 未着手（8-A-2 / 8-A-3 / 8-B が残り） |
+| 8-A-2 | エージェント状態ボード /agents | 完了 |
+| 8 | Android/PWA 化 | 未着手（8-A-3 / 8-B が残り） |
 
 ## 未消化の作業
 
 - Phase 5 のクローズ確認のうち、スクラッチ作業での通知1点
   （実プロジェクトでの動作は 2026-08-30 13:27 のセッションで確認済み）
-- Phase 8-A-2: エージェント状態ボード /agents（着手中）
 - 段階3 の材料収集（既存 PowerShell 通知との併走データを数日分）
 
 ルール:
@@ -93,6 +93,8 @@
 ## 稼働中のもの
 
 - 本番 serve: ポート 3847
+- 開発 serve: ポート 4847 / AIUSAGE_HOME=<repo>/.dev-aiusage。
+  クォータ取得と通知は無効（OPERATIONS.md「開発サーバは外部 API を叩かない」）。
 - クォータ取得: 5分間隔。Claude と Codex の両方。
   claude-code: five_hour / seven_day / nimbus_quill
   codex: five_hour / weekly_limit

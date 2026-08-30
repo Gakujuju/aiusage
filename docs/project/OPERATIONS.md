@@ -13,6 +13,25 @@
   `AIUSAGE_HOME=<repo>/.dev-aiusage`、ポート 4847 を使う。
   本番は 3847。これを混ぜると本番DBが意図せずマイグレーションされる（実際に一度起きた）。
 
+## 開発サーバは外部 API を叩かない
+
+開発サーバと本番サーバが同時に動くと、両方が同じクォータ
+エンドポイントを叩き、レート制限（429）に当たる。
+実際に 8-A-1 の検証中に発生し、本番の quota_current に
+取得失敗が記録された。
+
+.dev-aiusage/config.json では
+  quotaSnapshotInterval: 0
+  notifications.enabled: false
+を設定する。本番DBをコピーし直すと config も上書きされるので、
+dev-server.mjs が起動時に検査して警告を出す。
+
+credentials（Discord webhook）も同じ経路で入ってくるので、
+コピー後は削除する。dev-server.mjs はこれも検査する。
+
+quotaSnapshotInterval: 0 は定期ポーリングだけでなく
+起動時の1回も止める（serve 側を修正済み）。
+
 ## バックアップ
 
 - 常に2世代を保つ。
@@ -56,6 +75,15 @@
 - CLI のテストは `loadConfig()` を通じて実 `~/.aiusage/config.json` を読む。
   設定に依存するテストは、実機の状態に左右されないようモジュールをモックする
   （`tests/notify/discord.test.ts` が例）。
+
+## 翻訳が無いキーは英語で出る
+
+t() は現在のロケールにキーが無ければ en にフォールバックする。
+生のキー（"quotas.forecast.pace"）が画面に出ることは構造的に無い。
+
+追加する文言は en / ja / zh の3ロケールすべてに入れるのが原則。
+ただし zh を埋められない場合はフォールバックに任せてよい。
+英語で出るのは欠落であって不具合ではない。
 
 ## パッケージ間のビルド順序
 

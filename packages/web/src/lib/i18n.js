@@ -10,6 +10,7 @@ const translations = {
       models: 'Models',
       toolCalls: 'Tool Calls',
       projects: 'Projects',
+      agents: 'Agents',
       sessions: 'Sessions',
       quotas: 'Quotas',
       leaderboard: 'Leaderboard',
@@ -397,6 +398,41 @@ const translations = {
       quotaWarningDesc: 'quota used',
       quotaWarningLink: 'View Quotas',
     },
+    agents: {
+      title: 'Agents',
+      desc: 'What every agent is doing right now, with anything waiting on you first.',
+      showAll: 'Show all',
+      empty: 'No agent activity recorded yet.',
+      emptyHint: 'Use Claude Code or Codex and sessions will appear here.',
+      pollFailed: 'Could not refresh just now — showing the last reading.',
+      forDuration: 'for {time}',
+      stale: 'not reporting',
+      unknownDevice: 'unknown device',
+      turns: 'Turns',
+      working: 'Working',
+      waitingPermission: 'Awaiting approval',
+      waitingUser: 'Awaiting you',
+      tokens: 'Tokens',
+      cost: 'Cost',
+      openSession: 'Open session →',
+      truncated: '{n} more not shown.',
+      group: {
+        needsAction: 'Needs you',
+        done: 'Finished',
+        active: 'Working',
+        unknown: 'Unknown',
+      },
+      status: {
+        stopFailure: 'Ended with an error',
+        waitingForPermission: 'Awaiting approval',
+        waitingForUser: 'Work finished',
+        completed: 'Session ended',
+        failed: 'Failed',
+        running: 'Working',
+        idle: 'Idle',
+        unknown: 'Unknown',
+      },
+    },
     quotas: {
       title: 'Quotas',
       desc: 'Official subscription quota usage for each AI tool.',
@@ -439,6 +475,7 @@ const translations = {
         days: '{n}d',
         hours: '{n}h',
         minutes: '{n}m',
+        seconds: '{n}s',
         risk: {
           watch: 'Watch',
           warn: 'Warning',
@@ -545,6 +582,7 @@ const translations = {
       models: 'モデル',
       toolCalls: 'ツール呼び出し',
       projects: 'プロジェクト',
+      agents: 'エージェント',
       sessions: 'セッション',
       quotas: '利用枠',
       leaderboard: 'ランキング',
@@ -932,6 +970,41 @@ const translations = {
       quotaWarningDesc: '利用枠を消費',
       quotaWarningLink: '利用枠を見る',
     },
+    agents: {
+      title: 'エージェント',
+      desc: '各エージェントの現在の状態。対応が必要なものを最上部に表示します。',
+      showAll: 'すべて表示',
+      empty: 'まだエージェントの記録がありません。',
+      emptyHint: 'Claude Code か Codex を使うとここに表示されます。',
+      pollFailed: '今の更新に失敗しました。直前の内容を表示しています。',
+      forDuration: '{time} 経過',
+      stale: '報告が途絶えています',
+      unknownDevice: '不明なデバイス',
+      turns: 'ターン数',
+      working: '作業時間',
+      waitingPermission: '承認待ち',
+      waitingUser: '応答待ち',
+      tokens: 'トークン',
+      cost: 'コスト',
+      openSession: 'セッションを開く →',
+      truncated: 'ほか {n} 件は表示していません。',
+      group: {
+        needsAction: '要対応',
+        done: '完了',
+        active: '進行中',
+        unknown: '不明',
+      },
+      status: {
+        stopFailure: '処理エラー終了',
+        waitingForPermission: '確認・入力待ち',
+        waitingForUser: '作業完了',
+        completed: 'セッション終了',
+        failed: '異常終了',
+        running: '作業中',
+        idle: '待機',
+        unknown: '不明',
+      },
+    },
     quotas: {
       title: '利用枠',
       desc: '各AIツールの公式サブスクリプション利用枠の使用状況。',
@@ -974,6 +1047,7 @@ const translations = {
         days: '{n}日',
         hours: '{n}時間',
         minutes: '{n}分',
+        seconds: '{n}秒',
         risk: {
           watch: '注意',
           warn: '警告',
@@ -1080,6 +1154,7 @@ const translations = {
       models: '模型',
       toolCalls: '工具调用',
       projects: '项目',
+      agents: '智能体',
       sessions: '会话',
       quotas: '配额',
       leaderboard: '排行榜',
@@ -1467,6 +1542,41 @@ const translations = {
       quotaWarningDesc: '配额已使用',
       quotaWarningLink: '查看配额',
     },
+    agents: {
+      title: '智能体',
+      desc: '各智能体的当前状态，需要处理的排在最前。',
+      showAll: '显示全部',
+      empty: '还没有智能体记录。',
+      emptyHint: '使用 Claude Code 或 Codex 后会显示在这里。',
+      pollFailed: '本次刷新失败，显示的是上一次的内容。',
+      forDuration: '已 {time}',
+      stale: '已失去联系',
+      unknownDevice: '未知设备',
+      turns: '轮次',
+      working: '工作时长',
+      waitingPermission: '等待批准',
+      waitingUser: '等待你',
+      tokens: '令牌',
+      cost: '成本',
+      openSession: '打开会话 →',
+      truncated: '另有 {n} 条未显示。',
+      group: {
+        needsAction: '需要处理',
+        done: '已完成',
+        active: '进行中',
+        unknown: '未知',
+      },
+      status: {
+        stopFailure: '异常结束',
+        waitingForPermission: '等待确认',
+        waitingForUser: '工作完成',
+        completed: '会话结束',
+        failed: '异常终止',
+        running: '工作中',
+        idle: '空闲',
+        unknown: '未知',
+      },
+    },
     quotas: {
       title: '配额',
       desc: '各 AI 工具的官方订阅配额使用情况。',
@@ -1509,6 +1619,7 @@ const translations = {
         days: '{n}天',
         hours: '{n}小时',
         minutes: '{n}分钟',
+        seconds: '{n}秒',
         risk: {
           watch: '注意',
           warn: '警告',
@@ -1637,14 +1748,39 @@ export function toggleLang() {
   })
 }
 
+/**
+ * Walk a dotted key into a dictionary.
+ *
+ * @param {any} dict
+ * @param {string} key
+ */
+function lookup(dict, key) {
+  let result = dict
+  for (const part of key.split('.')) {
+    result = result?.[part]
+  }
+  return result
+}
+
+/**
+ * A key missing from the active locale falls back to English.
+ *
+ * Without this, adding one string meant editing every locale or shipping the
+ * dotted key itself to whoever was reading in the one that was missed —
+ * "quotas.forecast.pace" on screen rather than a translation. Falling back
+ * makes an untranslated string read as English, which is a gap rather than a
+ * defect. The key is still returned when English has nothing either, since at
+ * that point the string genuinely does not exist.
+ */
 export const t = derived(lang, ($lang) => {
   const dict = translations[$lang] || translations.en
-  return (key) => {
-    const parts = key.split('.')
-    let result = dict
-    for (const part of parts) {
-      result = result?.[part]
+  return (/** @type {string} */ key) => {
+    const direct = lookup(dict, key)
+    if (direct) return direct
+    if (dict !== translations.en) {
+      const fallback = lookup(translations.en, key)
+      if (fallback) return fallback
     }
-    return result || key
+    return key
   }
 })

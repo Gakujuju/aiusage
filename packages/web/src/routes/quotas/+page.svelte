@@ -3,6 +3,7 @@
   import { t, lang } from '$lib/i18n.js'
   import { fetchQuotas, fetchQuotaHistory, fetchQuotaForecast } from '$lib/api.js'
   import QuotaChart from '$lib/components/QuotaChart.svelte'
+  import { formatDuration as formatDurationWith } from '$lib/duration.js'
 
   /** @type {any} */
   let data = null
@@ -128,22 +129,8 @@
     })
   }
 
-  /** "1時間3分" / "1h 3m". Null when the moment has passed. */
-  function formatDuration(ms) {
-    if (!Number.isFinite(ms) || ms <= 0) return null
-    const totalMinutes = Math.floor(ms / 60000)
-    const days = Math.floor(totalMinutes / (60 * 24))
-    const hours = Math.floor((totalMinutes % (60 * 24)) / 60)
-    const minutes = totalMinutes % 60
-    const parts = []
-    if (days > 0) parts.push($t('quotas.forecast.days').replace('{n}', days))
-    if (hours > 0) parts.push($t('quotas.forecast.hours').replace('{n}', hours))
-    // Minutes are noise next to days, and the only unit when nothing else fits.
-    if (days === 0 && (minutes > 0 || parts.length === 0)) {
-      parts.push($t('quotas.forecast.minutes').replace('{n}', minutes))
-    }
-    return parts.join(' ')
-  }
+  /** Shared with /agents so the two pages measure time the same way. */
+  const formatDuration = (/** @type {number} */ ms) => formatDurationWith(ms, $t)
 
   $: forecastByKey = new Map(
     (forecast?.forecasts ?? []).map((f) => [`${f.tool}:${f.tier}`, f]),

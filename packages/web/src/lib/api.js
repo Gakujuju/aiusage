@@ -253,6 +253,15 @@ export async function fetchQuotaForecast(params = {}) {
   return apiFetch(buildUrl('/api/quotas/forecast', params))
 }
 
+export async function fetchAgentSummary() {
+  return apiFetch('/api/agent/summary')
+}
+
+/** @param {Record<string, string | undefined>} params */
+export async function fetchAgentSessions(params = {}) {
+  return apiFetch(buildUrl('/api/agent/sessions', params))
+}
+
 export async function fetchAuthStatus() {
   return apiFetch('/api/auth/status')
 }
