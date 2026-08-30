@@ -15,6 +15,62 @@
     retentionDays: '',
     displayCurrency: 'USD', exchangeRate: '',
   }
+  /**
+   * Which screens appear in the navigation.
+   *
+   * The server decides what may be hidden — home and settings are not on the
+   * list, because settings is the only way back and home is where the
+   * installed app starts. Stored as "visible" rather than "hidden" so the
+   * checkboxes read the way they behave: ticked means you see it.
+   *
+   * @type {string[]}
+   */
+  let hideableRoutes = []
+  /** @type {Record<string, boolean>} */
+  let routeVisible = {}
+  let navSaving = false
+  let navSaved = false
+  let navError = ''
+
+  /** Nav labels already exist for the sidebar; this reuses them. */
+  const ROUTE_LABEL_KEYS = {
+    '/overview': 'nav.overview',
+    '/tokens': 'nav.tokens',
+    '/cost': 'nav.cost',
+    '/models': 'nav.models',
+    '/agents': 'nav.agents',
+    '/sessions': 'nav.sessions',
+    '/projects': 'nav.projects',
+    '/tool-calls': 'nav.toolCalls',
+    '/quotas': 'nav.quotas',
+    '/notifications': 'nav.notifications',
+    '/pricing': 'nav.pricing',
+    '/leaderboard': 'nav.leaderboard',
+    '/support': 'nav.support',
+  }
+
+  /** @param {any} cfg */
+  function loadNavigation(cfg) {
+    hideableRoutes = Array.isArray(cfg.hideableRoutes) ? cfg.hideableRoutes : []
+    const hidden = new Set(cfg.ui?.hiddenRoutes ?? [])
+    routeVisible = Object.fromEntries(hideableRoutes.map((route) => [route, !hidden.has(route)]))
+  }
+
+  async function saveNavigation() {
+    navSaving = true; navError = ''
+    try {
+      await saveConfig({
+        hiddenRoutes: hideableRoutes.filter((route) => !routeVisible[route]),
+      })
+      navSaved = true
+      setTimeout(() => { navSaved = false }, 1500)
+    } catch (e) {
+      navError = e instanceof Error ? e.message : 'Failed to save'
+    } finally {
+      navSaving = false
+    }
+  }
+
   /** @type {any} */
   let detectedTools = []
   let showNotFound = false
@@ -199,6 +255,7 @@
         exchangeRate: cfg.exchangeRate ? (1 / cfg.exchangeRate).toFixed(4) : '',
       }
       loadNotifications(cfg)
+      loadNavigation(cfg)
       detectedTools = toolsResult.tools ?? []
       currentPlatform = cfg.platform ?? ''
       currentHostname = cfg.hostname ?? ''
@@ -805,6 +862,30 @@
       </div>
     </div>
 
+
+    <!-- Navigation -->
+    <div class="card">
+      <div class="group-title">{$t('settings.navigation.title')}</div>
+      <div class="fields">
+        <div class="field">
+          <div class="field-hint">{$t('settings.navigation.hint')}</div>
+          <div class="toggle-grid">
+            {#each hideableRoutes as route (route)}
+              <label class="toggle">
+                <input type="checkbox" bind:checked={routeVisible[route]} />
+                {$t(ROUTE_LABEL_KEYS[route] ?? route)}
+              </label>
+            {/each}
+          </div>
+        </div>
+      </div>
+      {#if navError}<p class="section-error">{navError}</p>{/if}
+      <div class="section-footer">
+        <button class="btn-save" class:saved={navSaved} on:click={saveNavigation} disabled={navSaving}>
+          {btnLabel(navSaving, navSaved, $t('settings.save'), $t('settings.saved'))}
+        </button>
+      </div>
+    </div>
 
     <!-- Notifications -->
     <div class="card">

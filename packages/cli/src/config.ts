@@ -103,6 +103,49 @@ export interface Config {
   projectRoots?: string[]
   /** Display names for projects, keyed by the extracted project name. */
   projectAliases?: Record<string, string>
+  ui?: UiConfig
+}
+
+export interface UiConfig {
+  /**
+   * Screens to leave out of the navigation, by path.
+   *
+   * Hiding, not removing: the pages still work if opened directly, because
+   * the feature exists and pretending otherwise would be a lie. This is about
+   * a sidebar with fifteen entries when two of them are for a service the
+   * user does not use.
+   */
+  hiddenRoutes?: string[]
+}
+
+/**
+ * The screens that may be hidden.
+ *
+ * `/` and `/settings` are deliberately absent. Settings is the only way back
+ * from a hidden screen, and home is the manifest's start_url — hiding either
+ * turns a preference into something you cannot undo from the dashboard.
+ */
+export const HIDEABLE_ROUTES: readonly string[] = [
+  '/overview',
+  '/tokens',
+  '/cost',
+  '/models',
+  '/agents',
+  '/sessions',
+  '/projects',
+  '/tool-calls',
+  '/quotas',
+  '/notifications',
+  '/pricing',
+  '/leaderboard',
+  '/support',
+]
+
+/** Keep only paths we recognise, deduplicated and in a stable order. */
+export function normalizeHiddenRoutes(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const wanted = new Set(value.filter((v): v is string => typeof v === 'string').map((v) => v.trim()))
+  return HIDEABLE_ROUTES.filter((route) => wanted.has(route))
 }
 
 export interface NotificationConfig {

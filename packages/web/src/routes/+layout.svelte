@@ -57,6 +57,23 @@
 
   const SIDEBAR_KEY = 'aiusage-sidebar-collapsed'
 
+  /**
+   * Screens the user has switched off, from config.
+   *
+   * Hidden means "not in the navigation", not "gone": a bookmark to one still
+   * resolves, and lands on a note saying it was turned off rather than a 404.
+   * Claiming a working feature does not exist would send someone hunting for
+   * a bug that is not there.
+   */
+  /** @type {string[]} */
+  let hiddenRoutes = []
+  $: hiddenSet = new Set(hiddenRoutes)
+  // A group whose every item is hidden leaves its heading behind otherwise.
+  $: visibleNavGroups = NAV_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter((item) => !hiddenSet.has(item.path)) }))
+    .filter((group) => group.items.length > 0)
+  $: routeHidden = hiddenSet.has($page.url.pathname)
+
   let collapsed = false
   let mobileOpen = false
 
@@ -147,6 +164,7 @@
     if (cfg.displayCurrency) displayCurrency.set(cfg.displayCurrency)
     if (cfg.exchangeRateCache?.CNY_USD) exchangeRate.set(cfg.exchangeRateCache.CNY_USD)
     if (cfg.exchangeRate) exchangeRate.set(cfg.exchangeRate)
+    hiddenRoutes = Array.isArray(cfg.ui?.hiddenRoutes) ? cfg.ui.hiddenRoutes : []
   }
 
   /**
@@ -318,7 +336,7 @@
       </a>
 
       <nav class="sidebar-nav">
-        {#each NAV_GROUPS as group}
+        {#each visibleNavGroups as group}
           <div class="nav-group">
             {#if !collapsed}
               <div class="group-label">{$t(group.key)}</div>
@@ -399,7 +417,17 @@
     </header>
 
     <main class="page-content">
-      <slot />
+      {#if routeHidden}
+        <!-- Not a 404. The screen exists and works; it was switched off, and
+             saying "not found" would send the reader looking for a bug. -->
+        <div class="state-msg">
+          <h2>{$t('nav.hidden.title')}</h2>
+          <p>{$t('nav.hidden.hint')}</p>
+          <a class="hidden-route-link" href="/settings">{$t('nav.hidden.action')}</a>
+        </div>
+      {:else}
+        <slot />
+      {/if}
     </main>
 
   </div>
@@ -1161,6 +1189,24 @@
     margin-bottom: 0.375rem;
   }
   :global(.state-msg.error) { color: var(--rose); }
+
+  /* The way back on from a screen that was switched off. */
+  .hidden-route-link {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: var(--raised);
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  .hidden-route-link:hover {
+    border-color: var(--accent);
+  }
 
   :global(button) { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
 

@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
 import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
 import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL,
-  DASHBOARD_PASSWORD_CREDENTIAL, buildConsentConfig, loadConfig, saveConfig, loadCredential } from '../config.js'
+  DASHBOARD_PASSWORD_CREDENTIAL, HIDEABLE_ROUTES, buildConsentConfig, loadConfig, saveConfig,
+  loadCredential, normalizeHiddenRoutes } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent, getIngestToken } from '../init.js'
 import { generateConsentFingerprint } from '../sync/consent.js'
@@ -2431,6 +2432,11 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             dashboardPasswordConfigured: loadCredential(DASHBOARD_PASSWORD_CREDENTIAL) != null,
             hostname: hostname(),
             platform: osPlatform,
+            // Always an array, never null: the client filters its navigation
+            // with it, and an absent value would have to be special-cased at
+            // every use.
+            ui: { hiddenRoutes: normalizeHiddenRoutes(rest.ui?.hiddenRoutes) },
+            hideableRoutes: [...HIDEABLE_ROUTES],
           })
           return
         }
@@ -2453,6 +2459,20 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
                 weekStart = ws as 0 | 1
               } else {
                 delete existing.weekStart
+              }
+            }
+            if ('hiddenRoutes' in update) {
+              // Only paths we know. An unrecognised one would be a screen
+              // nobody can reach and nobody can find in the settings list to
+              // turn back on.
+              const hidden = normalizeHiddenRoutes(update.hiddenRoutes)
+              if (hidden.length === 0) {
+                if (existing.ui) {
+                  delete existing.ui.hiddenRoutes
+                  if (Object.keys(existing.ui).length === 0) delete existing.ui
+                }
+              } else {
+                existing.ui = { ...existing.ui, hiddenRoutes: hidden }
               }
             }
             if ('displayCurrency' in update) {

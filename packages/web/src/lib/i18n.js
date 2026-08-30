@@ -19,6 +19,11 @@ const translations = {
       support: 'Support',
       settings: 'Settings',
       docs: 'Docs',
+      hidden: {
+        title: 'This screen is turned off',
+        hint: 'It still works — it was removed from the navigation in settings.',
+        action: 'Open settings',
+      },
       collapse: 'Collapse',
       expand: 'Expand',
       group: {
@@ -286,6 +291,10 @@ const translations = {
       allTools: 'All tools',
     },
     settings: {
+      navigation: {
+        title: 'Navigation',
+        hint: 'Untick a screen to leave it out of the sidebar. It still works if you open it directly.',
+      },
       notifications: {
         title: 'Notifications',
         enabled: 'Send notifications',
@@ -643,6 +652,11 @@ const translations = {
       support: 'サポート',
       settings: '設定',
       docs: 'ドキュメント',
+      hidden: {
+        title: 'この画面は表示しない設定です',
+        hint: '機能は残っています。設定でナビゲーションから外しています。',
+        action: '設定を開く',
+      },
       collapse: '折りたたむ',
       expand: '展開',
       group: {
@@ -910,6 +924,10 @@ const translations = {
       allTools: 'すべてのツール',
     },
     settings: {
+      navigation: {
+        title: 'ナビゲーション',
+        hint: 'チェックを外した画面はサイドバーに出しません。直接開けば動きます。',
+      },
       notifications: {
         title: '通知',
         enabled: '通知を送信する',
@@ -1267,6 +1285,11 @@ const translations = {
       support: '服务与支持',
       settings: '设置',
       docs: '文档',
+      hidden: {
+        title: '此页面已隐藏',
+        hint: '功能仍然可用，只是在设置中从导航里移除了。',
+        action: '打开设置',
+      },
       collapse: '收起',
       expand: '展开',
       group: {
@@ -1534,6 +1557,10 @@ const translations = {
       allTools: '全部工具',
     },
     settings: {
+      navigation: {
+        title: '导航',
+        hint: '取消勾选的页面不会出现在侧栏。直接打开仍然可用。',
+      },
       notifications: {
         title: '通知',
         enabled: '发送通知',
