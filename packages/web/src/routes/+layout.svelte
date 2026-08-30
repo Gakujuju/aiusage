@@ -6,7 +6,7 @@
   const LANG_SHORT = { en: 'EN', zh: '中', ja: '日' }
   const LANG_NAME = { en: 'English', zh: '中文', ja: '日本語' }
   import { userPref, cycleTheme, initTheme } from '$lib/theme.js'
-  import { fetchConfig, fetchAuthStatus, login } from '$lib/api.js'
+  import { fetchConfig, fetchAuthStatus, login, setUnauthorizedHandler } from '$lib/api.js'
   import { displayCurrency, exchangeRate } from '$lib/stores.js'
   import { getAuthShellState } from '$lib/auth-shell.js'
   import {
@@ -65,6 +65,12 @@
   let authLoading = true
   let authEnabled = false
   let authenticated = false
+  /**
+   * Whether the home page shows anything without a login. Only the server
+   * knows — it depends on what it bound to. Defaults to the old behaviour so
+   * an older serve, which does not send the field, keeps working.
+   */
+  let publicHome = true
   let password = ''
   let authError = ''
   let authSubmitting = false
@@ -76,6 +82,7 @@
     authEnabled,
     authenticated,
     authLoading,
+    publicHome,
   })
   $: shouldShowLogin = shellState === 'login-page'
   $: shouldShowPublicHome = shellState === 'public-home'
@@ -85,9 +92,13 @@
       const status = await fetchAuthStatus()
       authEnabled = Boolean(status.enabled)
       authenticated = Boolean(status.authenticated)
+      // Absent on an older serve, and absent must mean "public" — reading it
+      // as locked would put a login page in front of a home page that works.
+      publicHome = status.publicHome !== false
     } catch {
       authEnabled = false
       authenticated = false
+      publicHome = true
     } finally {
       authLoading = false
     }
@@ -138,9 +149,26 @@
     if (cfg.exchangeRate) exchangeRate.set(cfg.exchangeRate)
   }
 
+  /**
+   * A 401 from anywhere means the session this shell was drawn for is gone.
+   * Asking the server settles it, and if we really are logged out the shell
+   * becomes the login page — instead of a navigation full of pages that all
+   * say "Authentication required" and offer a refresh button.
+   *
+   * Re-entrancy guard: a page in flight can fire several 401s at once, and
+   * each would otherwise start its own status request.
+   */
+  let recheckingAuth = false
+  function onUnauthorized() {
+    if (recheckingAuth || !authEnabled || authLoading) return
+    recheckingAuth = true
+    loadAuthStatus().finally(() => { recheckingAuth = false })
+  }
+
   onMount(() => {
     initTheme()
     loadAuthStatus()
+    setUnauthorizedHandler(onUnauthorized)
     // Initialize currency stores from config
     fetchConfig().then(applyConfig).catch(() => {})
     if (typeof window !== 'undefined') {
@@ -148,7 +176,9 @@
     }
   })
 
-  onDestroy(() => {})
+  onDestroy(() => {
+    setUnauthorizedHandler(null)
+  })
 
   $: $page, mobileOpen = false
 </script>
@@ -189,7 +219,11 @@
       {#if authError}
         <div class="auth-error">{authError}</div>
       {/if}
-      <a class="auth-home" href="/">{$t('auth.backHome')}</a>
+      <!-- Only when there is a public home to go back to. Otherwise this link
+           returns to this same page, which is the dead end in miniature. -->
+      {#if publicHome}
+        <a class="auth-home" href="/">{$t('auth.backHome')}</a>
+      {/if}
     </section>
   </main>
 {:else if shellState === 'loading'}
@@ -210,9 +244,17 @@
         </svg>
         <span>AIUsage</span>
       </button>
-      <button class="public-lang" type="button" on:click={toggleLang} title={LANG_NAME[$lang]}>
-        {LANG_SHORT[$lang]}
-      </button>
+      <div class="public-actions">
+        <!-- The brand above opens the same dialog, but a logo does not read as
+             a way in. Someone looking at a page of 401s needs a button that
+             says what it does. -->
+        <button class="public-signin" type="button" on:click={openUnlock}>
+          {$t('auth.signIn')}
+        </button>
+        <button class="public-lang" type="button" on:click={toggleLang} title={LANG_NAME[$lang]}>
+          {LANG_SHORT[$lang]}
+        </button>
+      </div>
     </header>
 
     <main class="public-page-content">
@@ -523,6 +565,31 @@
   .public-unlock:hover {
     border-color: var(--border-medium);
     color: var(--accent);
+  }
+
+  .public-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* The one control on this page that has to look like the way forward. */
+  .public-signin {
+    height: 2.5rem;
+    padding: 0 1rem;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: var(--accent);
+    color: oklch(0.99 0.002 175);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .public-signin:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
   }
 
   .public-lang {

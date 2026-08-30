@@ -11,6 +11,31 @@ function buildUrl(base, params) {
 const swrCache = new Map()
 const inflightRequests = new Map()
 
+/**
+ * Told about every 401 that comes back from the API.
+ *
+ * A session can lapse while the dashboard is open. Without this the shell
+ * keeps rendering as if logged in, every page fills with "Authentication
+ * required", and there is no login form anywhere to fix it — the reader is
+ * left pressing refresh. One signal here lets the layout notice and put the
+ * form back in front of them.
+ *
+ * @type {null | (() => void)}
+ */
+let unauthorizedHandler = null
+
+/** @param {null | (() => void)} handler */
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler
+}
+
+function reportUnauthorized(url) {
+  // Not the auth endpoints themselves: /api/auth/login answers 401 for a
+  // wrong password, and re-checking the session on that would be noise.
+  if (url.startsWith('/api/auth/')) return
+  if (unauthorizedHandler) unauthorizedHandler()
+}
+
 async function apiFetch(url, { signal, swr = false } = {}) {
   const request = () => signal ? fetch(url, { signal }) : fetch(url)
 
@@ -37,6 +62,7 @@ async function apiFetch(url, { signal, swr = false } = {}) {
   const promise = request()
     .then(async (response) => {
       if (!response.ok) {
+        if (response.status === 401) reportUnauthorized(url)
         const error = await response.json().catch(() => ({ error: { message: 'API error' } }))
         throw new Error(error.error?.message || `HTTP ${response.status}`)
       }

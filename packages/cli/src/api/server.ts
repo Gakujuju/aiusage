@@ -726,6 +726,17 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       json(res, {
         enabled: dashboardPassword != null,
         authenticated: isAuthenticated(dashboardPassword, req.headers.cookie),
+        /**
+         * Whether the home page can show anything without a login.
+         *
+         * The client cannot work this out for itself — it depends on what
+         * this server bound to, which is not visible from a browser. Getting
+         * it wrong left the home page rendering its public variant against
+         * endpoints that answered 401, with no way to reach the login form
+         * from there. Same condition as the gate below, so the two cannot
+         * drift apart.
+         */
+        publicHome: !shouldProtectApiPath('/api/summary', options?.isLoopbackBind !== false),
       })
       return
     }

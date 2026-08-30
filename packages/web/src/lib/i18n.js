@@ -598,6 +598,7 @@ const translations = {
     auth: {
       locked: 'Dashboard locked',
       lockedHint: 'Enter the dashboard password to view this page.',
+      signIn: 'Sign in',
       unlock: 'Unlock',
       unlocking: 'Unlocking...',
       unlockDashboard: 'Unlock dashboard',
@@ -1221,6 +1222,7 @@ const translations = {
     auth: {
       locked: 'ダッシュボードはロックされています',
       lockedHint: 'このページを表示するにはダッシュボードのパスワードを入力してください。',
+      signIn: 'ログイン',
       unlock: 'ロック解除',
       unlocking: 'ロック解除中...',
       unlockDashboard: 'ダッシュボードのロックを解除',
@@ -1844,6 +1846,7 @@ const translations = {
     auth: {
       locked: '仪表盘已锁定',
       lockedHint: '请输入仪表盘密码以查看此页面。',
+      signIn: '登录',
       unlock: '解锁',
       unlocking: '解锁中...',
       unlockDashboard: '解锁仪表盘',
