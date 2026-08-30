@@ -2,9 +2,35 @@ import { writable } from 'svelte/store'
 
 const THEME_KEY = 'aiusage-theme'
 
+/**
+ * The themes, and whether each one is a light or a dark surface.
+ *
+ * The polarity is not decoration: it is what `system` resolves to, and it is
+ * what the browser needs in order to draw form controls and scrollbars that
+ * are legible against the page. A theme that forgets to declare it gets white
+ * scrollbars on a dark background and no one can say why.
+ *
+ * `system` is not in here — it is a preference for one of these, not a theme.
+ */
+export const THEMES = {
+  light: { polarity: 'light' },
+  dark: { polarity: 'dark' },
+  terminal: { polarity: 'dark' },
+}
+
+/** The order the toggle walks through. system first, so it stays the default. */
+export const THEME_ORDER = ['system', 'dark', 'light', 'terminal']
+
+/** @param {string} value */
+function isKnown(value) {
+  return value === 'system' || Object.hasOwn(THEMES, value)
+}
+
 function getStored() {
   if (typeof window === 'undefined') return 'system'
-  return localStorage.getItem(THEME_KEY) || 'system'
+  const stored = localStorage.getItem(THEME_KEY)
+  // A name from an older or newer build is not a reason to render nothing.
+  return stored && isKnown(stored) ? stored : 'system'
 }
 
 function getSystemTheme() {
@@ -15,12 +41,26 @@ function getSystemTheme() {
 export const userPref = writable(getStored())
 export const resolvedTheme = writable(getSystemTheme())
 
+/**
+ * What `system` means right now, or the chosen theme itself.
+ *
+ * @param {string} pref
+ */
+export function resolveTheme(pref) {
+  return pref === 'system' ? getSystemTheme() : pref
+}
+
 export function cycleTheme() {
   userPref.update(current => {
-    if (current === 'system') return 'dark'
-    if (current === 'dark') return 'light'
-    return 'system'
+    const index = THEME_ORDER.indexOf(current)
+    return THEME_ORDER[(index + 1) % THEME_ORDER.length]
   })
+}
+
+/** @param {string} next */
+export function setTheme(next) {
+  if (!isKnown(next)) return
+  userPref.set(next)
 }
 
 export function initTheme() {
@@ -28,9 +68,16 @@ export function initTheme() {
 
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
 
+  /** @param {string} pref */
   function apply(pref) {
-    const theme = pref === 'system' ? getSystemTheme() : pref
+    const theme = resolveTheme(pref)
     document.documentElement.setAttribute('data-theme', theme)
+    // Tells the browser which way round its own furniture goes — scrollbars,
+    // date pickers, the select popup. Set from the theme's declared polarity
+    // rather than from the name, so a new dark theme does not have to be
+    // spelled 'dark' to get dark scrollbars.
+    const known = /** @type {Record<string, { polarity: string }>} */ (THEMES)
+    document.documentElement.style.colorScheme = known[theme]?.polarity ?? 'light'
     resolvedTheme.set(theme)
   }
 

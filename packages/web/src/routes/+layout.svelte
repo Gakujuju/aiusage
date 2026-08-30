@@ -14,7 +14,7 @@
     MessageSquare, FolderKanban, Wrench, Activity, Bell,
     Gauge, Tag, Trophy, Settings, HelpCircle,
     Sun, Moon, MonitorCog,
-    Languages, PanelLeftClose, PanelLeftOpen, ExternalLink
+    Languages, PanelLeftClose, PanelLeftOpen, ExternalLink, SquareTerminal
   } from 'lucide-svelte'
 
   const NAV_GROUPS = [
@@ -77,7 +77,7 @@
   let collapsed = false
   let mobileOpen = false
 
-  const themeIcons = { system: MonitorCog, dark: Moon, light: Sun }
+  const themeIcons = { system: MonitorCog, dark: Moon, light: Sun, terminal: SquareTerminal }
 
   let authLoading = true
   let authEnabled = false
@@ -160,7 +160,17 @@
     password = ''
   }
 
+  /**
+   * What the status line shows. Both are real values, not decoration: the
+   * interval the pages actually poll at, and the clock.
+   */
+  let refreshMs = 30000
+  let statusClock = ''
+  /** @type {any} */
+  let statusClockTimer = null
+
   function applyConfig(cfg) {
+    if (cfg.refreshInterval) refreshMs = cfg.refreshInterval
     if (cfg.displayCurrency) displayCurrency.set(cfg.displayCurrency)
     if (cfg.exchangeRateCache?.CNY_USD) exchangeRate.set(cfg.exchangeRateCache.CNY_USD)
     if (cfg.exchangeRate) exchangeRate.set(cfg.exchangeRate)
@@ -187,6 +197,13 @@
     initTheme()
     loadAuthStatus()
     setUnauthorizedHandler(onUnauthorized)
+    const tick = () => {
+      statusClock = new Date().toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      })
+    }
+    tick()
+    statusClockTimer = setInterval(tick, 1000)
     // Initialize currency stores from config
     fetchConfig().then(applyConfig).catch(() => {})
     if (typeof window !== 'undefined') {
@@ -196,6 +213,7 @@
 
   onDestroy(() => {
     setUnauthorizedHandler(null)
+    if (statusClockTimer != null) clearInterval(statusClockTimer)
   })
 
   $: $page, mobileOpen = false
@@ -430,6 +448,20 @@
       {/if}
     </main>
 
+    <!-- Only drawn by the terminal theme; the CSS hides it everywhere else. -->
+    <div class="status-line">
+      <span>
+        <span class="status-key">aiusage</span>
+        <span class="status-sep">│</span>
+        {$page.url.pathname}
+      </span>
+      <span>
+        {$t('status.refresh')} {Math.round(refreshMs / 1000)}s
+        <span class="status-sep">│</span>
+        {statusClock}
+      </span>
+    </div>
+
   </div>
 
 </div>
@@ -642,6 +674,229 @@
     --notice-bg:        oklch(0.2 0.04 55);
     --notice-border:    oklch(0.35 0.1 55);
     --notice-fg:        oklch(0.78 0.14 60);
+  }
+
+  /*
+   * ── Terminal ──────────────────────────────────────────────────────────
+   *
+   * A monitoring TUI, not a nostalgia filter: dark blue-green rather than
+   * black, and colour used to sort information rather than to decorate.
+   * Cyan carries headings, magenta the second level, amber a warning, olive
+   * the middle ground and green what is healthy or remaining — the same job
+   * those colours do in top or btop, which is where a reader of this page
+   * has met them before.
+   *
+   * Everything is monospace here. That is the point of the theme, and it is
+   * the one place the rule from DESIGN.md is deliberately set aside: the
+   * grid is the aesthetic, so labels line up with the figures under them.
+   *
+   * Corners and shadows are zero. Structure is carried by lines: solid rules
+   * for boxes, dotted ones for dividers, and bracketed corners on the panels.
+   */
+  :global(:root[data-theme="terminal"]) {
+    --bg:               oklch(0.21 0.028 195);
+    --surface:          oklch(0.25 0.032 195);
+    --raised:           oklch(0.29 0.036 195);
+    --hover:            oklch(0.33 0.04 195);
+    --sidebar-bg:       oklch(0.18 0.024 195);
+    --border-subtle:    oklch(0.40 0.045 195);
+    --border-medium:    oklch(0.55 0.07 195);
+    --text:             oklch(0.90 0.03 175);
+    --text-secondary:   oklch(0.78 0.04 175);
+    --text-muted:       oklch(0.62 0.04 190);
+    /* Cyan is the interface's own colour: headings, links, the caret. */
+    --accent:           oklch(0.82 0.13 200);
+    --accent-dim:       oklch(0.82 0.13 200 / 0.16);
+    --accent-hover:     oklch(0.90 0.13 200);
+    /* Green reads as "fine, and this much left". */
+    --green:            oklch(0.80 0.19 145);
+    --green-dim:        oklch(0.80 0.19 145 / 0.16);
+    /* Magenta is the second heading level, not an alert. */
+    --blue:             oklch(0.74 0.19 330);
+    --blue-dim:         oklch(0.74 0.19 330 / 0.16);
+    --purple:           oklch(0.74 0.19 330);
+    --purple-dim:       oklch(0.74 0.19 330 / 0.16);
+    --rose:             oklch(0.72 0.20 25);
+    --rose-dim:         oklch(0.72 0.20 25 / 0.16);
+    --badge-override-bg: oklch(0.82 0.13 200 / 0.16);
+    --badge-override-fg: oklch(0.82 0.13 200);
+    --badge-matched-bg:  oklch(0.80 0.19 145 / 0.16);
+    --badge-matched-fg:  oklch(0.80 0.19 145);
+    --badge-noprice-bg:  oklch(0.80 0.15 75 / 0.16);
+    --badge-noprice-fg:  oklch(0.80 0.15 75);
+    /* No shadows. Depth is a painted illusion and this surface has none. */
+    --shadow-sm:        none;
+    --shadow-md:        none;
+    --shadow-lg:        none;
+    --shadow-dropdown:  none;
+    --shadow-modal:     none;
+    --overlay:          oklch(0.12 0.02 195 / 0.75);
+    --overlay-strong:   oklch(0.12 0.02 195 / 0.85);
+    /* One face for everything. */
+    --font-sans:        var(--mono);
+    /* Square. */
+    --radius-xs:        0;
+    --radius-badge:     0;
+    --radius-input:     0;
+    --radius-card:      0;
+    --radius-panel:     0;
+    --radius-pill:      0;
+    --on-accent:        oklch(0.16 0.02 195);
+    /* Amber warns; olive is the step before it. */
+    --warn-solid:       oklch(0.80 0.15 75);
+    --warn-bg:          oklch(0.80 0.15 75 / 0.14);
+    --warn-fg:          oklch(0.84 0.14 80);
+    --notice-bg:        oklch(0.74 0.12 110 / 0.14);
+    --notice-border:    oklch(0.74 0.12 110);
+    --notice-fg:        oklch(0.80 0.12 110);
+    --danger-fg:        oklch(0.76 0.20 25);
+    --danger-bg:        oklch(0.72 0.20 25 / 0.18);
+    --danger-solid:     oklch(0.72 0.20 25);
+    --danger-border:    oklch(0.72 0.20 25);
+    --danger-soft-bg:   oklch(0.72 0.20 25 / 0.12);
+    --danger-soft-fg:   oklch(0.80 0.18 25);
+    --danger-plain:     oklch(0.76 0.20 25);
+    --info-bg:          oklch(0.82 0.13 200 / 0.14);
+    --info-fg:          oklch(0.82 0.13 200);
+    --info-solid:       oklch(0.82 0.13 200);
+    --success-fg:       oklch(0.80 0.19 145);
+    --amber:            oklch(0.80 0.15 75);
+    /* Chart series, ordered so neighbours stay distinguishable. */
+    --chart-input:      oklch(0.82 0.13 200);
+    --chart-output:     oklch(0.74 0.19 330);
+    --chart-cache-read: oklch(0.80 0.15 75);
+    --chart-cache-write: oklch(0.74 0.12 110);
+    --chart-thinking:   oklch(0.76 0.20 25);
+    --chart-total:      oklch(0.80 0.19 145);
+  }
+
+  /*
+   * ── Terminal: the parts a colour cannot carry ─────────────────────────
+   *
+   * Everything below is scoped to the theme, so no other theme is touched by
+   * it. This is the boundary the token file could not cross: brackets,
+   * dotted rules and a status line are shapes, not values.
+   */
+
+  /* One face, everywhere. */
+  :global(:root[data-theme="terminal"] body),
+  :global(:root[data-theme="terminal"] button),
+  :global(:root[data-theme="terminal"] input),
+  :global(:root[data-theme="terminal"] select),
+  :global(:root[data-theme="terminal"] textarea) {
+    font-family: var(--mono);
+  }
+
+  /*
+   * Bracketed corners, drawn as eight background slices rather than extra
+   * elements — an element has two pseudo-elements and a box has four corners.
+   */
+  :global(:root[data-theme="terminal"] .card) {
+    /* The title above is positioned against this. */
+    position: relative;
+    border: var(--border-width) solid var(--border-subtle);
+    /*
+     * The card clips its overflow to hold rounded corners. There are no
+     * rounded corners here, and the title has to sit on the top rule, so the
+     * clip has to go — otherwise the title is cut in half. Wide tables are
+     * unaffected: they have carried their own scroller since 8-B-2.
+     */
+    overflow: visible;
+    background:
+      linear-gradient(var(--accent), var(--accent)) 0 0 / 12px 2px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 0 0 / 2px 12px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 100% 0 / 12px 2px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 100% 0 / 2px 12px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 0 100% / 12px 2px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 0 100% / 2px 12px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 100% 100% / 12px 2px no-repeat,
+      linear-gradient(var(--accent), var(--accent)) 100% 100% / 2px 12px no-repeat,
+      var(--surface);
+  }
+
+  /*
+   * The panel's title sits on its top rule, the way a boxed TUI names its
+   * panes. Lifted by the card's own padding plus half a line, and the space
+   * it vacated is given back so nothing below shifts.
+   */
+  /*
+   * Taken out of the flow rather than pulled up through it. Lifting it with
+   * a negative margin dragged everything after it along, and on a card whose
+   * header also holds tabs the list rose over the top of them. Out of flow,
+   * the title is only a label on the rule and the card lays out as if it
+   * were not there.
+   */
+  :global(:root[data-theme="terminal"] .card > .section-title:first-child),
+  :global(:root[data-theme="terminal"] .card > .group-title:first-child),
+  :global(:root[data-theme="terminal"] .card > .card-header:first-child > .section-title) {
+    position: absolute;
+    top: -0.62em;
+    left: 0.9rem;
+    margin: 0;
+    padding: 0 0.5rem;
+    background: var(--surface);
+    color: var(--accent);
+  }
+
+  /* The small stat boxes are boxes too, without the ceremony of brackets. */
+  :global(:root[data-theme="terminal"] .hero-card),
+  :global(:root[data-theme="terminal"] .token-item) {
+    border: var(--border-width) solid var(--border-subtle);
+  }
+
+  /* The second level of heading, in magenta. */
+  :global(:root[data-theme="terminal"] h1),
+  :global(:root[data-theme="terminal"] .page-header h1) {
+    color: var(--accent);
+  }
+  :global(:root[data-theme="terminal"] h2),
+  :global(:root[data-theme="terminal"] h3) {
+    color: var(--purple);
+  }
+
+  /* Dotted rules everywhere a solid one was only separating rows. */
+  :global(:root[data-theme="terminal"] td),
+  :global(:root[data-theme="terminal"] th) {
+    border-bottom-style: dotted;
+    border-bottom-color: var(--border-medium);
+  }
+  :global(:root[data-theme="terminal"] .filter-bar) {
+    border: var(--border-width) dotted var(--border-subtle);
+    background: transparent;
+  }
+
+  /*
+   * The status line.
+   *
+   * A TUI ends in one, and this one says only things that are true: which
+   * screen is open, how often the page refreshes itself, and the clock. No
+   * "Ctrl-C quit" — the key does nothing in a browser, and a status line
+   * that lies about its own keys is the one part of the imitation that would
+   * actually mislead someone.
+   */
+  .status-line {
+    display: none;
+  }
+  :global(:root[data-theme="terminal"]) .status-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.3rem 1rem;
+    border-top: var(--border-width) solid var(--border-subtle);
+    background: var(--sidebar-bg);
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .status-line .status-key {
+    color: var(--accent);
+  }
+  .status-line .status-sep {
+    color: var(--border-medium);
+    padding: 0 0.5rem;
   }
 
   /* ── App shell ────────────────────────────────────────────────────────── */

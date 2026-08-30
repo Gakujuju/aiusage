@@ -19,11 +19,17 @@
     -->
     <script>
       (function() {
+        // Runs before the first paint so the page never flashes the default
+        // theme. Kept in step with THEMES in lib/theme.js — a name missing
+        // here is a name that flickers.
+        var polarity = { light: 'light', dark: 'dark', terminal: 'dark' };
         var pref = localStorage.getItem('aiusage-theme') || 'system';
+        if (pref !== 'system' && !polarity[pref]) pref = 'system';
         var theme = pref === 'system'
           ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
           : pref;
         document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.colorScheme = polarity[theme];
       })();
     </script>
     %sveltekit.head%

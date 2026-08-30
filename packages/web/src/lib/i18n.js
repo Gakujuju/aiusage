@@ -196,6 +196,10 @@ const translations = {
       system: 'System',
       dark: 'Dark',
       light: 'Light',
+      terminal: 'Terminal',
+    },
+    status: {
+      refresh: 'refresh'
     },
     pricing: {
       title: 'Pricing',
@@ -834,6 +838,10 @@ const translations = {
       system: 'システム',
       dark: 'ダーク',
       light: 'ライト',
+      terminal: 'ターミナル',
+    },
+    status: {
+      refresh: '更新'
     },
     pricing: {
       title: '料金',
@@ -1472,6 +1480,10 @@ const translations = {
       system: '跟随系统',
       dark: '深色',
       light: '浅色',
+      terminal: '终端',
+    },
+    status: {
+      refresh: '刷新'
     },
     pricing: {
       title: '定价管理',
