@@ -32,10 +32,29 @@ export function resolveAiusageDir(env: NodeJS.ProcessEnv = process.env): string 
 export const AIUSAGE_DIR = resolveAiusageDir()
 export const CONFIG_PATH = join(AIUSAGE_DIR, 'config.json')
 
+/**
+ * Every field a synced record carries off this machine.
+ *
+ * This list is what the consent screen shows and what the consent
+ * fingerprint is computed from, so it has one job: match what
+ * mapStatsRecordToSyncRecord actually puts on the wire. It did not.
+ * platform, sourceFile and cwd were being uploaded without appearing here,
+ * which meant consent was given against a list that left out the two fields
+ * a person would most want to know about — sourceFile is the path of the log
+ * file, and cwd is the absolute path of the directory the work happened in.
+ * On a work machine those carry project and client names.
+ *
+ * Adding them changes the fingerprint, so anyone who has already consented is
+ * asked again. That is the point: consent obtained against an inaccurate
+ * list is not consent for what was actually being sent.
+ *
+ * If a field is ever added to the record, add it here in the same change.
+ */
 export const SYNC_FIELDS = [
   'ts', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens',
   'thinkingTokens', 'cost', 'costSource', 'tool', 'model', 'provider',
-  'sessionKey', 'device', 'deviceInstanceId', 'updatedAt',
+  'sessionKey', 'device', 'deviceInstanceId', 'platform', 'updatedAt',
+  'sourceFile', 'cwd',
 ]
 
 export interface SyncConfig {
