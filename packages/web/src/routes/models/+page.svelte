@@ -240,7 +240,7 @@
     gap: 1rem 1.5rem;
     align-items: center;
     padding: 0.65rem 0;
-    border-bottom: var(--border-width) solid var(--row-divider);
+    border-bottom: var(--border-width) solid var(--border-subtle);
   }
   .model-row:last-child { border-bottom: none; }
 

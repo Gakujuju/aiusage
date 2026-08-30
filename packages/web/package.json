@@ -6,7 +6,9 @@
     "dev": "vite dev",
     "build": "svelte-kit sync && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:css-vars": "node scripts/check-css-vars.cjs",
+    "pretest": "node scripts/check-css-vars.cjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "~3.0.0",

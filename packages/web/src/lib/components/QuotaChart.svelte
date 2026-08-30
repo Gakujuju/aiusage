@@ -122,26 +122,26 @@
   }
 
   .grid {
-    stroke: var(--color-border-subtle);
+    stroke: var(--border-subtle);
     stroke-width: 1;
     vector-effect: non-scaling-stroke;
   }
 
   .reset {
-    stroke: var(--color-text-muted);
+    stroke: var(--text-muted);
     stroke-width: 1;
     stroke-dasharray: 3 3;
     vector-effect: non-scaling-stroke;
   }
 
   .axis {
-    fill: var(--color-text-muted);
+    fill: var(--text-muted);
     font-size: 10px;
     font-family: var(--font-mono);
   }
 
   .reset-label {
-    fill: var(--color-text-muted);
+    fill: var(--text-muted);
   }
 
   .line {

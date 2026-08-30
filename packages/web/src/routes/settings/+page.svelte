@@ -1997,7 +1997,7 @@
 
   .test-result {
     font-size: 0.75rem;
-    color: var(--text-secondary, var(--color-text-secondary));
+    color: var(--text-secondary);
   }
 
   /* Sending response text off the machine deserves more than the usual grey. */

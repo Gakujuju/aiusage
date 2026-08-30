@@ -598,7 +598,7 @@
   }
 
   .tier-row + .tier-row {
-    border-top: var(--border-width) solid var(--color-border-subtle, var(--border));
+    border-top: var(--border-width) solid var(--border-subtle);
     padding-top: 0.75rem;
   }
 
@@ -640,7 +640,7 @@
   .tier-empty {
     margin-top: 0.5rem;
     font-size: 0.75rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .forecast {
@@ -657,7 +657,7 @@
   }
 
   .forecast-row dt {
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
     min-width: 7.5rem;
   }
 
@@ -665,7 +665,7 @@
     margin: 0;
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    color: var(--text, var(--color-text));
+    color: var(--text);
   }
 
   .forecast-row dd.over {
@@ -676,11 +676,11 @@
     margin-left: 0.4rem;
     font-family: inherit;
     font-size: 0.6875rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .forecast-unknown {
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
     font-style: normal;
   }
 </style>

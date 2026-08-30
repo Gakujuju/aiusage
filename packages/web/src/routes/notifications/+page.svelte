@@ -264,7 +264,7 @@
     flex-wrap: wrap;
     gap: 0.6rem;
     font-size: 0.75rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .notif-state {
@@ -276,7 +276,7 @@
   /* Two weights of the same error hue, as elsewhere: failed is the state to
      act on, dropped is one nothing can be done about. */
   .state-failed { color: var(--danger-fg); }
-  .state-dropped { color: var(--text-muted, var(--color-text-muted)); }
+  .state-dropped { color: var(--text-muted); }
   .state-sent { color: var(--success-fg); }
   .state-pending,
   .state-sending { color: var(--info-fg); }
@@ -299,7 +299,7 @@
   .notif-body {
     margin: 0.35rem 0 0;
     padding: 0.5rem 0.6rem;
-    background: var(--raised, var(--color-raised));
+    background: var(--raised);
     border-radius: var(--radius-input);
     font-size: 0.75rem;
     font-family: var(--font-mono);
@@ -321,7 +321,7 @@
     gap: 0.75rem;
     margin-top: 0.4rem;
     font-size: 0.75rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .retry-btn {
@@ -330,6 +330,6 @@
 
   .truncated {
     font-size: 0.75rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 </style>

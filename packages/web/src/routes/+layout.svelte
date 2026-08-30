@@ -565,15 +565,6 @@
      * nothing on screen and makes it reachable from a theme.
      */
     --amber:            #f59e0b;
-    /*
-     * Likewise var(--border, rgba(255,255,255,0.06)) on the model table: the
-     * name it asked for has never existed, and this translucent white is
-     * what has always been drawn — barely visible on the light theme. Kept
-     * as-is; pointing it at --border-subtle would be a visible change and
-     * belongs in its own decision.
-     */
-    --row-divider:      rgba(255, 255, 255, 0.06);
-
     /* Two shadows that were written out by hand rather than reused. */
     --shadow-dropdown:  0 1px 3px oklch(0 0 0 / 0.08), 0 4px 12px oklch(0 0 0 / 0.04);
     --shadow-modal:     0 4px 8px oklch(0 0 0 / 0.06), 0 12px 32px oklch(0 0 0 / 0.04);

@@ -362,7 +362,7 @@
     align-items: center;
     gap: 0.4rem;
     font-size: 0.8125rem;
-    color: var(--text-secondary, var(--color-text-secondary));
+    color: var(--text-secondary);
     white-space: nowrap;
     cursor: pointer;
   }
@@ -397,7 +397,7 @@
   }
 
   .count-label {
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .group {
@@ -412,7 +412,7 @@
     font-weight: 550;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
     margin: 0 0 0.6rem;
   }
 
@@ -449,7 +449,7 @@
   .agent-waited,
   .agent-stale {
     font-size: 0.75rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .agent-stale {
@@ -459,12 +459,12 @@
   .agent-meta {
     margin-top: 0.2rem;
     font-size: 0.75rem;
-    color: var(--text-secondary, var(--color-text-secondary));
+    color: var(--text-secondary);
   }
 
   .sep {
     margin: 0 0.35rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .agent-stats {
@@ -482,7 +482,7 @@
   }
 
   .agent-stats dt {
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 
   .agent-stats dd {
@@ -506,6 +506,6 @@
   .truncated,
   .hint {
     font-size: 0.75rem;
-    color: var(--text-muted, var(--color-text-muted));
+    color: var(--text-muted);
   }
 </style>
