@@ -45,6 +45,7 @@
     "build": "tsup && node scripts/copy-web.js",
     "dev": "tsx src/index.ts serve",
     "cli": "tsx src/index.ts",
+    "pretest": "pnpm --filter @aiusage/core build",
     "test": "vitest run",
     "test:watch": "vitest"
   },

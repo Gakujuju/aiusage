@@ -106,6 +106,35 @@ CLAUDE_KNOWN_TIERS に無い未知 tier で、resets_at も返らない。
 通知の tier 名は `tierDisplayName` が日本語に写す。未知 tier は
 生の名前のまま出るので、80% に達したら「nimbus_quill 80% 到達」と表示される。
 
+## 既知の事象
+
+2026-08-30 11:19 開始の codex セッション1件は、
+ウォッチャの初期不具合により device="DESKTOP-QOS4C85" /
+project="Codex" / turn_count=0 で記録されている。
+修正後のセッションは正しい値になる。この1件は履歴として残す。
+（履歴1行の見た目のために本番DBを直接 UPDATE する前例を作らない。
+  turn_count は正しい値を復元できず、device と project だけ直すと
+  部分的に正しい行になってかえって紛らわしい）
+
+## upstream への PR 候補
+
+※ この一覧は実装役が作業内容から再構成したもの。
+  指示役の手元の一覧と食い違う場合はそちらが正。
+
+1. `extractSessionId` が '/' でしか分割せず、Windows では
+   session_id にフルパスが入る（packages/cli/src/commands/parse.ts）。
+   fork では v17 でバックフィルも行った。
+2. `claude-code.ts` と `codex.ts` だけが cost_source を
+   `model === 'unknown'` で判定しており、価格表に無いモデルでも
+   `cost=0 / cost_source='pricing'` になる。総コスト $0 の原因（D15）。
+3. `serve` が無条件に 0.0.0.0 で listen し、ダッシュボードの
+   パスワードは任意。既定でネットワークに露出する（D16）。
+4. `ensureAiusageDir` に呼び出し元が無く state.json が作られないため、
+   ingest トークンが null になり hook の POST が全て 401 になる。
+5. cli のテストが core のビルド済み dist を参照するため、
+   core を変更してもビルドするまで反映されず、落ちるべきテストが通る。
+   packages/cli/package.json に pretest を1行足すだけで塞げる。
+
 ## バックアップ
 
 - `~/.aiusage/backup-v12-20260829/` プロジェクト開始前

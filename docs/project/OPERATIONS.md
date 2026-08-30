@@ -57,6 +57,29 @@
   設定に依存するテストは、実機の状態に左右されないようモジュールをモックする
   （`tests/notify/discord.test.ts` が例）。
 
+## パッケージ間のビルド順序
+
+cli のテストは @aiusage/core のビルド済み dist を参照する。
+core を変更しても再ビルドするまで cli のテストには反映されず、
+落ちるべきテストが通る。実際に quotaThresholdCrossings の期待値誤りが
+1フェーズ分隠れていた（出荷済みの挙動は正しく、誤っていたのは期待値だけ）。
+
+packages/cli/package.json の pretest が core をビルドするので
+通常は意識しなくてよい。ただし個別に vitest を直接叩く場合は
+pretest が走らないため、core を触った直後は
+  pnpm --filter @aiusage/core build
+を先に実行すること。
+
+packages/site は別の解き方をしていて、vitest.config.ts で
+`@aiusage/core` を `../core/src/index.ts` にエイリアスしている。
+ビルドが要らない代わりに、出荷されるバンドルではなくソースを
+テストすることになる。cli は出荷物と同じものをテストしたいので
+pretest を選んだ。どちらでもよいが、両方やらない状態が最悪。
+
+web と widget は core を参照していない
+（web は TOOLS を手で写した定数を持っている。これはこれで
+  ずれる余地があるが、ビルド順序の問題ではない）。
+
 ## 検証条件の書き方
 
 「この分岐は安全なので通す」という判断は、判断そのものを引数か
