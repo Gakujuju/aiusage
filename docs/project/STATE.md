@@ -18,7 +18,10 @@
 
 ## 未消化の作業
 
-- Phase 5 のクローズ確認（次に Codex が使われた時点で実施）
+- Phase 5 のクローズ確認のうち、スクラッチ作業での通知1点
+  （実プロジェクトでの動作は 2026-08-30 13:27 のセッションで確認済み）
+- 応答プレビューが Discord に出ることの実機確認
+  （設定は本番に投入済み。次の Stop hook で発火する）
 - 段階3 の材料収集（既存 PowerShell 通知との併走データを数日分）
 
 ルール:
@@ -99,6 +102,8 @@
 - Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）。
   Codex のターン完了でも通知が出るようになった。
   tool 別に切るなら config の notifications.tools（例 { "codex": false }）。
+- 応答プレビュー: 有効（notifications.includeAssistantMessage = true）。
+  取得時点で200文字に切り詰め、改行を畳んで assistant_preview に入れる（D10）。
 - hook: `~/.claude/settings.json` に8イベント登録済み
   （Stop / StopFailure / Notification / UserPromptSubmit /
     SessionStart / SessionEnd / PermissionRequest / PermissionDenied）
@@ -125,7 +130,12 @@ CLAUDE_KNOWN_TIERS に無い未知 tier で、resets_at も返らない。
 2026-08-30 11:19 開始の codex セッション1件は、
 ウォッチャの初期不具合により device="DESKTOP-QOS4C85" /
 project="Codex" / turn_count=0 で記録されている。
-修正後のセッションは正しい値になる。この1件は履歴として残す。
+この1件は履歴として残す。
+
+修正後の 13:27 開始のセッションでは device="自宅PC" / project="aiusage" /
+turn_count=2 となり、session_start から先頭読みできている。
+会話本文は入っておらず、_droppedKeys に message / local_images /
+local_audio / text_elements / last_agent_message の名前だけが残っている。
 （履歴1行の見た目のために本番DBを直接 UPDATE する前例を作らない。
   turn_count は正しい値を復元できず、device と project だけ直すと
   部分的に正しい行になってかえって紛らわしい）
