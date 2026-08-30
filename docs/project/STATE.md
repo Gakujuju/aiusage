@@ -10,7 +10,7 @@
 | 2 | 日本語化 | 完了・main マージ済み |
 | 3 | 端末識別 | 完了（device / deviceInstanceId） |
 | 4 | Claude Code Hook 取り込み | 完了（8イベント、実データ確認済み） |
-| 5 | Codex の状態取得 | 未着手 |
+| 5 | Codex の状態取得 | 完了（rollout ログ追尾・D18） |
 | 6-A | クォータ履歴・枯渇予測 | 完了（Claude / Codex で稼働中） |
 | 6-B | 状態管理・作業時間計測 | 完了 |
 | 7 | Discord 通知統合 | 完了（段階2 併走中） |
@@ -24,6 +24,7 @@
 - v16 v_agent_sessions の寛容な JOIN
 - v17 records.session_id のバックフィル（本番適用済み・10,368行を修正）
 - v18 quota 3テーブルから device_instance_id = '' の行を削除（D17）
+- v19 agent_log_cursors（ログ追尾の byte offset）
 
 ## 未解決の課題
 
@@ -39,18 +40,25 @@
    paceRatio は常に null、ロールオーバー判定は「5ポイント以上の下落」
    のみで行われる（§nimbus_quill の制約 を参照）。
    statusLine 経由（案C）は Desktop で発火しない・行き止まり（記録として保持）。
-2. Gemini のクォータは未対応。Gemini CLI のトークン実績は probeGemini で取得可能。
+2. Codex の「確認待ち」は取得できない。rollout ログに該当するイベント型が
+   存在しない（10セッション 55,373行を横断して0件）。
+   Codex は「作業中 / 完了」の2状態のみ。
+   この端末は sandbox = "elevated" かつ対象プロジェクトが trusted なので
+   そもそも承認自体が起きにくいが、それとは別に型が無い。
+3. Codex のセッション終了イベントも存在しない。ended_at は DECAY_POLICY の
+   24時間タイムアウト任せになる。プロセス監視による即時検出は将来の課題。
+4. Gemini のクォータは未対応。Gemini CLI のトークン実績は probeGemini で取得可能。
    Gemini アプリ（Web）は消費率 API が非公開で取得手段なし。
-3. ChatGPT Web / Gemini Web の会話利用は対象外（公開 API なし）。
+5. ChatGPT Web / Gemini Web の会話利用は対象外（公開 API なし）。
    Claude.ai の Web 利用は Claude Code と 5h/7d 枠を共有するため、
    案A が通れば自動的に数字に含まれる。
-4. serve のバインドは 127.0.0.1 が既定になった（D16）。
+6. serve のバインドは 127.0.0.1 が既定になった（D16）。
    非ループバックはパスワード必須で、そのとき /api/summary と /api/quotas
    も保護対象に入る。Phase 8（Android/PWA）で外から見る段になったら、
    `--host` + `AIUSAGE_DASHBOARD_PASSWORD` か、
    ループバックのままトンネルを張るかを選ぶ必要がある。
-5. `device_instance_id` が全件 'unknown'。正規化は D1 のとおり単独では行わない。
-6. コストは API 従量換算であって請求額ではない（D7）。UI で誤読されない表記が必要。
+7. `device_instance_id` が全件 'unknown'。正規化は D1 のとおり単独では行わない。
+8. コストは API 従量換算であって請求額ではない（D7）。UI で誤読されない表記が必要。
 
 ## コスト
 
@@ -72,7 +80,11 @@
   claude-code: five_hour / seven_day / nimbus_quill
   codex: five_hour / weekly_limit
   copilot: 認証情報が無いため not_found（正常）
-- Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）
+- Codex ログ追尾: 5秒間隔。~/.codex/sessions 配下の rollout-*.jsonl のうち、
+  直近7日分のディレクトリ＋カーソル済みファイルで、mtime が直近30分以内のもの。
+- Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）。
+  Codex のターン完了でも通知が出るようになった。
+  tool 別に切るなら config の notifications.tools（例 { "codex": false }）。
 - hook: `~/.claude/settings.json` に8イベント登録済み
   （Stop / StopFailure / Notification / UserPromptSubmit /
     SessionStart / SessionEnd / PermissionRequest / PermissionDenied）
@@ -97,7 +109,8 @@ CLAUDE_KNOWN_TIERS に無い未知 tier で、resets_at も返らない。
 ## バックアップ
 
 - `~/.aiusage/backup-v12-20260829/` プロジェクト開始前
-- `~/.aiusage/backup-v17-20260830/` v18 適用直前（直近の安定状態）
+- `~/.aiusage/backup-v19-20260830/` Codex ログ追尾を動かす直前（直近の安定状態）
+  ※ v19 は空テーブルを足すだけなので、内容は v18 適用後と同じ。
 - `~/.aiusage/backup-pre-claude-cli/` `~/.claude` 系（別目的・保持）
 - `~/.claude/settings.json.pre-notify-hooks` hook 追記前（sha256 3c0ef1dbcf7bb8ee）
   現在の settings.json は sha256 bbfbead44827f015（案A の CLI ログイン後）。

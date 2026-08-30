@@ -17,11 +17,12 @@ import { RuntimeSettingsController } from '../runtime/settings-controller.js'
 import { AsyncTaskQueue } from '../db/write-queue.js'
 import { countUnpricedRecords, findPredominantDeviceInstanceId } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
-import { AgentSessionEmitter, decayStaleSessions } from '../db/agent-sessions.js'
+import { AgentSessionEmitter, applyAgentEvents, decayStaleSessions } from '../db/agent-sessions.js'
 import { NotificationSender } from '../notify/discord.js'
 import { requeueInFlightNotifications } from '../db/notifications.js'
 import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
+import { runCodexLogTick } from '../agent/codex-log-watcher.js'
 import { queryAllQuotas } from '../quota.js'
 import { hostname } from 'node:os'
 import { fetchExchangeRate, CACHE_TTL_MS } from '@aiusage/core'
@@ -139,6 +140,7 @@ export function runServeCommand(
 
 const MAX_PORT_ATTEMPTS = 10
 const AGENT_REAPER_INTERVAL_MS = 15_000
+const CODEX_LOG_INTERVAL_MS = 5_000
 const PORT_FILE = join(AIUSAGE_DIR, '.serve-port')
 
 const MIME_TYPES: Record<string, string> = {
@@ -356,6 +358,26 @@ export function serve(options: ServeOptions): void {
     }).catch((err) => console.error('[serve] agent session reaper failed:', err))
   }, AGENT_REAPER_INTERVAL_MS)
 
+  // Codex has no hooks, so its lifecycle is read out of the rollout logs it
+  // already writes (D18). Skipped while a parse is in flight for the same
+  // reason the notification sender is: better-sqlite3 is synchronous, and a
+  // parse holds the event loop long enough that this would only queue up.
+  const codexLogWatcher = setInterval(() => {
+    if (runtimeSettings.isParseInFlight()) return
+    const now = Date.now()
+    void runDbWrite(() => runCodexLogTick({
+      db: options.db,
+      now,
+      applyEvents: (events) => applyAgentEvents(options.db, events, {
+        projectRoots: loadConfig()?.projectRoots,
+        device: hostname(),
+        deviceInstanceId: getState(AIUSAGE_DIR)?.deviceInstanceId ?? 'unknown',
+        platform: process.platform,
+        now,
+      }, agentEmitter).applied,
+    })).catch((err) => console.error('[serve] codex log watcher failed:', err))
+  }, CODEX_LOG_INTERVAL_MS)
+
   // Anything the previous process was mid-send on. Runs before the sender
   // starts, so the first tick can pick them up.
   void runDbWrite(() => requeueInFlightNotifications(options.db))
@@ -473,6 +495,7 @@ export function serve(options: ServeOptions): void {
 
     runtimeSettings.stop()
     clearInterval(agentReaper)
+    clearInterval(codexLogWatcher)
     notificationSender.stop()
     throw error
   })
@@ -489,6 +512,7 @@ export function serve(options: ServeOptions): void {
     cleanup()
     runtimeSettings.stop()
     clearInterval(agentReaper)
+    clearInterval(codexLogWatcher)
     notificationSender.stop()
     server.close(() => {
       process.exit(0)
@@ -499,6 +523,7 @@ export function serve(options: ServeOptions): void {
     cleanup()
     runtimeSettings.stop()
     clearInterval(agentReaper)
+    clearInterval(codexLogWatcher)
     notificationSender.stop()
     server.close(() => {
       process.exit(0)

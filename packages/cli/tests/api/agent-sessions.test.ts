@@ -41,11 +41,13 @@ describe('migration v14', () => {
     expect(versions).toContain(14)
   })
 
-  it('creates the three agent tables and the view', () => {
+  it('creates the three agent session tables and the view', () => {
     const tables = (db.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'agent%'"
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'agent_session%'"
     ).all() as Array<{ name: string }>).map((r) => r.name).sort()
     expect(tables).toEqual(['agent_session_events', 'agent_session_spans', 'agent_sessions'])
+    // Deliberately not LIKE 'agent%': agent_log_cursors arrived in v19 and
+    // has nothing to do with what v14 creates.
 
     expect(db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'v_agent_sessions'"

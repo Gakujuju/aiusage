@@ -135,6 +135,12 @@ export interface NotificationConfig {
   quietHours?: { start: string; end: string }
   /** Event kinds that ignore quiet hours. */
   quietHoursAllow?: string[]
+  /**
+   * Per-tool mute, e.g. { codex: false }. Unset means enabled: a tool we
+   * learn to watch later starts announcing itself rather than staying
+   * silently off for everyone who already has a config file.
+   */
+  tools?: Record<string, boolean>
 }
 
 /** Credential key holding the Discord webhook. Never stored in `notifications`. */

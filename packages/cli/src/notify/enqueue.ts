@@ -95,6 +95,7 @@ export function notifySessionChange(ctx: NotifyContext, sessionPk: string): Sess
     previousNotifyState: session.notify_state || null,
     statusSince: session.status_since,
     lastNotifiedAt: session.notified_at,
+    tool: session.tool,
     now: ctx.now,
     config: ctx.config,
   })

@@ -70,7 +70,25 @@ describe('shouldNotifySession — the order of the checks', () => {
     expect(shouldNotifySession(input({ config: { enabled: false } })).reason).toBe('disabled')
   })
 
-  it('2. refuses a status with no label, even when its event is enabled', () => {
+  it('2. refuses a tool the user has muted', () => {
+    const decision = shouldNotifySession(input({
+      tool: 'codex',
+      config: { enabled: true, tools: { codex: false } },
+    }))
+    expect(decision).toEqual({ notify: false, reason: 'tool_disabled' })
+  })
+
+  it('2. leaves an unlisted tool enabled', () => {
+    // Unset means on. A tool we learn to watch later should announce itself
+    // rather than be silently off for everyone with an existing config.
+    expect(shouldNotifySession(input({ tool: 'codex', config: { enabled: true } })).notify).toBe(true)
+    expect(shouldNotifySession(input({
+      tool: 'codex', config: { enabled: true, tools: { 'claude-code': false } },
+    })).notify).toBe(true)
+    expect(shouldNotifySession(input({ config: { enabled: true, tools: { codex: false } } })).notify).toBe(true)
+  })
+
+  it('3. refuses a status with no label, even when its event is enabled', () => {
     const decision = shouldNotifySession(input({
       status: 'running', lastEventKind: 'user_prompt',
       config: { enabled: true, events: { running: true } },
@@ -78,29 +96,29 @@ describe('shouldNotifySession — the order of the checks', () => {
     expect(decision).toEqual({ notify: false, reason: 'no_label' })
   })
 
-  it('3. refuses a muted event kind', () => {
+  it('4. refuses a muted event kind', () => {
     const decision = shouldNotifySession(input({
       config: { enabled: true, events: { waiting_for_permission: false } },
     }))
     expect(decision).toEqual({ notify: false, reason: 'event_disabled' })
   })
 
-  it('3. honours the defaults: completed on, idle off', () => {
+  it('4. honours the defaults: completed on, idle off', () => {
     expect(shouldNotifySession(input({ status: 'completed', lastEventKind: 'session_end' })).notify).toBe(true)
     expect(shouldNotifySession(input({ status: 'idle', lastEventKind: 'process_scan' })).reason).toBe('no_label')
   })
 
-  it('4. refuses to repeat what it already said', () => {
+  it('5. refuses to repeat what it already said', () => {
     const previousNotifyState = notifyStateFor('waiting_for_permission', 'notification', T0)
     expect(shouldNotifySession(input({ previousNotifyState }))).toEqual({ notify: false, reason: 'duplicate' })
   })
 
-  it('4. treats the same status reached again as a new event', () => {
+  it('5. treats the same status reached again as a new event', () => {
     const previousNotifyState = notifyStateFor('waiting_for_permission', 'notification', T0 - 10 * MIN)
     expect(shouldNotifySession(input({ previousNotifyState })).notify).toBe(true)
   })
 
-  it('5. throttles a second notification inside the minimum interval', () => {
+  it('6. throttles a second notification inside the minimum interval', () => {
     const decision = shouldNotifySession(input({
       lastNotifiedAt: T0 + MIN - 1000,
       now: T0 + MIN,
@@ -108,7 +126,7 @@ describe('shouldNotifySession — the order of the checks', () => {
     expect(decision).toEqual({ notify: false, reason: 'throttled' })
   })
 
-  it('5. allows it once the interval has elapsed', () => {
+  it('6. allows it once the interval has elapsed', () => {
     const decision = shouldNotifySession(input({
       lastNotifiedAt: T0,
       now: T0 + DEFAULT_MIN_INTERVAL_MS,
@@ -116,7 +134,7 @@ describe('shouldNotifySession — the order of the checks', () => {
     expect(decision.notify).toBe(true)
   })
 
-  it('6. holds a non-urgent notification during quiet hours', () => {
+  it('7. holds a non-urgent notification during quiet hours', () => {
     const night = new Date('2026-08-30T23:30:00').getTime()
     const decision = shouldNotifySession(input({
       status: 'completed', lastEventKind: 'session_end',

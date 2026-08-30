@@ -43,6 +43,15 @@ export interface AgentEventInput {
   detail?: string
   status?: AgentStatus
   payload?: Record<string, unknown>
+  /**
+   * Whether this event begins a new turn. Defaults to kind === 'user_prompt'.
+   *
+   * Codex marks a turn start twice — task_started then user_message — and
+   * both mean 'running'. Recording only one would lose an event; counting
+   * both would double every turn. The producer knows which is which, so it
+   * says so rather than the counter guessing from the kind.
+   */
+  countsAsTurn?: boolean
   dedupeKey?: string
 }
 
@@ -389,7 +398,9 @@ export function applyAgentEvents(
         lastPromptPreview: ctx.storePromptPreview && promptText
           ? truncate(promptText, MAX_PROMPT_PREVIEW_CHARS)
           : row.last_prompt_preview,
-        turnCount: event.kind === 'user_prompt' ? row.turn_count + 1 : row.turn_count,
+        turnCount: (event.countsAsTurn ?? event.kind === 'user_prompt')
+          ? row.turn_count + 1
+          : row.turn_count,
         // Phase 7 owns these; a status change re-arms whatever it decides.
         notifyState: resolution.changed ? '' : row.notify_state,
         notifiedAt: resolution.changed ? null : row.notified_at,

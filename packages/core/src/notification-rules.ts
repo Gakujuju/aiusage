@@ -37,6 +37,11 @@ export interface NotificationRulesConfig {
   escalation?: { waiting_for_permission?: number[] }
   quota?: { thresholds?: number[]; notifyOnReset?: boolean }
   quietHours?: { start: string; end: string }
+  /**
+   * Per-tool mute. Unset means enabled, so a tool added later starts
+   * announcing itself rather than staying silently off.
+   */
+  tools?: Record<string, boolean>
   quietHoursAllow?: string[]
 }
 
@@ -125,6 +130,7 @@ export function isQuietHour(
 export type NotifyDecisionReason =
   | 'ok'
   | 'disabled'
+  | 'tool_disabled'
   | 'no_label'
   | 'event_disabled'
   | 'duplicate'
@@ -143,6 +149,8 @@ export interface ShouldNotifySessionInput {
   previousNotifyState: string | null
   statusSince: number
   lastNotifiedAt: number | null
+  /** Which tool the session belongs to, for the per-tool mute. */
+  tool?: string
   now: number
   config: NotificationRulesConfig | undefined
 }
@@ -157,27 +165,33 @@ export function shouldNotifySession(input: ShouldNotifySessionInput): NotifyDeci
   // 1. Switched off entirely.
   if (config.enabled !== true) return { notify: false, reason: 'disabled' }
 
-  // 2. Nothing worth saying about this state.
+  // 2. This tool is muted. Ahead of the label check because 'I do not want
+  //    to hear about Codex' is about the source, not about what happened.
+  if (input.tool != null && config.tools?.[input.tool] === false) {
+    return { notify: false, reason: 'tool_disabled' }
+  }
+
+  // 3. Nothing worth saying about this state.
   const label = notificationLabel(input.status, input.lastEventKind)
   if (!label) return { notify: false, reason: 'no_label' }
 
-  // 3. This particular kind of news is muted.
+  // 4. This particular kind of news is muted.
   const events = { ...DEFAULT_NOTIFICATION_EVENTS, ...(config.events ?? {}) }
   if (events[input.status as keyof NotificationEventsConfig] !== true) {
     return { notify: false, reason: 'event_disabled' }
   }
 
-  // 4. We already said exactly this.
+  // 5. We already said exactly this.
   const state = notifyStateFor(input.status, input.lastEventKind, input.statusSince)
   if (input.previousNotifyState === state) return { notify: false, reason: 'duplicate' }
 
-  // 5. Too soon after the last one, whatever it was.
+  // 6. Too soon after the last one, whatever it was.
   const minInterval = config.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS
   if (input.lastNotifiedAt != null && input.now - input.lastNotifiedAt < minInterval) {
     return { notify: false, reason: 'throttled' }
   }
 
-  // 6. Quiet hours, unless this is one of the things worth waking up for.
+  // 7. Quiet hours, unless this is one of the things worth waking up for.
   if (isQuietHour(config.quietHours, input.now)) {
     const allow = config.quietHoursAllow ?? DEFAULT_QUIET_HOURS_ALLOW
     const key = input.lastEventKind === 'stop_failure' ? 'failed' : input.status

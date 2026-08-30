@@ -73,8 +73,8 @@ describe('migration v18', () => {
     expect(windows).toEqual([{ id: 'w-known', dii: 'unknown' }])
 
     expect(
-      (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v
-    ).toBe(18)
+      db.prepare('SELECT version FROM schema_version WHERE version = 18').get()
+    ).toBeTruthy()
   })
 
   it('reports the count for each table before deleting', () => {
