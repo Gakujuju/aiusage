@@ -32,9 +32,27 @@
 
   const POLL_MS = 5000
   const MAX_ROWS = 50
+  /**
+   * A run of events — a session ending while another starts — arrives as
+   * several nudges in a row. Waiting a moment turns them into one refetch.
+   */
+  const SSE_COALESCE_MS = 300
+  /**
+   * How long a stream may stay broken before polling comes back. EventSource
+   * reconnects on its own, so this only fires when it genuinely cannot.
+   */
+  const SSE_GIVE_UP_MS = 15000
 
   /** @type {any} */
   let timer = null
+  /** @type {any} */
+  let stream = null
+  /** @type {any} */
+  let coalesceTimer = null
+  /** @type {any} */
+  let giveUpTimer = null
+  /** True only while the stream is carrying the updates. */
+  let live = false
 
   /** @type {Record<string, string>} */
   const TOOL_LABEL_KEYS = {
@@ -79,28 +97,102 @@
   }
 
   /**
+   * The stream carries a nudge, never the data — so every update still goes
+   * through the same load() the poll uses, and the board is always showing
+   * what the server currently says rather than a patched-up local copy.
+   */
+  function onNudge() {
+    if (coalesceTimer != null) clearTimeout(coalesceTimer)
+    coalesceTimer = setTimeout(() => {
+      coalesceTimer = null
+      void load()
+    }, SSE_COALESCE_MS)
+  }
+
+  function closeStream() {
+    if (giveUpTimer != null) { clearTimeout(giveUpTimer); giveUpTimer = null }
+    if (coalesceTimer != null) { clearTimeout(coalesceTimer); coalesceTimer = null }
+    if (stream) { stream.close(); stream = null }
+    live = false
+  }
+
+  /**
+   * Subscribe if we can, and keep polling until we know we can.
+   *
+   * Polling is not replaced until the stream actually opens, so an environment
+   * without EventSource — an old browser, a proxy that will not pass
+   * text/event-stream — simply keeps the behaviour it had before.
+   */
+  function openStream() {
+    if (typeof EventSource === 'undefined') return
+    closeStream()
+
+    try {
+      stream = new EventSource('/api/agent/stream')
+    } catch {
+      stream = null
+      return
+    }
+
+    stream.onopen = () => {
+      live = true
+      // Only now: until the stream is carrying updates, the poll is what keeps
+      // the board current.
+      stopPolling()
+      if (giveUpTimer != null) { clearTimeout(giveUpTimer); giveUpTimer = null }
+    }
+
+    stream.addEventListener('change', onNudge)
+
+    stream.onerror = () => {
+      // EventSource retries by itself, so a single error is not a failure —
+      // it usually means "reconnecting". Polling restarts immediately to cover
+      // the gap, and the stream is abandoned only if it stays down.
+      live = false
+      startPolling()
+      if (giveUpTimer == null) {
+        giveUpTimer = setTimeout(() => {
+          giveUpTimer = null
+          if (!live) closeStream()
+        }, SSE_GIVE_UP_MS)
+      }
+    }
+  }
+
+  /**
    * A board left open on a second monitor is the normal case, and polling a
    * hidden tab every five seconds buys nothing. Coming back asks immediately
    * rather than waiting out an interval, because the first thing a returning
    * reader wants is the current state, not the state from five seconds ago.
+   *
+   * The stream is closed too. Holding a connection open through a phone's
+   * sleep achieves nothing except keeping the radio interested, and whatever
+   * events it would have carried are already covered by the reload below.
    */
   function onVisibilityChange() {
     if (document.hidden) {
       stopPolling()
+      closeStream()
     } else {
+      // Order matters: fetch the whole board first, then subscribe. Subscribing
+      // first would leave a window where a change lands before the fetch and
+      // gets overwritten by the older answer.
       void load()
       startPolling()
+      openStream()
     }
   }
 
   onMount(() => {
     void load()
     startPolling()
+    openStream()
     document.addEventListener('visibilitychange', onVisibilityChange)
   })
 
   onDestroy(() => {
     stopPolling()
+    closeStream()
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }

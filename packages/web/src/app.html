@@ -3,7 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="/logo-icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/logo-icon.svg" />
+    <!-- iOS ignores the manifest's icons and wants a PNG of its own. -->
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Tints the mobile browser's UI. Matches the manifest's theme_color,
+         which is --color-accent from DESIGN.md written as sRGB hex. -->
+    <meta name="theme-color" content="#00876e" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

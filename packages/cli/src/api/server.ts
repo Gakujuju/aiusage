@@ -46,6 +46,7 @@ import {
   summariseAgentSessions,
   type AgentEventInput,
 } from '../db/agent-sessions.js'
+import { openAgentStream } from './agent-stream.js'
 import { AsyncTaskQueue, type AsyncTaskQueueStatus } from '../db/write-queue.js'
 import { getPricingRegistrySummary, getUserAliasBindings, hasUserPrice, listLocalModelBindings, listPricingAliasTargets, listPricingModels, loadPricingRuntime, removeUserPricingAlias, resetUserPriceToSynced, resolvePriceFromRegistry, setUserPrice, setUserPricingAlias, syncPricingFromLitellm } from '../pricing-registry.js'
 import type { DetectedTool } from '../discovery.js'
@@ -775,7 +776,14 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
     // read key for everything the dashboard shows. Narrowing costs nothing:
     // agent-event only ever POSTs here, and the widget stays inside
     // isPublicPath.
-    const tokenExempt = url.pathname.startsWith('/api/agent/') && hasValidIngestToken(req)
+    // The stream is the exception to the exception. Everything else under
+    // /api/agent/ that the token unlocks is a write from a hook; this is a
+    // read, and what it reads out is the same session state the dashboard
+    // shows. Letting the token open it would undo the narrowing above, since
+    // the token is the thing that travels the network.
+    const tokenExempt = url.pathname.startsWith('/api/agent/')
+      && url.pathname !== '/api/agent/stream'
+      && hasValidIngestToken(req)
     if (
       dashboardPassword
       && !tokenExempt
@@ -1558,6 +1566,11 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
               limit: Number(url.searchParams.get('limit')) || undefined,
               offset: Number(url.searchParams.get('offset')) || undefined,
             }, Date.now()))
+            return
+          }
+
+          if (url.pathname === '/api/agent/stream' && req.method === 'GET') {
+            openAgentStream(req, res, agentEmitter)
             return
           }
 

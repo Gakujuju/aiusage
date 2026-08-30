@@ -201,6 +201,10 @@ const MIME_TYPES: Record<string, string> = {
   '.js': 'application/javascript',
   '.css': 'text/css',
   '.json': 'application/json',
+  // Without this the manifest goes out as application/octet-stream, and a
+  // browser that refuses it gives no reason anyone would connect to "add to
+  // home screen quietly does nothing".
+  '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',

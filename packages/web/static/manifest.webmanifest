@@ -1,0 +1,38 @@
+{
+  "_comment": "Colours are DESIGN.md tokens converted to sRGB hex, not new colours. theme_color #00876e is --color-accent oklch(0.55 0.12 175); background_color #f7fbfa is --color-bg oklch(0.985 0.004 175). Hex rather than oklch because a manifest is read by the OS as often as by the browser, and CSS Color 4 support there is uneven — an unparseable colour becomes no colour at all.",
+  "id": "/",
+  "name": "AIUsage",
+  "short_name": "AIUsage",
+  "description": "Token usage and cost across your AI coding assistants.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#00876e",
+  "background_color": "#f7fbfa",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

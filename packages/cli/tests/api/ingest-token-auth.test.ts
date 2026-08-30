@@ -159,3 +159,78 @@ describe('the ingest token satisfies the dashboard password', () => {
     expect(response.status).toBe(200)
   })
 })
+
+describe('the event stream is a read, so the token does not open it', () => {
+  beforeEach(() => {
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    process.env.AIUSAGE_INGEST_TOKEN = TOKEN
+    process.env.AIUSAGE_DASHBOARD_PASSWORD = PASSWORD
+  })
+
+  afterEach(() => {
+    db.close()
+    delete process.env.AIUSAGE_INGEST_TOKEN
+    delete process.env.AIUSAGE_DASHBOARD_PASSWORD
+  })
+
+  function server() {
+    return createApiServer(db, { isLoopbackBind: false })
+  }
+
+  it('refuses a token-only subscriber', async () => {
+    // Everything else the token unlocks under /api/agent/ is a hook writing
+    // what it just observed. This one hands back the session state the
+    // dashboard shows, and the token travels the network on every POST — so
+    // opening it here would undo the point of narrowing the exemption.
+    const response = await request(server(), '/api/agent/stream', {
+      headers: { 'x-aiusage-token': TOKEN },
+    })
+    expect(response.status).toBe(401)
+  })
+
+  it('opens it for a dashboard cookie', async () => {
+    // This one never calls end(): the whole point is that it stays open. So
+    // the assertion is on the head, not on a finished response.
+    const { buildAuthCookie } = await import('../../src/auth.js')
+    const { Readable } = await import('node:stream')
+    const cookie = buildAuthCookie(PASSWORD).split(';')[0]
+
+    const req: any = Readable.from([])
+    req.url = '/api/agent/stream'
+    req.method = 'GET'
+    req.headers = { host: '127.0.0.1', cookie }
+
+    const head = await new Promise<{ status: number; headers: Record<string, string> }>((resolve) => {
+      const res: any = {
+        statusCode: 200,
+        headersSent: false,
+        setHeader() {},
+        getHeader() { return undefined },
+        writeHead(status: number, headers?: Record<string, string>) {
+          resolve({ status, headers: headers ?? {} })
+          return this
+        },
+        write() { return true },
+        end() {},
+        on() { return this },
+        once() { return this },
+        emit() { return false },
+      }
+      server().emit('request', req, res)
+    })
+
+    expect(head.status).toBe(200)
+    expect(head.headers['Content-Type']).toContain('text/event-stream')
+  })
+
+  it('still opens the write endpoints for the token', async () => {
+    // The narrowing is one path, not the whole prefix.
+    const response = await request(server(), '/api/agent/events', {
+      method: 'POST',
+      headers: { 'x-aiusage-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ events: [{ sessionId: 's1', tool: 'claude-code', kind: 'stop' }] }),
+    })
+    expect(response.status).not.toBe(401)
+  })
+})
