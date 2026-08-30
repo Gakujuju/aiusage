@@ -44,8 +44,15 @@
 
 ## テスト
 
-- `pnpm -r test` の widget 1件（`resolves the widget-specific native sqlite
-  binding path`）は Windows のパス区切りに起因する既存の失敗。本件とは無関係。
+- `pnpm -r test` は widget の既知失敗で中断し、後続パッケージが
+  実行されない。core / cli / web は個別に実行して確認すること。
+  完了条件として「pnpm -r test 緑」と書かれていた場合は
+  「core / cli / web が個別に緑」と読み替えてよい。
+- widget の既知失敗は 1件（`resolves the widget-specific native sqlite
+  binding path`）で、Windows のパス区切りに起因する。個別の変更とは無関係。
+- widget のテストは実行前に better-sqlite3 をリビルドするため、
+  本番 serve が動いていると .node ファイルがロックされて EBUSY で失敗する。
+  widget を確認したいときは serve を止めてから実行する。
 - CLI のテストは `loadConfig()` を通じて実 `~/.aiusage/config.json` を読む。
   設定に依存するテストは、実機の状態に左右されないようモジュールをモックする
   （`tests/notify/discord.test.ts` が例）。
@@ -83,6 +90,10 @@ serve --host の安全確認をこの順序に直した経緯がある（D16 関
 
 - `~/.claude/settings.json` は自動で書き換えない。
   Phase 7 の hook 追記は明示承認を得て実施済み。
+  現在の sha256 は bbfbead44827f015（2026-08-30、案A の CLI ログイン後）。
+  CLI ログインは theme キーを1つ追加するだけで hooks を壊さない。
+  8イベント・12エントリすべて無傷で、既存 PowerShell hook と
+  aiusage hook の両方が残っていることを実測確認した。
   変更する場合は必ず事前にバックアップし、保存前に
   「既存 command 文字列が1つも変化していないこと」を検証する。
   （壊れた settings.json は Claude Code 全体を止める。前例あり）

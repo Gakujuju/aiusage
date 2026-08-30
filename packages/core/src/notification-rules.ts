@@ -204,6 +204,10 @@ export function notifyStateFor(
  *
  * Returns all of them; the caller announces only the highest. Keeping the
  * filtering out of here makes the boundary behaviour testable on its own.
+ *
+ * A null `previous` means there is no baseline — a first observation, or the
+ * first reading of a new window — and returns nothing. Pass 0 explicitly to
+ * say "the window is known to have started empty".
  */
 export function quotaThresholdCrossings(
   previous: number | null,
@@ -211,7 +215,13 @@ export function quotaThresholdCrossings(
   thresholds: number[] = [...DEFAULT_QUOTA_THRESHOLDS],
 ): number[] {
   if (!Number.isFinite(current)) return []
-  const from = Number.isFinite(previous as number) ? (previous as number) : -Infinity
+  // No baseline, no crossing. A first observation at 85 % is not the moment
+  // the quota reached 80 % — it is the moment we started looking, and
+  // announcing "80% 到達" for it reports an event that was never seen. The
+  // same applies after a rollover, where the caller passes null deliberately:
+  // the new window's history begins here.
+  if (!Number.isFinite(previous as number)) return []
+  const from = previous as number
   return thresholds
     .filter((t) => Number.isFinite(t))
     .filter((t) => from < t && current >= t)

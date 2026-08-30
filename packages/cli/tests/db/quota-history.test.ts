@@ -624,3 +624,52 @@ describe('recordQuotaSnapshot', () => {
     expect(row).toEqual({ device: DEVICE, device_instance_id: DEVICE_ID })
   })
 })
+
+describe('empty device instance id', () => {
+  let db: Database.Database
+  let warn: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warn.mockRestore()
+    db.close()
+  })
+
+  function recordWithId(deviceInstanceId: string, now: number) {
+    return recordQuotaSnapshot(
+      db,
+      [success('codex', [{ name: 'five_hour', utilization: 40, resetsAt: null }])],
+      { device: DEVICE, deviceInstanceId, now },
+    )
+  }
+
+  it('writes nothing when there is no device instance id yet', () => {
+    // '' means state.json does not exist, not that the device is unnamed.
+    // Recording under '' guarantees the split that v18 had to clean up: the
+    // moment state.json appears the same machine starts writing 'unknown'.
+    const summary = recordWithId('', 1_000)
+
+    expect(countSnapshots(db)).toBe(0)
+    expect((db.prepare('SELECT COUNT(*) AS n FROM quota_current').get() as { n: number }).n).toBe(0)
+    expect((db.prepare('SELECT COUNT(*) AS n FROM quota_windows').get() as { n: number }).n).toBe(0)
+    expect(summary.inserted).toBe(0)
+    expect(summary.attempted).toBe(0)
+    expect(warn).toHaveBeenCalledOnce()
+  })
+
+  it('records normally once an id exists, with one series', () => {
+    recordWithId('', 1_000)
+    recordWithId('unknown', 2_000)
+    recordWithId('unknown', 3_000)
+
+    const ids = db.prepare(
+      'SELECT DISTINCT device_instance_id AS id FROM quota_snapshots'
+    ).all() as Array<{ id: string }>
+    expect(ids).toEqual([{ id: 'unknown' }])
+  })
+})

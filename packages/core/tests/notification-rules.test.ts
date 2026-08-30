@@ -194,8 +194,23 @@ describe('quotaThresholdCrossings', () => {
     expect(quotaThresholdCrossings(0, 100, thresholds)).toEqual([80, 95, 100])
   })
 
-  it('treats a first reading as crossing everything below it', () => {
-    expect(quotaThresholdCrossings(null, 85, thresholds)).toEqual([80])
+  it('reports nothing for a first reading, however high it is', () => {
+    // We did not watch it cross 80 — we arrived after it had. Announcing
+    // '80% 到達' here would report an event nobody observed.
+    expect(quotaThresholdCrossings(null, 85, thresholds)).toEqual([])
+    expect(quotaThresholdCrossings(null, 100, thresholds)).toEqual([])
+    expect(quotaThresholdCrossings(NaN, 85, thresholds)).toEqual([])
+  })
+
+  it('resumes on the reading after the first', () => {
+    // The baseline exists from the second reading on, so a genuine crossing
+    // is still caught one interval later.
+    expect(quotaThresholdCrossings(85, 96, thresholds)).toEqual([95])
+  })
+
+  it('treats an explicit 0 as a real baseline', () => {
+    // null means 'unknown'; 0 means 'known to have started empty'.
+    expect(quotaThresholdCrossings(0, 85, thresholds)).toEqual([80])
   })
 
   it('returns nothing when utilization falls', () => {

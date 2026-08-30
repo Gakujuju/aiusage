@@ -224,6 +224,21 @@ export function recordQuotaSnapshot(
   const deviceInstanceId = ctx.deviceInstanceId || ''
   const device = ctx.device || ''
 
+  // An empty id is not a device that happens to be unnamed — it means
+  // state.json does not exist yet, so nothing has minted one. Recording under
+  // '' guarantees a split later: the moment state.json appears the same
+  // machine starts writing 'unknown', and every tier exists twice, one series
+  // frozen and one live. v18 deleted the rows that got in before this guard.
+  // Skipping costs one poll interval; recording costs a permanent fork.
+  if (deviceInstanceId === '') {
+    console.warn(
+      '[quota-history] skipping this round: no device instance id yet ' +
+      '(state.json has not been created). Recording now would split the ' +
+      'history once it is.'
+    )
+    return summary
+  }
+
   const selectCurrent = db.prepare(
     'SELECT * FROM quota_current WHERE tool = ? AND tier = ? AND device_instance_id = ?'
   )

@@ -220,3 +220,19 @@ CMD には `--host 0.0.0.0` を明示した。結果として、コンテナ利�
 判定は `runServeCommand` に置き、`createDatabase` より前に走らせる。
 createDatabase はマイグレーションを伴うため、順序が逆だと
 「起動は拒否されたのに本番DBだけスキーマが上がっている」が成立する。
+
+## D17. quota テーブルに空の device_instance_id を記録しない
+
+state.json が無い期間、device_instance_id は '' だった。
+state.json 生成後は 'unknown' になり、同じ tier が
+2系列に分裂した（v18 で '' 期間を削除）。
+
+recordQuotaSnapshot は空文字を受け取ったら記録せず warn を出す。
+空文字は「まだ state.json が無い」状態であり、
+そのまま記録すると後から必ず分裂する。
+D1（device_instance_id は 'unknown' のまま）と併せて読むこと。
+
+バックフィルではなく削除を選んだのは、snapshot id と window_id が
+device_instance_id を含むハッシュだからである。列だけ書き換えると
+「自分の入力から導出できない id」が残る。実害は無いが、
+次にこのテーブルを調べる人間に対する罠になる。

@@ -11,7 +11,7 @@
 | 3 | 端末識別 | 完了（device / deviceInstanceId） |
 | 4 | Claude Code Hook 取り込み | 完了（8イベント、実データ確認済み） |
 | 5 | Codex の状態取得 | 未着手 |
-| 6-A | クォータ履歴・枯渇予測 | 完了（Codex で稼働中） |
+| 6-A | クォータ履歴・枯渇予測 | 完了（Claude / Codex で稼働中） |
 | 6-B | 状態管理・作業時間計測 | 完了 |
 | 7 | Discord 通知統合 | 完了（段階2 併走中） |
 | 8 | Android/PWA 化 | 未着手 |
@@ -23,15 +23,22 @@
 - v15 notifications / agent_sessions.escalation_level
 - v16 v_agent_sessions の寛容な JOIN
 - v17 records.session_id のバックフィル（本番適用済み・10,368行を修正）
+- v18 quota 3テーブルから device_instance_id = '' の行を削除（D17）
 
 ## 未解決の課題
 
-1. Claude のクォータが取れていない。
-   `~/.claude/.credentials.json` が存在しない（Claude Code Desktop が
-   トークンをアプリ内に保持しているため）。
-   解決策: `npm install -g @anthropic-ai/claude-code` → `claude` → `/login`。
-   ユーザー操作待ち。実施すれば quota.ts は無改修で動く。
-   statusLine 経由（案C）は Desktop で発火しないことを実測確認済み・行き止まり。
+1. （解消）Claude のクォータ。2026-08-30 に案A を実施
+   （`npm install -g @anthropic-ai/claude-code` → `claude` → `/login`）。
+   quota.ts は無改修で動いた。取得できる tier は
+   five_hour / seven_day / nimbus_quill の3つ。
+   seven_day_opus と seven_day_sonnet は CLAUDE_KNOWN_TIERS に
+   含まれているがこのアカウントでは返らない。プランによって返る tier が
+   違うため想定内で、コード変更は不要。
+   nimbus_quill は CLAUDE_KNOWN_TIERS に無い未知 tier で、
+   「未知 tier も拾う」ループが拾っている。窓の長さが引けないため
+   paceRatio は常に null、ロールオーバー判定は「5ポイント以上の下落」
+   のみで行われる（§nimbus_quill の制約 を参照）。
+   statusLine 経由（案C）は Desktop で発火しない・行き止まり（記録として保持）。
 2. Gemini のクォータは未対応。Gemini CLI のトークン実績は probeGemini で取得可能。
    Gemini アプリ（Web）は消費率 API が非公開で取得手段なし。
 3. ChatGPT Web / Gemini Web の会話利用は対象外（公開 API なし）。
@@ -47,12 +54,13 @@
 
 ## コスト
 
-本番の総コストは $3,608.96（10,881 レコード、全件 cost_source='pricing'）。
+本番の総コストは $3,628.10（10,976 レコード、全件 cost_source='pricing'）。
 2026-08-30 に価格表を同期するまで $0 だった。原因は D15 を参照。
+数字は作業のたびに増えるので、桁が合っていれば十分。
 
 | tool | model | 件数 | コスト |
 |---|---|---|---|
-| claude-code | claude-opus-5 | 7,529 | $2,508.46 |
+| claude-code | claude-opus-5 | 7,624 | $2,527.60 |
 | claude-code | claude-fable-5 | 602 | $624.13 |
 | claude-code | claude-sonnet-5 | 2,311 | $277.88 |
 | codex | gpt-5.6-sol | 439 | $198.49 |
@@ -60,15 +68,36 @@
 ## 稼働中のもの
 
 - 本番 serve: ポート 3847
-- クォータ取得: 5分間隔（Codex の five_hour / weekly_limit）
+- クォータ取得: 5分間隔。Claude と Codex の両方。
+  claude-code: five_hour / seven_day / nimbus_quill
+  codex: five_hour / weekly_limit
+  copilot: 認証情報が無いため not_found（正常）
 - Discord 通知: 段階2 併走中（既存 PowerShell と2通ずつ）
 - hook: `~/.claude/settings.json` に8イベント登録済み
   （Stop / StopFailure / Notification / UserPromptSubmit /
     SessionStart / SessionEnd / PermissionRequest / PermissionDenied）
 
+## nimbus_quill の制約
+
+CLAUDE_KNOWN_TIERS に無い未知 tier で、resets_at も返らない。
+`windowDurationMs` が null を返すため、以下が効かなくなる。
+
+- detectRollover の規則B（reset 時刻のジャンプ）と規則C（観測ギャップ）が
+  無効化され、規則A（5ポイント以上の下落）だけで窓の切り替わりを判断する。
+  utilization が 0 のまま動かない限り窓は分裂しない。一方、実際の枠が
+  リセットされても下落幅が5ポイント未満なら検出できず、窓が閉じない。
+- forecastQuota は elapsedRatio と paceRatio を null にする
+  （resets_at が無いので経過割合が定義できない）。枯渇予測は出ない。
+- window_id のハッシュは resets_at 部分が 'unknown' になるが、
+  opened_at を含むので窓ごとに一意であり、断片化はしない。
+
+通知の tier 名は `tierDisplayName` が日本語に写す。未知 tier は
+生の名前のまま出るので、80% に達したら「nimbus_quill 80% 到達」と表示される。
+
 ## バックアップ
 
 - `~/.aiusage/backup-v12-20260829/` プロジェクト開始前
-- `~/.aiusage/backup-v16-20260830/` 直近の安定状態
+- `~/.aiusage/backup-v17-20260830/` v18 適用直前（直近の安定状態）
 - `~/.aiusage/backup-pre-claude-cli/` `~/.claude` 系（別目的・保持）
 - `~/.claude/settings.json.pre-notify-hooks` hook 追記前（sha256 3c0ef1dbcf7bb8ee）
+  現在の settings.json は sha256 bbfbead44827f015（案A の CLI ログイン後）。
