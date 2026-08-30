@@ -141,7 +141,6 @@
     cursor: pointer;
     font-size: 0.75rem;
     font-weight: 500;
-    font-family: var(--mono);
     transition: color 0.15s, background 0.15s, border-color 0.15s;
   }
   .tab:hover {

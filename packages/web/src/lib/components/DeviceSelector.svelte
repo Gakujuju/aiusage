@@ -71,7 +71,6 @@
     padding: 0.38rem 0.6rem;
     border: var(--border-width) solid var(--border-subtle);
     border-radius: var(--radius-input);
-    font-family: var(--mono);
     font-size: 0.75rem;
     background: var(--raised);
     color: var(--text-secondary);

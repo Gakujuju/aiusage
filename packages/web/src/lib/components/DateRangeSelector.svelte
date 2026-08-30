@@ -190,7 +190,6 @@
     color: var(--accent);
   }
   .custom-toggle {
-    font-family: var(--mono);
     font-size: 0.9rem;
     padding: 0.32rem 0.5rem;
   }

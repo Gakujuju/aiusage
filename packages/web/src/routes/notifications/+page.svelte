@@ -240,7 +240,7 @@
   }
 
   .count-n {
-    font-family: var(--font-mono);
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
   }
@@ -302,7 +302,6 @@
     background: var(--raised);
     border-radius: var(--radius-input);
     font-size: 0.75rem;
-    font-family: var(--font-mono);
     white-space: pre-wrap;
     word-break: break-word;
   }

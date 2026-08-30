@@ -663,7 +663,7 @@
 
   .forecast-row dd {
     margin: 0;
-    font-family: var(--font-mono);
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
     color: var(--text);
   }

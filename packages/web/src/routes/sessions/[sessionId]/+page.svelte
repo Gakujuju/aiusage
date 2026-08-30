@@ -368,7 +368,6 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
-    font-family: var(--mono);
   }
   .metric-value {
     font-size: 0.9rem;
@@ -396,7 +395,6 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-muted);
-    font-family: var(--mono);
     text-align: right;
   }
   .tb-bar {
@@ -436,7 +434,6 @@
     padding: 0.125rem 0;
   }
   .gap-text {
-    font-family: var(--mono);
     font-size: 0.6875rem;
     color: var(--text-muted);
     background: var(--raised);
@@ -549,7 +546,6 @@
     border-radius: var(--radius-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-family: var(--mono);
     flex-shrink: 0;
   }
   .badge-mcp {

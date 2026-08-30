@@ -391,7 +391,7 @@
   }
 
   .count-n {
-    font-family: var(--font-mono);
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
   }
@@ -417,7 +417,7 @@
   }
 
   .group-count {
-    font-family: var(--font-mono);
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0;
   }
@@ -487,7 +487,7 @@
 
   .agent-stats dd {
     margin: 0;
-    font-family: var(--font-mono);
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
   }
 

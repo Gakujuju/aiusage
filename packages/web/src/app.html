@@ -10,10 +10,13 @@
          which is --color-accent from DESIGN.md written as sRGB hex. -->
     <meta name="theme-color" content="#00876e" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet" />
-    <link href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-mono/style.css" rel="stylesheet" />
+    <!--
+      No webfonts. Inter came from Google and Geist Mono from jsdelivr, which
+      meant two external requests on every load, a typeface that changed once
+      they arrived, and — offline, the case the service worker exists for —
+      the platform's own fonts anyway. The stacks in --font-sans and --mono
+      start from those platform fonts, so the first paint is the final one.
+    -->
     <script>
       (function() {
         var pref = localStorage.getItem('aiusage-theme') || 'system';

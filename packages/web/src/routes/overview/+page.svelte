@@ -201,7 +201,6 @@
     opacity: 0.9;
   }
   .hero-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -233,7 +232,6 @@
     gap: 0.2rem;
   }
   .token-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -335,7 +333,6 @@
     border-radius: var(--radius-badge);
     cursor: pointer;
     font-size: 0.75rem;
-    font-family: var(--mono);
     font-weight: 500;
     transition: color 0.12s, background 0.12s;
   }

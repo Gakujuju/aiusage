@@ -492,7 +492,17 @@
     --shadow-md:        0 1px 3px oklch(0 0 0 / 0.08), 0 4px 12px oklch(0 0 0 / 0.04);
     --shadow-lg:        0 4px 8px oklch(0 0 0 / 0.08), 0 12px 32px oklch(0 0 0 / 0.06);
     --overlay:          oklch(0 0 0 / 0.25);
-    --mono:             'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+    /*
+     * Geist Mono is gone with the CDN it came from. ui-monospace is the
+     * platform's own — SF Mono, Cascadia Mono, Roboto Mono — which is a
+     * better fit for a tool that sits next to a terminal than a webfont
+     * would be, and it is there before the first paint. The Japanese entries
+     * follow for the same per-glyph reason as above: a mono stack with no
+     * CJK font leaves kana to a fallback nobody chose.
+     */
+    --mono:             ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas,
+                        'Roboto Mono', 'BIZ UDGothic', 'Yu Gothic UI', Meiryo,
+                        'Noto Sans Mono CJK JP', monospace;
     --sidebar-width:    180px;
     --sidebar-collapsed: 56px;
     --chart-input:      oklch(0.65 0.14 175);
@@ -508,16 +518,25 @@
      * wants square corners sets four values instead of hunting fourteen
      * literals through the pages.
      */
-    --font-sans:        'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     /*
-     * Eight places ask for var(--font-mono), and --font-mono has
-     * never existed — so those eight render in the platform's default
-     * monospace rather than Geist Mono. Defined here at the value that is
-     * actually being drawn, which keeps the screen identical and puts the
-     * mistake somewhere a theme can see it. Pointing them at --mono would be
-     * a visible change and is proposed separately.
+     * The system's own UI font, and the system's own Japanese font after it.
+     *
+     * Inter and Geist Mono came from two CDNs, which meant every page load
+     * reached out to Google and jsdelivr, the first paint changed typeface
+     * once the files arrived, and offline — the case the service worker
+     * exists for — the app fell back to whatever the platform had anyway.
+     * Using that font from the start costs nothing and is the same picture
+     * every time.
+     *
+     * Latin first, then Japanese: font fallback is per glyph, so Segoe UI
+     * draws the Latin on Windows and Yu Gothic UI the kana beside it. Android
+     * resolves system-ui to Roboto and the CJK to Noto Sans by itself; the
+     * names are listed anyway so the choice does not depend on the platform
+     * getting its own fallback right.
      */
-    --font-mono:        monospace;
+    --font-sans:        system-ui, -apple-system, 'Segoe UI', Roboto,
+                        'Hiragino Sans', 'Yu Gothic UI', 'Yu Gothic', Meiryo,
+                        'Noto Sans JP', 'Noto Sans CJK JP', sans-serif;
     --radius-xs:        3px;
     --radius-badge:     4px;
     --radius-input:     6px;
@@ -948,7 +967,6 @@
   }
 
   .group-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.06em;
@@ -1047,7 +1065,6 @@
     font-weight: 700;
   }
   .ctrl-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.02em;
@@ -1180,7 +1197,6 @@
   }
 
   :global(.section-title) {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -1227,7 +1243,6 @@
     border-collapse: collapse;
   }
   :global(th) {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;

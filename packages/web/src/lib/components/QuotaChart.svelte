@@ -137,7 +137,7 @@
   .axis {
     fill: var(--text-muted);
     font-size: 10px;
-    font-family: var(--font-mono);
+    font-family: var(--mono);
   }
 
   .reset-label {

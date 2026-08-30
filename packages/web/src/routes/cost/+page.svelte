@@ -194,7 +194,6 @@
     margin-bottom: 1.5rem;
   }
   .hero-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -279,7 +278,6 @@
     transition: height 0.4s ease;
   }
   .label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-top: 6px;

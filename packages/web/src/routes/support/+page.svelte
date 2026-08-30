@@ -96,7 +96,6 @@
   }
 
   .support-section h2 {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.04em;
@@ -185,7 +184,6 @@
   .open-label {
     flex-shrink: 0;
     color: var(--accent);
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
   }

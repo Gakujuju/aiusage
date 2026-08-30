@@ -444,7 +444,6 @@
     background: var(--green);
   }
   .live-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.1em;
@@ -452,7 +451,6 @@
   }
 
   .range-badge {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.06em;
@@ -514,7 +512,6 @@
   }
 
   .counter-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.1em;
@@ -548,7 +545,6 @@
     gap: 0.125rem;
   }
   .sub-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.08em;
@@ -600,7 +596,6 @@
     border: var(--border-width) solid var(--border-subtle);
     border-radius: var(--radius-badge);
     background: transparent;
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     color: var(--text-muted);
@@ -630,7 +625,6 @@
   }
   .stat-block:hover { background: var(--raised); }
   .stat-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.06em;
@@ -666,7 +660,6 @@
     transition: width 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
   .seg-lbl {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.04em;
@@ -687,7 +680,6 @@
     flex-wrap: wrap;
   }
   .leg {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.04em;
@@ -737,7 +729,6 @@
     margin-bottom: 1rem;
   }
   .cfg-title {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.06em;
@@ -762,7 +753,6 @@
 
   .cfg-section { margin-bottom: 1rem; }
   .cfg-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.06em;
@@ -776,7 +766,6 @@
     border: var(--border-width) solid var(--border-subtle);
     border-radius: 5px;
     background: transparent;
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     color: var(--text-secondary);
@@ -795,7 +784,6 @@
     background: var(--raised);
   }
   .refresh-info-text {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     color: var(--text-muted);
@@ -870,7 +858,6 @@
     text-align: center;
   }
   .splash-text {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.1em;
@@ -884,7 +871,6 @@
     border: var(--border-width) solid var(--rose);
     border-radius: var(--radius-input);
     background: transparent;
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     color: var(--rose);

@@ -193,7 +193,6 @@
     padding: 2px;
   }
   .mode-btn {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -216,7 +215,6 @@
     flex-wrap: wrap;
   }
   .leg {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     letter-spacing: 0.04em;

@@ -832,7 +832,6 @@
     margin-bottom: 1.5rem;
   }
   .page-title {
-    font-family: var(--mono);
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--text);
@@ -954,7 +953,6 @@
     overflow: hidden;
   }
   .toggle-btn {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.25rem 0.6rem;
@@ -991,7 +989,6 @@
     gap: 0.25rem;
     width: min(420px, 100%);
     color: var(--text-muted);
-    font-family: var(--mono);
     font-size: 0.72rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -1047,7 +1044,6 @@
   .alias-list { margin-top: 0.75rem; }
   .alias-head h2 {
     margin: 0 0 0.25rem;
-    font-family: var(--mono);
     font-size: 0.9rem;
     font-weight: 700;
     color: var(--text);
@@ -1083,7 +1079,6 @@
   .alias-section-head h3 {
     margin: 0;
     color: var(--text-secondary);
-    font-family: var(--mono);
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -1111,7 +1106,6 @@
     justify-content: center;
     width: 14px;
     color: var(--text-muted);
-    font-family: var(--mono);
     font-size: 0.75rem;
   }
   .section-toggle:hover h3,
@@ -1239,7 +1233,6 @@
   }
   .empty-copy h2 {
     margin: 0;
-    font-family: var(--mono);
     font-size: 0.9rem;
     font-weight: 700;
     color: var(--text);
@@ -1312,7 +1305,6 @@
     margin-bottom: 0.1rem;
   }
   .price-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -1343,7 +1335,6 @@
     display: inline-block;
     padding: 0.15rem 0.5rem;
     border-radius: var(--radius-badge);
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -1365,7 +1356,6 @@
   }
 
   .btn-sm {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.2rem 0.55rem;
@@ -1393,7 +1383,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;

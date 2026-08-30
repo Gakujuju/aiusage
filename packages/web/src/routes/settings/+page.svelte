@@ -1413,7 +1413,6 @@
   }
 
   .group-title {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -1427,7 +1426,6 @@
   }
 
   .platform-badge {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.15rem 0.45rem;
@@ -1450,7 +1448,6 @@
   }
 
   .source-subtitle {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--text-secondary);
@@ -1466,7 +1463,6 @@
   .field.full { grid-column: 1 / -1; }
 
   .field-label {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -1524,7 +1520,6 @@
   }
 
   .btn-save {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.375rem 1rem;
@@ -1603,7 +1598,6 @@
     padding: 0.375rem 0.625rem;
   }
   .btn-sync {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.375rem 1rem;
@@ -1724,7 +1718,6 @@
     margin-bottom: 0.75rem;
   }
   .cloud-setup-title {
-    font-family: var(--mono);
     font-size: 0.6875rem;
     font-weight: 550;
     text-transform: uppercase;
@@ -1768,7 +1761,6 @@
     color: var(--text);
   }
   .cloud-step-link {
-    font-family: var(--mono);
     font-size: 0.75rem;
     color: var(--accent);
     text-decoration: none;
@@ -1807,7 +1799,6 @@
   }
 
   .btn-ghost {
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 600;
     padding: 0.375rem 0.75rem;
@@ -1879,7 +1870,6 @@
   }
 
   .detected-tool-status {
-    font-family: var(--mono);
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-left: auto;
@@ -1889,7 +1879,6 @@
     display: flex;
     align-items: center;
     gap: 0.375rem;
-    font-family: var(--mono);
     font-size: 0.75rem;
     font-weight: 550;
     color: var(--text-muted);
@@ -1983,7 +1972,6 @@
   }
 
   .webhook-state {
-    font-family: var(--font-mono);
     font-size: 0.8125rem;
     margin-bottom: 0.15rem;
   }
