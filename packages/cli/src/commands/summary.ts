@@ -28,7 +28,23 @@ export function generateSummary(db: Database.Database, options?: SummaryOptions)
   let byToolSql: string
   let byToolParams: Record<string, unknown> = {}
 
-  const localOnlyFilter = "AND source_file NOT LIKE 'synced/%'"
+  /*
+   * Rows this machine produced, and the reason it is an id test.
+   *
+   * This read source_file NOT LIKE 'synced/%' until the same false
+   * assumption was found in the API: the merge keeps a row's original
+   * source_file and only invents that prefix for rows that arrive without
+   * one, which direct sync never does. So the filter matched almost
+   * nothing it was meant to match and every merged row was counted twice.
+   *
+   * The API was fixed first, which left this command reporting a total a
+   * tenth larger than the dashboard beside it — and the status line runs
+   * this command, so the two disagreed on screen all day.
+   */
+  const localOnlyFilter = 'AND NOT EXISTS (SELECT 1 FROM synced_records s WHERE s.id = records.id)'
+
+  /** Rows the merge has not copied into records yet, so nothing is lost. */
+  const notAlreadyMerged = 'AND NOT EXISTS (SELECT 1 FROM records r WHERE r.id = synced_records.id)'
   const toolWhere = options?.tool ? 'AND tool = @tool' : ''
   const toolParam = options?.tool ? { tool: options.tool } : {}
   const timeWhere = [
@@ -48,9 +64,9 @@ export function generateSummary(db: Database.Database, options?: SummaryOptions)
         COALESCE(SUM(cost), 0) AS totalCost,
         COUNT(*) AS recordCount
       FROM (
-        SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM records WHERE 1=1 ${localOnlyFilter} ${toolWhere} ${timeWhere}
+        SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM records WHERE 1=1 ${toolWhere} ${timeWhere}
         UNION ALL
-        SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM synced_records WHERE device_instance_id != @currentId ${toolWhere} ${timeWhere}
+        SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM synced_records WHERE device_instance_id != @currentId ${notAlreadyMerged} ${toolWhere} ${timeWhere}
       )`
     totalsParams = { currentId, ...toolParam, ...timeParam }
 
@@ -59,9 +75,9 @@ export function generateSummary(db: Database.Database, options?: SummaryOptions)
              SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS tokens,
              SUM(cost) AS cost
       FROM (
-        SELECT tool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM records WHERE 1=1 ${localOnlyFilter} ${toolWhere} ${timeWhere}
+        SELECT tool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM records WHERE 1=1 ${toolWhere} ${timeWhere}
         UNION ALL
-        SELECT tool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM synced_records WHERE device_instance_id != @currentId ${toolWhere} ${timeWhere}
+        SELECT tool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost FROM synced_records WHERE device_instance_id != @currentId ${notAlreadyMerged} ${toolWhere} ${timeWhere}
       )
       GROUP BY tool ORDER BY cost DESC`
     byToolParams = { currentId, ...toolParam, ...timeParam }
