@@ -4,8 +4,9 @@ import { hostname, platform, tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
-import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
+import { removePriceOverride, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
 import { PRODUCED_HERE, PRODUCED_HERE_R, NOT_YET_MERGED } from '../db/row-scope.js'
+import { decideRecalc, makePriceResolver, RECALC_COLUMNS, RECALC_UPDATE_SQL, type RecalcRow } from '../pricing/recalc-row.js'
 import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL,
   DASHBOARD_PASSWORD_CREDENTIAL, DEFAULT_VAPID_SUBJECT, HIDEABLE_ROUTES, VAPID_PRIVATE_KEY_CREDENTIAL,
   buildConsentConfig, loadConfig, saveConfig,
@@ -133,73 +134,55 @@ function emptyPricingRecalcStatus(): PricingRecalcStatus {
   }
 }
 
+/**
+ * Reprice every row, without stopping the dashboard answering.
+ *
+ * What to do with a row lives in decideRecalc, shared with the CLI. The
+ * loop is not shared and should not be: this one runs inside a live
+ * server, so it hands the event loop back between batches. Twenty
+ * thousand rows priced in one go is long enough to be noticed as an
+ * outage.
+ */
 async function recalcCosts(db: Database.Database, onProgress?: (status: Pick<PricingRecalcStatus, 'total' | 'processed' | 'updated' | 'skipped'>) => void): Promise<number> {
   const BATCH_SIZE = 1000
   let updated = 0
   let processed = 0
   let skipped = 0
   let lastId = ''
-  const exchangeRate = resolveExchangeRate(loadConfig() ?? {})
-  const priceCache = new Map<string, PriceEntry | null>()
-  const resolveCachedPrice = (model: string): PriceEntry | undefined => {
-    if (priceCache.has(model)) return priceCache.get(model) ?? undefined
-    const price = resolvePriceFromRegistry(db, model) ?? null
-    priceCache.set(model, price)
-    return price ?? undefined
+
+  const deps = {
+    resolvePrice: makePriceResolver(db),
+    hasUserPrice: (model: string) => hasUserPrice(db, model),
+    exchangeRate: resolveExchangeRate(loadConfig() ?? {}),
   }
-  const totalRow = db.prepare('SELECT COUNT(*) AS total FROM records').get() as { total: number }
-  const total = totalRow.total
+
+  const selectStmt = db.prepare(
+    `SELECT ${RECALC_COLUMNS} FROM records WHERE id > ? ORDER BY id LIMIT ?`)
+  const updateStmt = db.prepare(RECALC_UPDATE_SQL)
+
+  const total = (db.prepare('SELECT COUNT(*) AS total FROM records').get() as { total: number }).total
   onProgress?.({ total, processed, updated, skipped })
 
+  const applyBatch = db.transaction((rows: RecalcRow[]) => {
+    for (const row of rows) {
+      processed++
+      const decision = decideRecalc(row, deps)
+      if (decision.action === 'skip') { skipped++; continue }
+      if (decision.action === 'keep') continue
+      updateStmt.run(
+        decision.model, decision.provider, decision.cost, decision.costSource,
+        Date.now(), row.id)
+      updated++
+    }
+  })
+
   while (true) {
-    const records = db.prepare(
-      'SELECT id, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, cost_source, breakdown_missing FROM records WHERE id > ? ORDER BY id LIMIT ?'
-    ).all(lastId, BATCH_SIZE) as any[]
-    if (records.length === 0) break
-    const updateStmt = db.prepare('UPDATE records SET model = ?, provider = ?, cost = ?, cost_source = ?, updated_at = ? WHERE id = ?')
-    const tx = db.transaction((batch: any[]) => {
-      for (const r of batch) {
-        processed++
-
-        const rawModel = r.tool === 'qoder' ? normalizeQoderModel(r.model) : r.model
-        const model = rawModel === 'unknown' ? (r.tool === 'qoder' ? 'qoder-auto' : r.model) : rawModel
-
-        // Logged costs are authoritative and left untouched — EXCEPT when the logged
-        // cost is non-positive (custom gateways report 0 for models they don't price)
-        // or when the user has set a manual price for this model. In both cases the
-        // logged value must not block pricing/recalc (issue #13).
-        if (r.cost_source === 'log' && r.cost > 0 && !hasUserPrice(db, model)) {
-          skipped++
-          continue
-        }
-        const provider = model !== r.model ? inferProvider(model) : r.provider
-        const price = resolveCachedPrice(model)
-        /*
-         * A row with no input/output split cannot be priced. Its whole token
-         * count sits in input_tokens because that is the only way to count it
-         * at all, so multiplying it by the input rate invents a number — here
-         * it invented $28.70 across 24 rows. The parser already refuses to
-         * price these; recalc has to refuse as well, or the button on the
-         * dashboard quietly undoes it.
-         */
-        const priceable = price != null && !r.breakdown_missing
-        const cost = priceable ? calculateCostForPrice(price!, {
-          inputTokens: r.input_tokens,
-          outputTokens: r.output_tokens,
-          cacheReadTokens: r.cache_read_tokens,
-          cacheWriteTokens: r.cache_write_tokens,
-          thinkingTokens: r.thinking_tokens,
-        }, exchangeRate) : 0
-        const costSource = priceable ? 'pricing' : 'unknown'
-
-        if (model === r.model && provider === r.provider && cost === r.cost && costSource === r.cost_source) continue
-        updateStmt.run(model, provider, cost, costSource, Date.now(), r.id)
-        updated++
-      }
-    })
-    tx(records)
-    lastId = records[records.length - 1].id
+    const rows = selectStmt.all(lastId, BATCH_SIZE) as RecalcRow[]
+    if (rows.length === 0) break
+    applyBatch(rows)
+    lastId = rows[rows.length - 1].id
     onProgress?.({ total, processed, updated, skipped })
+    // The point of the whole separate loop: let the server answer.
     await new Promise<void>((resolve) => setImmediate(resolve))
   }
   return updated

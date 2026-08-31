@@ -1,7 +1,14 @@
 import type Database from 'better-sqlite3'
-import { calculateCostForPrice, inferProvider, normalizeQoderModel, resolveExchangeRate } from '@aiusage/core'
+import { resolveExchangeRate } from '@aiusage/core'
 import { loadConfig } from '../config.js'
-import { hasUserPrice, resolvePriceFromRegistry } from '../pricing-registry.js'
+import { hasUserPrice } from '../pricing-registry.js'
+import {
+  decideRecalc,
+  makePriceResolver,
+  RECALC_COLUMNS,
+  RECALC_UPDATE_SQL,
+  type RecalcRow,
+} from '../pricing/recalc-row.js'
 
 export interface RecalcResult {
   updatedCount: number
@@ -10,60 +17,55 @@ export interface RecalcResult {
 
 const BATCH_SIZE = 1000
 
+/**
+ * Reprice every row from the current price table.
+ *
+ * What to do with a row lives in decideRecalc, shared with the dashboard's
+ * recalc button. Both copies of that decision had the same defect once and
+ * it had to be found twice; only the loop differs now, and it differs for a
+ * reason — this one runs to completion in a short-lived command, while the
+ * API's has to let the server answer requests in between.
+ */
 export function recalcPricing(db: Database.Database): RecalcResult {
   let updatedCount = 0
   let skippedCount = 0
   let lastId = ''
-  const exchangeRate = resolveExchangeRate(loadConfig() ?? {})
 
-  const updateStmt = db.prepare('UPDATE records SET model = ?, provider = ?, cost = ?, cost_source = ?, updated_at = ? WHERE id = ?')
+  const deps = {
+    resolvePrice: makePriceResolver(db),
+    hasUserPrice: (model: string) => hasUserPrice(db, model),
+    exchangeRate: resolveExchangeRate(loadConfig() ?? {}),
+  }
+
+  const selectStmt = db.prepare(
+    `SELECT ${RECALC_COLUMNS} FROM records WHERE id > ? ORDER BY id LIMIT ?`)
+  const updateStmt = db.prepare(RECALC_UPDATE_SQL)
+
+  /*
+   * A batch at a time, in a transaction.
+   *
+   * Without one, a run interrupted part way leaves the table half repriced
+   * with nothing to say so — some rows at the new price, some at the old,
+   * and no marker anywhere. Several of today's faults were exactly that
+   * shape, and there is no reason to keep making new ones.
+   */
+  const applyBatch = db.transaction((rows: RecalcRow[]) => {
+    for (const row of rows) {
+      const decision = decideRecalc(row, deps)
+      if (decision.action === 'skip') { skippedCount++; continue }
+      if (decision.action === 'keep') continue
+      updateStmt.run(
+        decision.model, decision.provider, decision.cost, decision.costSource,
+        Date.now(), row.id)
+      updatedCount++
+    }
+  })
 
   while (true) {
-    const records = db.prepare(
-      'SELECT id, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, cost_source, breakdown_missing FROM records WHERE id > ? ORDER BY id LIMIT ?'
-    ).all(lastId, BATCH_SIZE) as any[]
-
-    if (records.length === 0) break
-
-    for (const record of records) {
-      const model = record.tool === 'qoder' ? normalizeQoderModel(record.model) : record.model
-
-      // Logged costs are treated as authoritative and left untouched — EXCEPT when the
-      // logged cost is non-positive (custom gateways report 0 for models they don't
-      // price) or when the user has explicitly set a manual price for this model. In
-      // both cases the logged value must not block pricing/recalc (issue #13).
-      if (record.cost_source === 'log' && record.cost > 0 && !hasUserPrice(db, model)) {
-        skippedCount++
-        continue
-      }
-
-      const provider = model !== record.model ? inferProvider(model) : record.provider
-      const price = resolvePriceFromRegistry(db, model)
-        /*
-         * A row with no input/output split cannot be priced. Its whole token
-         * count sits in input_tokens because that is the only way to count it
-         * at all, so multiplying it by the input rate invents a number — here
-         * it invented $28.70 across 24 rows. The parser already refuses to
-         * price these; recalc has to refuse as well, or the button on the
-         * dashboard quietly undoes it.
-         */
-      const priceable = price != null && !record.breakdown_missing
-      const newCost = priceable ? calculateCostForPrice(price!, {
-        inputTokens: record.input_tokens,
-        outputTokens: record.output_tokens,
-        cacheReadTokens: record.cache_read_tokens,
-        cacheWriteTokens: record.cache_write_tokens,
-        thinkingTokens: record.thinking_tokens,
-      }, exchangeRate) : 0
-      const costSource = priceable ? 'pricing' : 'unknown'
-
-      if (model !== record.model || provider !== record.provider || newCost !== record.cost || costSource !== record.cost_source) {
-        updateStmt.run(model, provider, newCost, costSource, Date.now(), record.id)
-        updatedCount++
-      }
-    }
-
-    lastId = records[records.length - 1].id
+    const rows = selectStmt.all(lastId, BATCH_SIZE) as RecalcRow[]
+    if (rows.length === 0) break
+    applyBatch(rows)
+    lastId = rows[rows.length - 1].id
   }
 
   return { updatedCount, skippedCount }
