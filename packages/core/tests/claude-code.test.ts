@@ -133,3 +133,69 @@ describe('ClaudeCodeParser', () => {
     expect(result!.toolCalls[0].name).toBe('skill__unknown')
   })
 })
+
+/**
+ * Anthropic and OpenAI disagree about what input_tokens means, and the two
+ * parsers must keep disagreeing with them in the same way.
+ *
+ * Measured across 23,599 usage objects in real logs: on every row with a
+ * cache hit, input_tokens was smaller than cache_read_input_tokens — often 2
+ * against 41,612. Totals were 161,087 input against 12,065,797,801 cache
+ * read. input cannot possibly contain the cache, so both are charged in full
+ * and neither is subtracted. Codex is the opposite and needs the opposite
+ * treatment; see the codex parser.
+ */
+describe('ClaudeCodeParser — buckets that must stay separate', () => {
+  const parser = new ClaudeCodeParser()
+  const context: ParseContext = {
+    sourceFile: 'x.jsonl',
+    lineOffset: 0,
+    sessionId: 'abc123',
+    tool: 'claude-code',
+    now: 1776738085700,
+    device: 'test-device',
+    deviceInstanceId: 'device-123',
+  }
+
+  const line = (usage: Record<string, unknown>) => JSON.stringify({
+    type: 'assistant',
+    timestamp: '2026-08-31T00:00:00.000Z',
+    message: { model: 'claude-opus-4', usage },
+  })
+
+  /**
+   * Deliberate. thinking_tokens lives at usage.output_tokens_details
+   * .thinking_tokens and is part of output_tokens — 8,046,142 of 25,028,992
+   * in the real logs. Reading it and passing it as thinkingTokens would bill
+   * it a second time at the output rate, which is exactly the mistake the
+   * codex parser was making. The top-level name this parser reads does not
+   * exist in Anthropic's payload, and that is the correct outcome, not a bug.
+   */
+  it('ignores the nested thinking tokens, because output already contains them', () => {
+    const result = parser.parseLine(line({
+      input_tokens: 100,
+      output_tokens: 500,
+      cache_read_input_tokens: 40000,
+      cache_creation_input_tokens: 1000,
+      output_tokens_details: { thinking_tokens: 300 },
+    }), context)
+
+    expect(result?.record?.thinkingTokens).toBe(0)
+    expect(result?.record?.outputTokens).toBe(500)
+  })
+
+  it('does not subtract the cache read from the input', () => {
+    // The shape every real cache hit has: a tiny input beside a large cache
+    // read. Subtracting here would drive input negative.
+    const result = parser.parseLine(line({
+      input_tokens: 2,
+      output_tokens: 78,
+      cache_read_input_tokens: 41612,
+      cache_creation_input_tokens: 15815,
+    }), context)
+
+    expect(result?.record?.inputTokens).toBe(2)
+    expect(result?.record?.cacheReadTokens).toBe(41612)
+    expect(result?.record?.cacheWriteTokens).toBe(15815)
+  })
+})

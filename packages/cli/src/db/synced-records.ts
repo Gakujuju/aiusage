@@ -9,12 +9,12 @@ export function insertSyncedRecord(db: Database.Database, record: SyncRecord): b
       id, ts, tool, model, provider, input_tokens, output_tokens,
       cache_read_tokens, cache_write_tokens, thinking_tokens,
       cost, cost_source, session_key, device, device_instance_id, platform, updated_at,
-      source_file, cwd
+      source_file, cwd, breakdown_missing
     ) VALUES (
       @id, @ts, @tool, @model, @provider, @inputTokens, @outputTokens,
       @cacheReadTokens, @cacheWriteTokens, @thinkingTokens,
       @cost, @costSource, @sessionKey, @device, @deviceInstanceId, @platform, @updatedAt,
-      @sourceFile, @cwd
+      @sourceFile, @cwd, @breakdownMissing
     )
     ON CONFLICT(id) DO UPDATE SET
       ts = excluded.ts,
@@ -34,7 +34,8 @@ export function insertSyncedRecord(db: Database.Database, record: SyncRecord): b
       platform = excluded.platform,
       updated_at = excluded.updated_at,
       source_file = excluded.source_file,
-      cwd = excluded.cwd
+      cwd = excluded.cwd,
+      breakdown_missing = excluded.breakdown_missing
     WHERE excluded.updated_at > synced_records.updated_at
   `).run({
     id: record.id,
@@ -56,6 +57,7 @@ export function insertSyncedRecord(db: Database.Database, record: SyncRecord): b
     updatedAt: record.updatedAt,
     sourceFile: record.sourceFile ?? '',
     cwd: record.cwd ?? '',
+    breakdownMissing: record.breakdownMissing ? 1 : 0,
   })
   return result.changes > 0
 }
@@ -96,13 +98,13 @@ export function mergeSyncedRecordsIntoRecords(db: Database.Database): number {
       tool, model, provider, input_tokens, output_tokens,
       cache_read_tokens, cache_write_tokens, thinking_tokens,
       cost, cost_source, session_id, source_file, device, device_instance_id,
-      platform
+      platform, breakdown_missing
     ) VALUES (
       @id, @ts, @ingestedAt, @syncedAt, @updatedAt, 0,
       @tool, @model, @provider, @inputTokens, @outputTokens,
       @cacheReadTokens, @cacheWriteTokens, @thinkingTokens,
       @cost, @costSource, @sessionId, @sourceFile, @device, @deviceInstanceId,
-      @platform
+      @platform, @breakdownMissing
     )
   `)
 
@@ -132,6 +134,7 @@ export function mergeSyncedRecordsIntoRecords(db: Database.Database): number {
         device: row.device,
         deviceInstanceId: row.device_instance_id,
         platform: (typeof row.platform === 'string' ? row.platform : '') || '',
+        breakdownMissing: row.breakdown_missing ? 1 : 0,
         cwd: (typeof row.cwd === 'string' ? row.cwd : '') || '',
       })
     }

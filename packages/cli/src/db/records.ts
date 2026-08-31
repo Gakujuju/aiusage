@@ -7,12 +7,14 @@ export function insertRecord(db: Database.Database, record: StatsRecord): void {
       id, ts, ingested_at, synced_at, updated_at, line_offset,
       tool, model, provider, input_tokens, output_tokens,
       cache_read_tokens, cache_write_tokens, thinking_tokens,
-      cost, cost_source, session_id, source_file, cwd, device, device_instance_id, platform
+      cost, cost_source, session_id, source_file, cwd, device, device_instance_id, platform,
+      breakdown_missing
     ) VALUES (
       @id, @ts, @ingestedAt, @syncedAt, @updatedAt, @lineOffset,
       @tool, @model, @provider, @inputTokens, @outputTokens,
       @cacheReadTokens, @cacheWriteTokens, @thinkingTokens,
-      @cost, @costSource, @sessionId, @sourceFile, @cwd, @device, @deviceInstanceId, @platform
+      @cost, @costSource, @sessionId, @sourceFile, @cwd, @device, @deviceInstanceId, @platform,
+      @breakdownMissing
     )
   `).run({
     id: record.id,
@@ -37,6 +39,7 @@ export function insertRecord(db: Database.Database, record: StatsRecord): void {
     device: record.device,
     deviceInstanceId: record.deviceInstanceId,
     platform: record.platform ?? '',
+    breakdownMissing: record.breakdownMissing ? 1 : 0,
   })
 }
 
@@ -122,6 +125,9 @@ function mapRowToRecord(row: Record<string, unknown>): StatsRecord {
     device: row.device as string,
     deviceInstanceId: row.device_instance_id as string,
     platform: (row.platform as string) || undefined,
+    // Read back as well as written. A field that only travels one way is a
+    // field the sync silently drops — which is how platform was lost.
+    breakdownMissing: row.breakdown_missing === 1,
   }
 }
 

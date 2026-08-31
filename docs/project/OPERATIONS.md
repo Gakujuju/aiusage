@@ -278,8 +278,42 @@ serve は packages/cli/dist/web をリクエストごとにディスクから読
 
 影響するもの:
   packages/web の変更 → ビルドした時点で本番に反映される
-  packages/cli の変更 → serve を再起動するまで反映されない
-  マイグレーション     → serve を再起動するまで適用されない
+  packages/cli の変更 → **常駐 serve の中のコードだけ**、再起動まで反映されない
+  マイグレーション     → **ビルドした時点で本番に届く。下記を読むこと**
+
+### マイグレーションはビルドした瞬間に本番へ届く
+
+**「serve を再起動するまで適用されない」は誤りだった。** 3回事故が起きて
+から気づいた。`dist/index.js` を叩くのは常駐 serve だけではない。
+
+  ・Claude Code のステータスライン（プロンプトのたび）
+  ・hook（agent-event、セッション中は数秒おき）
+  ・タスクスケジューラ（5分ごとの watchdog）
+
+これらは短命プロセスとして起動し、**そのたびに DB を開いて
+runMigrations が走る**。したがって dist にマイグレーションを含めて
+ビルドした時点で、次に誰かが index.js を叩いた瞬間——たいてい数秒後——
+本番のスキーマが変わる。
+
+過去3回、**すべて経路が違う**:
+
+  v14      プレビューサーバ経由
+  v19      `node -e "require('.../dist/index.js')"` 経由（読み取りのつもり）
+  v21・v22 ステータスライン経由（自分では何も実行していない）
+
+3回とも「調査で CLI のエントリを実行しない」という教訓では防げていない。
+3回目は**エントリを叩いてすらいない**。ビルドしただけで届いた。
+
+**したがって、承認されていないマイグレーションを dist に入れないこと。**
+検証は dist を経由せず、src から直接行う:
+
+```
+npx tsx -e "import Database from 'better-sqlite3'; import { runMigrations } from './packages/cli/src/db/migrations/index.js'; const db = new Database('.dev-aiusage/cache-copy.db'); runMigrations(db); db.close()"
+```
+
+複製に対して走らせること。`AIUSAGE_HOME` を指定しても、
+**DBのパスを明示的に渡さなければ守りにならない**
+（runMigrations は渡された接続に対して走る）。
 
 したがって web の変更は、隔離検証の対象外だと理解して扱うこと。
 本番に出したくない画面変更があるなら、ビルドしないこと。
@@ -308,6 +342,22 @@ CLI をビルドするときは `pnpm --filter ... build` か、
 最低でも tsup の直後に copy-web.js を走らせること。
 tsup 単体で終わらせないこと。
 
+
+### `source_file NOT LIKE 'synced/%'` で「他機由来」は絞れない
+
+古いコードはこの条件を「他の端末から来た行」の代用に使っている。
+**もう代用にならない。** 同期でも直送でも、レコードは送信元の実
+source_file を持ったまま届く。`synced/<deviceId>` になるのは
+source_file が空だった行だけ。
+
+実測: ノートPCから届いた codex 72行はすべて実パスを持っており、
+この条件では1行も除外されなかった。
+
+自機の行だけを選びたいときは `device_instance_id` を使うこと。
+ただし自機の id が `'unknown'` のことがある（D1）ので、
+その場合は `source_file NOT LIKE 'synced/%'` を**併用**する
+（置き換えではなく AND）。
+platform の埋め戻しで実際にこの順序で間違えかけた。
 
 ## Tailscale 経由でスマホから見る
 

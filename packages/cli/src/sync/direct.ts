@@ -83,6 +83,10 @@ export function normalizeIncomingSyncRecord(raw: unknown): SyncRecord | null {
     updatedAt: num(r.updatedAt, 0),
     sourceFile: str(r.sourceFile),
     cwd: str(r.cwd),
+    // Carried across so a spoke's total-only rows stay labelled as such on
+    // the hub. Dropping it here would leave the hub calling a combined
+    // input+output figure "input" with nothing to say otherwise.
+    breakdownMissing: r.breakdownMissing === true || r.breakdownMissing === 1,
   }
 }
 

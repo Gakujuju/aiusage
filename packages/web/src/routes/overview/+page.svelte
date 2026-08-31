@@ -94,6 +94,14 @@
     <div class="token-item">
       <span class="token-label">{$t('overview.inputTokens')}</span>
       <span class="token-value">{formatTokens(data.inputTokens)}</span>
+      <!--
+        Some sources report a total with no input/output split, and the whole
+        figure lands in this column. Counting those tokens is right; letting
+        the reader call all of them input is not.
+      -->
+      {#if data.unsplitTokens > 0}
+        <span class="token-note">{$t('overview.unsplitNote').replace('{n}', formatTokens(data.unsplitTokens))}</span>
+      {/if}
     </div>
     <div class="token-item">
       <span class="token-label">{$t('overview.outputTokens')}</span>
@@ -231,6 +239,12 @@
     flex-direction: column;
     gap: 0.2rem;
   }
+  .token-note {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+  }
+
   .token-label {
     font-size: 0.75rem;
     font-weight: 550;

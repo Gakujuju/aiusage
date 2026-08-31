@@ -48,5 +48,6 @@ export function mapStatsRecordToSyncRecord(record: StatsRecord): SyncRecord {
     updatedAt: record.updatedAt,
     sourceFile: record.sourceFile,
     cwd: record.cwd,
+    breakdownMissing: record.breakdownMissing,
   }
 }

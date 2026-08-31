@@ -51,6 +51,20 @@ export interface StatsRecord {
   device: string                       // 设备别名
   deviceInstanceId: string             // 当前安装实例生成的稳定设备实例 ID
   platform?: string                    // 'win32' | 'darwin' | 'linux'
+  /**
+   * The source reported a total but no input/output split.
+   *
+   * Codex desktop sessions do this: total_tokens is set and every breakdown
+   * field is 0, with no way to recover the ratio. The total goes into
+   * inputTokens so it is counted, which means inputTokens on these rows is
+   * really input+output combined — the flag is how anything reading it knows
+   * not to describe it as "input".
+   *
+   * Deliberately not folded into costSource. That answers "do we know the
+   * price"; this answers "do we know the shape". A row can be either, both,
+   * or neither, and one value cannot carry two axes without losing one.
+   */
+  breakdownMissing?: boolean
 }
 
 export interface ToolCallRecord {
@@ -81,6 +95,20 @@ export interface SyncRecord {
   updatedAt: number
   sourceFile?: string                  // 原始 source_file，用于跨设备项目统计
   cwd?: string                         // 工作目录，用于跨设备项目统计
+  /**
+   * The source reported a total but no input/output split.
+   *
+   * Codex desktop sessions do this: total_tokens is set and every breakdown
+   * field is 0, with no way to recover the ratio. The total goes into
+   * inputTokens so it is counted, which means inputTokens on these rows is
+   * really input+output combined — the flag is how anything reading it knows
+   * not to describe it as "input".
+   *
+   * Deliberately not folded into costSource. That answers "do we know the
+   * price"; this answers "do we know the shape". A row can be either, both,
+   * or neither, and one value cannot carry two axes without losing one.
+   */
+  breakdownMissing?: boolean
 }
 
 export interface SyncTombstone {

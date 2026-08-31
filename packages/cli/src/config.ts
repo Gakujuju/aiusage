@@ -54,7 +54,7 @@ export const SYNC_FIELDS = [
   'ts', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens',
   'thinkingTokens', 'cost', 'costSource', 'tool', 'model', 'provider',
   'sessionKey', 'device', 'deviceInstanceId', 'platform', 'updatedAt',
-  'sourceFile', 'cwd',
+  'sourceFile', 'cwd', 'breakdownMissing',
 ]
 
 export interface SyncConfig {

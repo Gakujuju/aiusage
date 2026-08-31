@@ -884,10 +884,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         if (df.useUnion) {
           // All devices: UNION records + synced_records (excluding current device's synced copy)
           const unionSql = `
-            SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, ts, session_id
+            SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, ts, session_id, breakdown_missing
             FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
             UNION ALL
-            SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, ts, session_key AS session_id
+            SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, ts, session_key AS session_id, breakdown_missing
             FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where}
           `
           totals = db.prepare(`
@@ -899,6 +899,15 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
               COALESCE(SUM(thinking_tokens), 0) AS thinkingTokens,
               COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens), 0) AS totalTokens,
               COALESCE(SUM(cost), 0) AS totalCost,
+              /*
+               * How much of "input" above is really input+output.
+               *
+               * Codex desktop sessions report a total with no split, so the
+               * whole figure lands in input_tokens. Counting the tokens is
+               * right; calling them input is not, and the number alone gives
+               * the reader no way to tell. See D27.
+               */
+              COALESCE(SUM(CASE WHEN breakdown_missing = 1 THEN input_tokens ELSE 0 END), 0) AS unsplitTokens,
               COUNT(DISTINCT strftime('%Y-%m-%d', ts/1000, 'unixepoch')) AS activeDays,
               COUNT(DISTINCT session_id) AS totalSessions
             FROM (${unionSql})
@@ -930,6 +939,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
               COALESCE(SUM(thinking_tokens), 0) AS thinkingTokens,
               COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens), 0) AS totalTokens,
               COALESCE(SUM(cost), 0) AS totalCost,
+              COALESCE(SUM(CASE WHEN breakdown_missing = 1 THEN input_tokens ELSE 0 END), 0) AS unsplitTokens,
               COUNT(DISTINCT strftime('%Y-%m-%d', ts/1000, 'unixepoch')) AS activeDays,
               COUNT(DISTINCT session_key) AS totalSessions
             FROM synced_records WHERE 1=1 ${df.where} ${dr.where} ${tf.where}
@@ -953,6 +963,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
               COALESCE(SUM(thinking_tokens), 0) AS thinkingTokens,
               COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens), 0) AS totalTokens,
               COALESCE(SUM(cost), 0) AS totalCost,
+              COALESCE(SUM(CASE WHEN breakdown_missing = 1 THEN input_tokens ELSE 0 END), 0) AS unsplitTokens,
               COUNT(DISTINCT strftime('%Y-%m-%d', ts/1000, 'unixepoch')) AS activeDays,
               COUNT(DISTINCT session_id) AS totalSessions
             FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}

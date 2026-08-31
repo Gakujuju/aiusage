@@ -30,6 +30,19 @@ export class ClaudeCodeParser implements Parser {
     const outputTokens = usage.output_tokens ?? 0
     const cacheWriteTokens = usage.cache_creation_input_tokens ?? 0
     const cacheReadTokens = usage.cache_read_input_tokens ?? 0
+    /*
+     * Absent from Anthropic's payload, and meant to stay that way.
+     *
+     * The real figure is usage.output_tokens_details.thinking_tokens, and it
+     * is part of output_tokens — 8,046,142 of 25,028,992 across the logs on
+     * this machine. Reading it here and passing it as thinkingTokens would
+     * bill it a second time at the output rate, because calculateCost adds
+     * its buckets independently. That is the mistake the codex parser was
+     * making until it was measured.
+     *
+     * So this reads a name that is not there, gets 0, and that is correct.
+     * Pinned by a test in claude-code.test.ts.
+     */
     const thinkingTokens = usage.thinking_tokens ?? 0
 
     // Calculate cost
