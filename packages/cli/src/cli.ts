@@ -56,7 +56,7 @@ program
       currentDeviceInstanceId: state?.deviceInstanceId,
     })
     if (summary.deviceCount > 1) {
-      console.log(`设备：全部（${summary.deviceCount} 台设备在线）`)
+      console.log(`デバイス：すべて（${summary.deviceCount} 台）`)
     }
     console.log(`Total Tokens: ${summary.totalTokens.toLocaleString()}`)
     console.log(`Total Cost:   $${summary.totalCost.toFixed(4)}`)
@@ -95,9 +95,9 @@ program
       tool: options.tool,
     })
     if (summary.deviceLabel) {
-      console.log(`设备：${summary.deviceLabel}`)
+      console.log(`デバイス：${summary.deviceLabel}`)
     } else if (summary.deviceCount > 1) {
-      console.log(`设备：全部（${summary.deviceCount} 台设备在线）`)
+      console.log(`デバイス：すべて（${summary.deviceCount} 台）`)
     }
     console.log(`Total Tokens: ${summary.totalTokens.toLocaleString()}`)
     console.log(`Total Cost:   $${summary.totalCost.toFixed(4)}`)
