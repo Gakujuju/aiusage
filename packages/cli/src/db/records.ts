@@ -156,28 +156,55 @@ export interface UnpricedSummary {
   unpricedRecords: number
   /** The models responsible, most affected first. */
   unpricedModels: string[]
+  /**
+   * Records left uncosted because the log gave no token breakdown.
+   *
+   * Counted apart from unpricedRecords because the two ask different things
+   * of the reader. A missing price is theirs to fix; a missing breakdown is
+   * not fixable at all.
+   */
+  breakdownMissingRecords: number
 }
 
 /**
- * How much usage is going uncosted, and which models are to blame.
+ * How much usage is going uncosted, and why.
  *
- * Both halves of the condition matter. cost_source='unknown' is the honest
- * signal, but records written before that was set correctly report 'pricing'
- * with a cost of zero — so a row with tokens and no cost counts too.
+ * Two causes, counted separately, because only one of them is anybody's to
+ * fix.
+ *
+ * Both halves of the price condition matter. cost_source='unknown' is the
+ * honest signal, but records written before that was set correctly report
+ * 'pricing' with a cost of zero — so a row with tokens and no cost counts
+ * too.
+ *
+ * breakdown_missing rows are excluded from that count, and counted on their
+ * own. They are zero and 'unknown' deliberately: the log gave a lump total
+ * with no split, so there is nothing to multiply a price by. Leaving them in
+ * produced a warning naming models that already had prices — an instruction
+ * to go and fix a price table that was not wrong, which no amount of editing
+ * could ever silence. A warning whose stated remedy does not work is worse
+ * than no warning, because it spends the reader's attention on a task that
+ * cannot succeed.
  */
 export function countUnpricedRecords(db: Database.Database): UnpricedSummary {
   const rows = db.prepare(`
     SELECT model, COUNT(*) AS n
     FROM records
-    WHERE cost_source = 'unknown'
-       OR (cost = 0 AND (input_tokens + output_tokens + cache_read_tokens
-                         + cache_write_tokens + thinking_tokens) > 0)
+    WHERE breakdown_missing = 0
+      AND (cost_source = 'unknown'
+           OR (cost = 0 AND (input_tokens + output_tokens + cache_read_tokens
+                             + cache_write_tokens + thinking_tokens) > 0))
     GROUP BY model
     ORDER BY n DESC
   `).all() as Array<{ model: string; n: number }>
 
+  const breakdownMissing = db.prepare(`
+    SELECT COUNT(*) AS n FROM records WHERE breakdown_missing = 1
+  `).get() as { n: number }
+
   return {
     unpricedRecords: rows.reduce((acc, r) => acc + r.n, 0),
     unpricedModels: rows.map((r) => r.model),
+    breakdownMissingRecords: breakdownMissing.n,
   }
 }

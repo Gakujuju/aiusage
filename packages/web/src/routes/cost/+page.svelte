@@ -1,7 +1,7 @@
 <script>
   import { dateRange, selectedDevice, selectedTool, formatCost } from '$lib/stores.js'
   import { fetchCost, fetchSummary } from '$lib/api.js'
-  import UnpricedWarning from '$lib/components/UnpricedWarning.svelte'
+  import CostCaveats from '$lib/components/CostCaveats.svelte'
   import { t } from '$lib/i18n.js'
   import DateRangeSelector from '$lib/components/DateRangeSelector.svelte'
   import DeviceSelector from '$lib/components/DeviceSelector.svelte'
@@ -100,9 +100,10 @@
   <ToolSelector />
 </div>
 
-<UnpricedWarning
+<CostCaveats
   unpricedRecords={summary?.unpricedRecords ?? 0}
   unpricedModels={summary?.unpricedModels ?? []}
+  breakdownMissingRecords={summary?.breakdownMissingRecords ?? 0}
 />
 
 {#if loading}
