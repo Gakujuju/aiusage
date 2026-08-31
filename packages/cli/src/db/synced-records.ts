@@ -81,7 +81,10 @@ export function mergeSyncedRecordsIntoRecords(db: Database.Database): number {
     WHERE r.id IS NULL
   `).all() as Record<string, unknown>[]
 
-  if (newRows.length === 0) return 0
+  // Not an early return any more. Having nothing new to insert says
+  // nothing about whether an existing row has been corrected, and
+  // returning here skipped every update — which is the whole of D28.
+  if (newRows.length === 0) return propagateSyncedUpdates(db)
 
   /*
    * platform is carried across like every other column.
@@ -141,7 +144,55 @@ export function mergeSyncedRecordsIntoRecords(db: Database.Database): number {
   })
 
   tx(newRows)
-  return newRows.length
+  return newRows.length + propagateSyncedUpdates(db)
+}
+
+/**
+ * Carry a spoke's corrections through to records (D28).
+ *
+ * The merge only ever inserted — WHERE r.id IS NULL — so once a row had
+ * arrived, nothing about it could change again. Every correction made on a
+ * spoke stopped at synced_records: the platform backfill, recalculated
+ * costs, the codex token fix. The hub kept showing the first version of a
+ * row for ever, and the two tables drifted apart with no way to notice.
+ *
+ * updated_at decides. A row is replaced only when the copy that arrived is
+ * newer than the one already stored, so a late-arriving stale upload cannot
+ * undo a correction made here.
+ *
+ * Rows the hub produced itself are never touched. They cannot appear in
+ * synced_records today — a spoke has no reason to send back what the hub
+ * made — but "cannot happen today" is how the source_file assumption
+ * started, and this one costs a WHERE clause.
+ *
+ * ingested_at is deliberately left alone: it records when this machine
+ * first saw the row, which a later correction does not change.
+ */
+function propagateSyncedUpdates(db: Database.Database): number {
+  const result = db.prepare(`
+    UPDATE records
+       SET ts = (SELECT s.ts FROM synced_records s WHERE s.id = records.id),
+           updated_at = (SELECT s.updated_at FROM synced_records s WHERE s.id = records.id),
+           tool = (SELECT s.tool FROM synced_records s WHERE s.id = records.id),
+           model = (SELECT s.model FROM synced_records s WHERE s.id = records.id),
+           provider = (SELECT s.provider FROM synced_records s WHERE s.id = records.id),
+           input_tokens = (SELECT s.input_tokens FROM synced_records s WHERE s.id = records.id),
+           output_tokens = (SELECT s.output_tokens FROM synced_records s WHERE s.id = records.id),
+           cache_read_tokens = (SELECT s.cache_read_tokens FROM synced_records s WHERE s.id = records.id),
+           cache_write_tokens = (SELECT s.cache_write_tokens FROM synced_records s WHERE s.id = records.id),
+           thinking_tokens = (SELECT s.thinking_tokens FROM synced_records s WHERE s.id = records.id),
+           cost = (SELECT s.cost FROM synced_records s WHERE s.id = records.id),
+           cost_source = (SELECT s.cost_source FROM synced_records s WHERE s.id = records.id),
+           platform = (SELECT COALESCE(s.platform, '') FROM synced_records s WHERE s.id = records.id),
+           breakdown_missing = (SELECT s.breakdown_missing FROM synced_records s WHERE s.id = records.id)
+     WHERE EXISTS (
+             SELECT 1 FROM synced_records s
+              WHERE s.id = records.id
+                AND s.updated_at > records.updated_at
+                AND s.device_instance_id = records.device_instance_id
+           )
+  `).run()
+  return result.changes
 }
 
 function mapRowToSyncRecord(row: Record<string, unknown>): SyncRecord {
