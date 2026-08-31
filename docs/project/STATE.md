@@ -244,7 +244,37 @@ DB は直接変更しない。
    （`source_file NOT LIKE 'synced/%'` は「他機由来」の代用として
    機能しなくなっている。実 source_file を持ったまま届く行があるため）。
 
-方針: 1・2・3・6・8 は挙動を壊さない明確なバグ修正なので
+9. **テストスイートを流すと開発機の実データが消える**
+   `cleanAll(db)` は `join(AIUSAGE_DIR, 'watermark.json')` を
+   `unlinkSync` する。`tests/commands/clean.test.ts` はこれを
+   モックせずに6回呼ぶので、**開発機の `~/.aiusage/watermark.json` が
+   毎回削除される。**
+
+   watermark は「各ログをどこまで読んだか」の記録なので、
+   消えると常駐 serve の取り込みが止まる。プロセスは生きたまま、
+   通知も出たまま、ダッシュボードも 200 のままで、
+   **取り込みだけが静かに止まる。**
+   実際にこのマシンで38分止まった。
+
+   テスト自身がこの問題を認めたうえで、迂回して通している:
+
+       // We can't easily test the watermark deletion since cleanAll uses AIUSAGE_DIR
+       // But we verify the function doesn't throw when watermark doesn't exist
+       expect(result.watermarkRemoved).toBe(false) // no watermark in test AIUSAGE_DIR
+
+   `~/.aiusage/watermark.json` を持たない開発機を前提にしている。
+   しかも同ファイル内で**先に走る5つの cleanAll が既に本物を消して
+   いる**ので、この行に到達する頃には無く、`false` が通る。
+   壊した後に壊れていないことを確認している形になっている。
+
+   我々の側では `cleanAll(db, aiusageDir = AIUSAGE_DIR)` と引数化し、
+   テストは一時ディレクトリを渡すようにした。
+   引数化した結果、**削除の挙動が初めて検証されるようになった**
+   （従来はどのテストも通っていなかった）。
+
+   ※ 1〜3・6・8 と同じ「明確なバグ修正」の束に入れてよい。
+
+方針: 1・2・3・6・8・9 は挙動を壊さない明確なバグ修正なので
 1つの PR にまとめてよい。4・5 は影響が大きいので個別に issue から始める。
 7 は単独の issue。まだ作成していない。
 

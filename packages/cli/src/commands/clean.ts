@@ -84,7 +84,21 @@ export function cleanOldData(db: Database.Database, days: number): CleanResult {
   }
 }
 
-export function cleanAll(db: Database.Database): CleanAllResult {
+/**
+ * Wipe every stored record, and the parse position along with them.
+ *
+ * The directory is a parameter with the real one as its default, so callers
+ * are unchanged and tests can point it somewhere harmless. Before that it
+ * read AIUSAGE_DIR directly, which meant the test suite deleted the
+ * developer's own watermark on every run — and because the watermark is what
+ * says how much of each log has been read, losing it silently stopped the
+ * running serve from ingesting anything new. That went unnoticed for 38
+ * minutes on this machine while everything else looked healthy.
+ *
+ * The test acknowledged the problem in a comment and asserted around it
+ * rather than through it, which is why nothing caught this.
+ */
+export function cleanAll(db: Database.Database, aiusageDir: string = AIUSAGE_DIR): CleanAllResult {
   const recordsResult = db.prepare('DELETE FROM records').run()
   const toolCallsResult = db.prepare('DELETE FROM tool_calls').run()
   const syncedResult = db.prepare('DELETE FROM synced_records').run()
@@ -99,7 +113,7 @@ export function cleanAll(db: Database.Database): CleanAllResult {
   const agentSpanResult = db.prepare('DELETE FROM agent_session_spans').run()
   const agentSessionResult = db.prepare('DELETE FROM agent_sessions').run()
 
-  const watermarkPath = join(AIUSAGE_DIR, 'watermark.json')
+  const watermarkPath = join(aiusageDir, 'watermark.json')
   let watermarkRemoved = false
   if (existsSync(watermarkPath)) {
     unlinkSync(watermarkPath)

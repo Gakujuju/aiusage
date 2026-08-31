@@ -4,7 +4,7 @@ import { initializeDatabase } from '../../src/db/index.js'
 import { insertRecord } from '../../src/db/records.js'
 import { cleanOldData, cleanAll } from '../../src/commands/clean.js'
 import type { StatsRecord } from '@aiusage/core'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -115,15 +115,25 @@ describe('cleanOldData', () => {
 })
 
 describe('cleanAll', () => {
+  /*
+   * cleanAll deletes the watermark next to the database, and until it took
+   * the directory as an argument it always took the real one — so running
+   * this file deleted the developer's own parse position and silently
+   * stopped their serve from ingesting anything. Every call below is given
+   * a sandbox instead.
+   */
+  let sandboxDir: string
   let db: Database.Database
 
   beforeEach(() => {
     db = new Database(':memory:')
     initializeDatabase(db)
+    sandboxDir = mkdtempSync(join(tmpdir(), 'aiusage-cleanall-'))
   })
 
   afterEach(() => {
     db.close()
+    rmSync(sandboxDir, { recursive: true, force: true })
   })
 
   it('deletes all records', () => {
@@ -143,7 +153,7 @@ describe('cleanAll', () => {
       sourceFile: '/f2', device: 'd1', deviceInstanceId: 'di1',
     })
 
-    const result = cleanAll(db)
+    const result = cleanAll(db, sandboxDir)
     expect(result.deletedRecords).toBe(2)
     expect(db.prepare('SELECT COUNT(*) as count FROM records').get()).toEqual({ count: 0 })
   })
@@ -162,7 +172,7 @@ describe('cleanAll', () => {
     db.prepare("INSERT INTO tool_calls (id, record_id, tool, name, ts, call_index) VALUES ('tc2', 'r1', 'codex', 'Write', ?, 1)").run(now)
 
     // DELETE FROM records cascades to delete tc2 (FK), DELETE FROM tool_calls deletes tc1 (orphan)
-    const result = cleanAll(db)
+    const result = cleanAll(db, sandboxDir)
     expect(result.deletedRecords).toBe(1)
     // tc2 was cascade-deleted by records deletion, tc1 deleted by explicit DELETE FROM tool_calls
     expect(result.deletedToolCalls).toBe(1)
@@ -173,14 +183,14 @@ describe('cleanAll', () => {
     db.prepare("INSERT INTO synced_records (id, ts, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, updated_at, session_key, source_file, cwd, device, device_instance_id, platform) VALUES ('sr1', 1000, 'claude-code', 'test', 'test', 0, 0, 0, 0, 0, 1000, 's1', '/f1', '', 'd1', 'di1', '')").run()
     db.prepare("INSERT INTO synced_records (id, ts, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, updated_at, session_key, source_file, cwd, device, device_instance_id, platform) VALUES ('sr2', 2000, 'claude-code', 'test', 'test', 0, 0, 0, 0, 0, 2000, 's2', '/f2', '', 'd1', 'di1', '')").run()
 
-    const result = cleanAll(db)
+    const result = cleanAll(db, sandboxDir)
     expect(result.deletedSyncedRecords).toBe(2)
   })
 
   it('deletes sync tombstones', () => {
     db.prepare("INSERT INTO sync_tombstones (id, device_scope, deleted_at, reason) VALUES ('t1', '*', 1000, 'manual_clean')").run()
 
-    const result = cleanAll(db)
+    const result = cleanAll(db, sandboxDir)
     expect(result.deletedTombstones).toBe(1)
   })
 
@@ -199,21 +209,48 @@ describe('cleanAll', () => {
       VALUES ('codex', 'five_hour', 'di1', 10, NULL, 'w1', ?, 'valid', ?, NULL, 0, ?)
     `).run(now, now, now)
 
-    const result = cleanAll(db)
+    const result = cleanAll(db, sandboxDir)
     expect(result.deletedQuotaSnapshots).toBe(1)
     expect(result.deletedQuotaWindows).toBe(1)
     expect(result.deletedQuotaCurrent).toBe(1)
   })
 
-  it('deletes watermark file when it exists', () => {
-    const testDir = join(tmpdir(), `aiusage-test-${Date.now()}`)
-    mkdirSync(testDir, { recursive: true })
-    const watermarkPath = join(testDir, 'watermark.json')
-    writeFileSync(watermarkPath, '{}')
+  /*
+   * This used to assert that nothing was deleted, on the grounds that the
+   * test directory had no watermark — while cleanAll was in fact reading the
+   * real one. The earlier cases in this file had already deleted the
+   * developer's watermark by the time this ran, so "false" was true for the
+   * wrong reason, and the deletion itself was never covered at all.
+   */
+  it('deletes the watermark in the directory it was given', () => {
+    const watermarkPath = join(sandboxDir, 'watermark.json')
+    writeFileSync(watermarkPath, '{"files":{}}')
 
-    // We can't easily test the watermark deletion since cleanAll uses AIUSAGE_DIR
-    // But we verify the function doesn't throw when watermark doesn't exist
-    const result = cleanAll(db)
-    expect(result.watermarkRemoved).toBe(false) // no watermark in test AIUSAGE_DIR
+    const result = cleanAll(db, sandboxDir)
+
+    expect(result.watermarkRemoved).toBe(true)
+    expect(existsSync(watermarkPath)).toBe(false)
+  })
+
+  it('says so, and does not throw, when there is no watermark to delete', () => {
+    const result = cleanAll(db, sandboxDir)
+
+    expect(result.watermarkRemoved).toBe(false)
+  })
+
+  /**
+   * The point of the argument. Left to its default this reaches
+   * AIUSAGE_DIR — the developer's own installation — and running the suite
+   * silently stopped their serve from ingesting for 38 minutes.
+   */
+  it('touches nothing outside the directory it was given', () => {
+    const neighbour = mkdtempSync(join(tmpdir(), 'aiusage-neighbour-'))
+    const untouched = join(neighbour, 'watermark.json')
+    writeFileSync(untouched, '{"files":{}}')
+
+    cleanAll(db, sandboxDir)
+
+    expect(existsSync(untouched)).toBe(true)
+    rmSync(neighbour, { recursive: true, force: true })
   })
 })
