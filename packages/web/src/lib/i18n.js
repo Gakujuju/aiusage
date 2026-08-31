@@ -107,6 +107,11 @@ const translations = {
       noData: 'No project data',
       noDataHint: 'No project usage recorded for this period.',
     },
+    health: {
+      stalledTitle: 'Log parsing has stopped',
+      stalledBody: 'No parse has completed for {minutes} minute(s). It normally runs every {interval} minute(s), so the figures below are missing anything newer than that.',
+      lastParsed: 'Last parsed {minutes} minute(s) ago',
+    },
     cost: {
       unpricedWarning: '{n} record(s) have no price set ({models}). Total cost is understated.',
       unpricedLink: 'Update the price table in Settings › Pricing',
@@ -786,6 +791,11 @@ const translations = {
       noData: 'プロジェクトデータがありません',
       noDataHint: 'この期間のプロジェクト利用は記録されていません。',
     },
+    health: {
+      stalledTitle: 'ログの取り込みが止まっています',
+      stalledBody: '{minutes} 分間、解析が1度も完了していません。本来は {interval} 分ごとに実行されるため、以下の数値にはそれ以降の利用が含まれていません。',
+      lastParsed: '最終取り込み {minutes} 分前',
+    },
     cost: {
       unpricedWarning: '{n} 件のレコードに価格が設定されていません（{models}）。総コストは実際より少なく出ています。',
       unpricedLink: '設定 › 価格 から価格表を更新できます',
@@ -1464,6 +1474,11 @@ const translations = {
       share: '占比',
       noData: '暂无项目数据',
       noDataHint: '当前时间段内无项目使用记录。',
+    },
+    health: {
+      stalledTitle: '日志解析已停止',
+      stalledBody: '已有 {minutes} 分钟没有完成任何解析。正常应每 {interval} 分钟运行一次，因此以下数据不包含此后的使用量。',
+      lastParsed: '上次解析于 {minutes} 分钟前',
     },
     cost: {
       unpricedWarning: '有 {n} 条记录没有设置价格（{models}）。总成本被低估。',

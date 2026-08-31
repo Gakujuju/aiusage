@@ -18,6 +18,9 @@ const TTL_MS: Record<string, number> = {
   // Sent once per outage, so it has no second chance if delivery keeps
   // failing. An hour covers the whole retry ladder.
   quota_credential: 60 * 60_000,
+  // Same shape as quota_credential: one message per outage, so the default
+  // 15 minutes would let it expire mid-retry and the outage would go unsaid.
+  parse_stalled: 60 * 60_000,
   test: 15 * 60_000,
 }
 

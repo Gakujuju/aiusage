@@ -21,7 +21,7 @@ import { AgentSessionEmitter, applyAgentEvents, decayStaleSessions } from '../db
 import { NotificationSender } from '../notify/discord.js'
 import { runPushNotificationTick } from '../notify/webpush-tick.js'
 import { requeueInFlightNotifications } from '../db/notifications.js'
-import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
+import { notifyEscalations, notifyParseStalled, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
 import { runHubUpload, type HubUploadResult } from '../sync/hub-upload.js'
 import { runCodexLogTick } from '../agent/codex-log-watcher.js'
@@ -441,6 +441,18 @@ export function serve(options: ServeOptions): void {
      */
     runHubUpload: reportHubUpload,
     onSyncScheduleChanged: (ts) => syncRuntime.setNextSyncAt(ts),
+    /*
+     * The second output of the same verdict.
+     *
+     * On the hub this reaches Discord and the phone. On a spoke it reaches
+     * nobody — there is no webhook and no push subscription there — so a
+     * laptop whose parsing stops stays quiet until someone asks it. That is
+     * the shape of the arrangement rather than a gap here; /api/health is
+     * how you ask, and OPERATIONS.md says so next to the spoke setup.
+     */
+    onParseStalled: (info) => {
+      void runDbWrite(() => notifyParseStalled(notifyContext(), info))
+    },
   })
   runtimeSettings.start()
 

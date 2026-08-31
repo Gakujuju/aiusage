@@ -294,6 +294,47 @@ export interface QuotaNotifyContext extends NotifyContext {
   device: string
 }
 
+/**
+ * Say that log parsing has gone quiet.
+ *
+ * One message per silence, in the shape D20 settled on: the dedupe key
+ * carries the moment the silence began, so every repeat inside the same
+ * outage collides on the unique index, and a later outage — having a
+ * different start — announces itself.
+ *
+ * Worth sending precisely because serve is still up. Unlike a crash, the
+ * machine that noticed can still tell someone. On a spoke it cannot: there
+ * is no webhook and no push subscription there, so this returns having
+ * queued a row nobody will ever deliver. That is the arrangement, not a
+ * defect here — see OPERATIONS.md.
+ */
+export function notifyParseStalled(
+  ctx: QuotaNotifyContext,
+  info: { stalledSince: number; intervalMs: number },
+): boolean {
+  if (ctx.config?.enabled !== true) return false
+
+  const quietFor = Math.round((ctx.now - info.stalledSince) / 60000)
+  const every = Math.round(info.intervalMs / 60000)
+  const prefix = ctx.config?.prefix ?? '[aiusage] '
+
+  return fanOutNotification(ctx, {
+    eventType: 'parse_stalled',
+    subjectKind: 'system',
+    subjectId: 'parse',
+    dedupeKey: `parsestalled:${info.stalledSince}`,
+    title: `${prefix}⚠️ ${ctx.device}｜ログの取り込みが止まっています`,
+    body: [
+      `${quietFor} 分間、解析が1度も完了していません。`,
+      `本来は ${every} 分ごとに実行されます。`,
+      'serve は動いていますが、新しい利用量が取り込まれていません。',
+    ].join('\n'),
+    payload: { stalledSince: info.stalledSince, intervalMs: info.intervalMs },
+    deviceInstanceId: ctx.deviceInstanceId,
+    drop: !ctx.isNotifier,
+  }) > 0
+}
+
 /** Queue whatever a quota round turned up. */
 export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSummary): number {
   if (ctx.config?.enabled !== true) return 0

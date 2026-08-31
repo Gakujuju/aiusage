@@ -18,6 +18,8 @@ export type NotificationEventType =
   | 'quota_threshold'
   | 'quota_reset'
   | 'quota_credential'
+  /** serve is up but log parsing has stopped completing. */
+  | 'parse_stalled'
   | 'test'
 
 export interface NotificationEventsConfig {

@@ -9,6 +9,7 @@
   import { fetchConfig, fetchAuthStatus, login, setUnauthorizedHandler } from '$lib/api.js'
   import { displayCurrency, exchangeRate } from '$lib/stores.js'
   import { getAuthShellState } from '$lib/auth-shell.js'
+  import ParseStallBanner from '$lib/components/ParseStallBanner.svelte'
   import {
     House, LayoutDashboard, Coins, DollarSign, Box,
     MessageSquare, FolderKanban, Wrench, Activity, Bell,
@@ -435,6 +436,8 @@
     </header>
 
     <main class="page-content">
+      <!-- Above the content, because everything below it is out of date. -->
+      <ParseStallBanner />
       {#if routeHidden}
         <!-- Not a 404. The screen exists and works; it was switched off, and
              saying "not found" would send the reader looking for a bug. -->
