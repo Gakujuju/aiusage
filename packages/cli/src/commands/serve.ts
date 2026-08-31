@@ -406,7 +406,27 @@ export function serve(options: ServeOptions): void {
   const runtimeSettings = new RuntimeSettingsController({
     db: options.db,
     loadConfig,
-    runParse: (db) => runDbWrite(() => runParse(db)),
+    /*
+     * Says what it did, but only when it did something.
+     *
+     * A line every five minutes reporting nothing would bury the ones that
+     * matter, so a quiet parse stays quiet. That leaves "parsed nothing" and
+     * "did not parse" looking identical in the log, which is precisely the
+     * ambiguity that cost an afternoon — so the standing answer lives in
+     * /api/health instead, where it can be asked at any time rather than
+     * inferred from an absence.
+     *
+     * Tagged (scheduled) to separate it from the startup parse above, which
+     * announces itself before it begins.
+     */
+    runParse: async (db) => {
+      const result = await runDbWrite(() => runParse(db))
+      if (result.parsedCount > 0 || result.toolCallCount > 0) {
+        console.log(
+          `[serve] parsed ${result.parsedCount} records, ${result.toolCallCount} tool calls (scheduled).`)
+      }
+      return result
+    },
     runCleanup: (db, retentionDays) => runDbWrite(() => cleanOldData(db, retentionDays)),
     runLeaderboardUpload: (db) => uploadLeaderboardData(db, getState(AIUSAGE_DIR)?.deviceInstanceId).then(() => undefined),
     runSync: () => syncRuntime.start(),
@@ -621,6 +641,8 @@ export function serve(options: ServeOptions): void {
     onConfigUpdated: () => runtimeSettings.reload(),
     runDbWrite,
     getDbWriteQueueStatus: () => dbWriteQueue.getStatus(),
+    // The controller decides; the endpoint only repeats it.
+    getParseHealth: () => runtimeSettings.parseHealth(),
   })
   const webBuildDir = (() => {
     const prodDir = join(dirname(fileURLToPath(import.meta.url)), 'web')

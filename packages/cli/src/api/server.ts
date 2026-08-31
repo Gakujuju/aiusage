@@ -407,6 +407,14 @@ async function proxyCloudSyncStatus(res: http.ServerResponse): Promise<void> {
 export interface ApiServerOptions {
   currentDeviceInstanceId?: string
   onRefresh?: () => Promise<{ parsedCount: number; toolCallCount: number; errors: string[] }>
+  /** The parse-health verdict, decided in one place by the controller. */
+  getParseHealth?: () => {
+    lastParseOkAt: number | null
+    intervalMs: number
+    thresholdMs: number
+    stalled: boolean
+    stalledSince: number | null
+  }
   onSyncStart?: () => SyncStartResult
   getSyncStatus?: () => SyncStatusSnapshot | null
   onConfigUpdated?: () => void
@@ -2053,6 +2061,29 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       if (url.pathname === '/api/pricing/recalc' && req.method === 'POST') {
         const result = startPricingRecalc()
         json(res, result, result.accepted ? 202 : 200)
+        return
+      }
+
+      // ── /api/health ────────────────────────────────────────────────
+      /*
+       * What the log cannot say.
+       *
+       * A scheduled parse only writes a line when it found something, so a
+       * quiet log means either "nothing to do" or "not running" and there is
+       * no way to tell which from the outside. This answers that directly,
+       * and can be asked whenever the question comes up rather than only
+       * while someone is tailing a file.
+       *
+       * The verdict is the controller's; nothing is recomputed here, so the
+       * banner and the notification cannot disagree.
+       */
+      if (url.pathname === '/api/health') {
+        const parse = options?.getParseHealth?.() ?? null
+        json(res, {
+          ok: parse ? !parse.stalled : true,
+          parse,
+          now: Date.now(),
+        })
         return
       }
 

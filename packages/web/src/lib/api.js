@@ -306,6 +306,18 @@ export async function fetchCloudSyncStatus(siteUrl) {
   }
 }
 
+/**
+ * Whether log parsing is still happening.
+ *
+ * The scheduled parse only writes a log line when it found something, so a
+ * quiet log is equally consistent with “nothing to do” and “not running”.
+ * This is the state rather than the events, which is why it can be asked at
+ * any moment instead of inferred from an absence.
+ */
+export async function fetchHealth() {
+  return apiFetch('/api/health')
+}
+
 export async function fetchConfig() {
   return apiFetch('/api/config')
 }
