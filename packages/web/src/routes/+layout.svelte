@@ -798,10 +798,29 @@
     /*
      * The card clips its overflow to hold rounded corners. There are no
      * rounded corners here, and the title has to sit on the top rule, so the
-     * clip has to go — otherwise the title is cut in half. Wide tables are
-     * unaffected: they have carried their own scroller since 8-B-2.
+     * vertical clip has to go — otherwise the title is cut in half.
+     *
+     * The horizontal one stays. Dropping both is what broke /tokens and
+     * /cost: their gridlines are drawn far past the chart and rely on this
+     * card to cut them off, so without it a 360px phone got a 10,093px page
+     * and both screens were squeezed into the left quarter. Clipping only
+     * the axis the title does not need buys back nothing and costs nothing —
+     * clip stops at the same padding box that overflow: hidden did, so the
+     * gridlines end exactly where they do in the other themes.
+     *
+     * Wide tables are unaffected either way: they have carried their own
+     * scroller since 8-B-2.
      */
-    overflow: visible;
+    overflow-x: clip;
+    overflow-y: visible;
+    /*
+     * overflow: hidden also made the card a scroll container, and a scroll
+     * container that is a grid item gets an automatic minimum size of zero.
+     * clip does not, so on /overview the cards grew to their tables'
+     * min-content width and pushed the page 96px past the phone. Saying it
+     * outright restores what the old value was doing by accident.
+     */
+    min-width: 0;
     background:
       linear-gradient(var(--accent), var(--accent)) 0 0 / 12px 2px no-repeat,
       linear-gradient(var(--accent), var(--accent)) 0 0 / 2px 12px no-repeat,

@@ -323,7 +323,18 @@
   .y-line {
     position: absolute;
     left: 52px;
-    right: -9999px;
+    /*
+     * Deliberately past this box: the gridline runs to the card's inner
+     * edge, and the card's clip is what ends it. Which means it is only ever
+     * as long as an ancestor allows — see the terminal theme in +layout,
+     * where switching that clip off once made this line 9999px of real page
+     * width on a phone.
+     *
+     * A viewport rather than the 9999px it used to be. Still far enough to
+     * reach the edge at any width, but if the clip ever goes missing again
+     * the damage is one screen of overflow instead of ten thousand pixels.
+     */
+    right: -100vw;
     height: 1px;
     background: var(--border-subtle);
     pointer-events: none;
