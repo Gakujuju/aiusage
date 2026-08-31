@@ -480,3 +480,44 @@ export function notifySettingsUpdated(patch) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT, { detail: patch }))
 }
+
+/**
+ * Web Push.
+ *
+ * The status endpoint returns the public VAPID key and a summary of the
+ * registered devices. It never returns p256dh or auth: those are what allow
+ * a message to be encrypted for a browser, and a GET that handed them back
+ * would turn read access into the ability to push.
+ */
+export async function fetchPushStatus() {
+  const response = await fetch('/api/push/status')
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+/** @param {{ endpoint: string, keys: { p256dh: string, auth: string } }} subscription @param {string} label */
+export async function savePushSubscription(subscription, label) {
+  const response = await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...subscription, label }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: { message: 'API error' } }))
+    throw new Error(error.error?.message || `HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
+/** @param {string} id */
+export async function deletePushSubscription(id) {
+  const response = await fetch(`/api/push/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+
+export async function sendPushTest() {
+  const response = await fetch('/api/push/test', { method: 'POST' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}

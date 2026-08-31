@@ -123,6 +123,19 @@ export interface Config {
   /** Display names for projects, keyed by the extracted project name. */
   projectAliases?: Record<string, string>
   ui?: UiConfig
+  /** Web Push application-server identity. The private half is a credential. */
+  vapid?: VapidConfig
+}
+
+export interface VapidConfig {
+  /** Uncompressed P-256 point, base64url. Handed to browsers when subscribing. */
+  publicKey?: string
+  /**
+   * RFC 8292 contact, sent to the push service on every delivery. Defaults to
+   * the repository — a personal address has no reason to travel to Google
+   * unless its owner decides otherwise.
+   */
+  subject?: string
 }
 
 export interface UiConfig {
@@ -186,6 +199,12 @@ export interface NotificationConfig {
   includeAssistantMessage?: boolean
   /** Floor on how often one session may notify. */
   minIntervalMs?: number
+  /**
+   * Where a decision is delivered. Absent means Discord alone: push cannot
+   * default to on, because there is nothing to send to until a browser has
+   * subscribed.
+   */
+  channels?: { discord?: boolean; webpush?: boolean }
   events?: {
     waiting_for_permission?: boolean
     waiting_for_user?: boolean
@@ -225,6 +244,25 @@ export const DISCORD_WEBHOOK_CREDENTIAL = 'discordWebhook'
  * by the API. The environment variable still wins when both are set.
  */
 export const DASHBOARD_PASSWORD_CREDENTIAL = 'dashboardPassword'
+
+/**
+ * The application server's private key for Web Push.
+ *
+ * Stored with the other secrets rather than in the config body because
+ * regenerating it invalidates every existing subscription — it is the
+ * identity the push service has recorded against them.
+ */
+export const VAPID_PRIVATE_KEY_CREDENTIAL = 'vapidPrivateKey'
+
+/**
+ * What the push service is told about who is sending.
+ *
+ * RFC 8292 wants a way to contact the operator. It is sent to Google on every
+ * delivery, so the default is this project's repository rather than anybody's
+ * email address: there is no reason for a personal address to travel to a
+ * third party by default, and someone who wants to be reachable can say so.
+ */
+export const DEFAULT_VAPID_SUBJECT = 'https://github.com/Gakujuju/aiusage'
 
 export function loadConfig(): Config | null {
   if (!existsSync(CONFIG_PATH)) return null

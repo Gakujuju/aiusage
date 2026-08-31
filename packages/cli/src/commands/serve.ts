@@ -19,6 +19,7 @@ import { countUnpricedRecords, findPredominantDeviceInstanceId } from '../db/rec
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import { AgentSessionEmitter, applyAgentEvents, decayStaleSessions } from '../db/agent-sessions.js'
 import { NotificationSender } from '../notify/discord.js'
+import { runPushNotificationTick } from '../notify/webpush-tick.js'
 import { requeueInFlightNotifications } from '../db/notifications.js'
 import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
@@ -520,6 +521,29 @@ export function serve(options: ServeOptions): void {
   })
   notificationSender.start()
 
+  /**
+   * The push half, on the same cadence and with its own failures.
+   *
+   * A separate timer rather than a step inside the Discord tick: the two
+   * channels share the decision that produced the rows and nothing else, and
+   * a slow webhook must not delay a phone.
+   */
+  const pushSender = setInterval(() => {
+    void runPushNotificationTick({
+      db: options.db,
+      runDbWrite,
+      isParseInFlight: () => runtimeSettings.isParseInFlight(),
+    })
+      .then((pushResult) => {
+        if (pushResult.sent > 0) console.log(`[serve] pushed ${pushResult.sent} notification(s)`)
+        if (pushResult.pruned > 0) {
+          console.log(`[serve] removed ${pushResult.pruned} push subscription(s) the browser no longer has`)
+        }
+      })
+      .catch((err) => console.error('[serve] push sender failed:', err))
+  }, 5_000)
+  pushSender.unref?.()
+
   // Events buffered while serve was down. dedupeKey makes this idempotent.
   void runDbWrite(() => drainAgentEventSpool(options.db, agentEmitter))
     .then((drained) => {
@@ -685,6 +709,7 @@ export function serve(options: ServeOptions): void {
     runtimeSettings.stop()
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
+    clearInterval(pushSender)
     clearInterval(portFileHeartbeat)
     notificationSender.stop()
     throw error
@@ -703,6 +728,7 @@ export function serve(options: ServeOptions): void {
     runtimeSettings.stop()
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
+    clearInterval(pushSender)
     clearInterval(portFileHeartbeat)
     notificationSender.stop()
     for (const extra of extraServers) extra.close()
@@ -716,6 +742,7 @@ export function serve(options: ServeOptions): void {
     runtimeSettings.stop()
     clearInterval(agentReaper)
     clearInterval(codexLogWatcher)
+    clearInterval(pushSender)
     clearInterval(portFileHeartbeat)
     notificationSender.stop()
     for (const extra of extraServers) extra.close()

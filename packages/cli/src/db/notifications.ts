@@ -26,7 +26,32 @@ export const RETRY_BACKOFF_MS: readonly number[] = [5_000, 30_000, 120_000, 600_
 
 export type NotificationState = 'pending' | 'sending' | 'sent' | 'failed' | 'dropped'
 
+/**
+ * Where a queued notification is going.
+ *
+ * One row per channel, so each carries its own state, attempt count and
+ * backoff. Discord failing to accept a message must not mark it delivered for
+ * the phone, and vice versa.
+ */
+export type NotificationChannel = 'discord' | 'webpush'
+
+export const DISCORD_CHANNEL: NotificationChannel = 'discord'
+export const WEBPUSH_CHANNEL: NotificationChannel = 'webpush'
+
+/**
+ * The prefix that keeps a channel's dedupe keys distinct.
+ *
+ * Discord's keys are deliberately left exactly as they were. Changing their
+ * shape would make every already-delivered notification look new, and the
+ * whole backlog would be sent a second time the moment this shipped.
+ */
+export function channelDedupeKey(channel: NotificationChannel, key: string): string {
+  return channel === DISCORD_CHANNEL ? key : `${channel}:${key}`
+}
+
 export interface EnqueueInput {
+  /** Defaults to Discord, which is what every existing caller means. */
+  channel?: NotificationChannel
   eventType: NotificationEventType
   subjectKind: 'agent_session' | 'quota' | 'system'
   subjectId: string
@@ -83,13 +108,14 @@ export function enqueueNotification(
       title, body, payload, state, attempts, next_attempt_at, expires_at,
       last_error, sent_at, device_instance_id
     ) VALUES (
-      @id, @now, 'discord', @eventType, @subjectKind, @subjectId, @dedupeKey,
+      @id, @now, @channel, @eventType, @subjectKind, @subjectId, @dedupeKey,
       @title, @body, @payload, @state, 0, @nextAttemptAt, @expiresAt,
       @lastError, NULL, @deviceInstanceId
     )
   `).run({
     id: notificationId(input.dedupeKey),
     now,
+    channel: input.channel ?? DISCORD_CHANNEL,
     eventType: input.eventType,
     subjectKind: input.subjectKind,
     subjectId: input.subjectId,
@@ -118,6 +144,7 @@ export function claimPendingNotifications(
   db: Database.Database,
   now: number,
   limit: number,
+  channel: NotificationChannel = DISCORD_CHANNEL,
 ): NotificationRow[] {
   // Anything past its expiry is dropped rather than delivered late.
   db.prepare(`
@@ -128,10 +155,11 @@ export function claimPendingNotifications(
 
   const rows = db.prepare(`
     SELECT * FROM notifications
-    WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= @now)
+    WHERE state = 'pending' AND channel = @channel
+      AND (next_attempt_at IS NULL OR next_attempt_at <= @now)
     ORDER BY created_at
     LIMIT @limit
-  `).all({ now, limit }) as NotificationRow[]
+  `).all({ now, limit, channel }) as NotificationRow[]
 
   if (rows.length === 0) return []
   const claim = db.prepare("UPDATE notifications SET state = 'sending' WHERE id = ? AND state = 'pending'")

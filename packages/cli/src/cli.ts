@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { runServeCommand, serve } from './commands/serve.js'
 import { runSetDashboardPassword, runDashboardPasswordStatus } from './commands/dashboard-password.js'
+import { runGenerateVapidKeys } from './commands/vapid-keys.js'
 import { runAgentEvent } from './commands/agent-event.js'
 import { runNotifyStatus, runNotifyTest } from './commands/notify.js'
 import { runInit } from './commands/init.js'
@@ -355,6 +356,15 @@ program
   .description('Say whether a dashboard password is set (never prints it)')
   .action(() => {
     runDashboardPasswordStatus()
+  })
+
+// Web Push identity
+program
+  .command('generate-vapid-keys')
+  .description('Create the Web Push key pair (refuses to replace an existing one)')
+  .option('--force', 'Replace existing keys, invalidating every push subscription')
+  .action((options: { force?: boolean }) => {
+    runGenerateVapidKeys({ force: options.force === true })
   })
 
 // notify-test command

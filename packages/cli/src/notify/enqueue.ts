@@ -15,7 +15,11 @@ import {
   type QuotaConfidence,
 } from '@aiusage/core'
 import { computeDurations } from '../db/agent-sessions.js'
-import { enqueueNotification } from '../db/notifications.js'
+import {
+  DISCORD_CHANNEL, WEBPUSH_CHANNEL, channelDedupeKey, enqueueNotification,
+  type EnqueueInput, type NotificationChannel,
+} from '../db/notifications.js'
+import { countPushSubscriptions } from '../db/push-subscriptions.js'
 import type { RecordSummary } from '../db/quota-history.js'
 
 /**
@@ -25,6 +29,65 @@ import type { RecordSummary } from '../db/quota-history.js'
  * database, so it must be cheap and synchronous — a webhook call in this path
  * would sit inside the write queue.
  */
+
+/**
+ * Which channels this decision should be delivered on.
+ *
+ * Discord unless told otherwise; push only when switched on, because there is
+ * nothing to send to until a browser has subscribed. The decision itself —
+ * whether to say anything at all — was made before this and is not revisited
+ * per channel: two channels answering the same question separately is how
+ * they end up disagreeing.
+ */
+export function enabledChannels(config: NotificationRulesConfig | undefined): NotificationChannel[] {
+  const channels = (config as { channels?: { discord?: boolean; webpush?: boolean } } | undefined)?.channels
+  const out: NotificationChannel[] = []
+  if (channels?.discord !== false) out.push(DISCORD_CHANNEL)
+  if (channels?.webpush === true) out.push(WEBPUSH_CHANNEL)
+  return out
+}
+
+/**
+ * One row per enabled channel, from one decision.
+ *
+ * The dedupe key gains the channel name for everything but Discord, whose
+ * keys keep exactly the shape they have always had — changing them would make
+ * every notification already delivered look new.
+ */
+function fanOutNotification(ctx: NotifyContext, input: Omit<EnqueueInput, 'channel'>): number {
+  let enqueued = 0
+
+  /**
+   * A push row with nobody to push to is not pending, it is undeliverable.
+   *
+   * Left as pending it sits in the queue until it expires — and if a browser
+   * subscribes before that, the whole backlog arrives at once. That happened:
+   * four rows queued between 1:27 and 1:31 were all delivered at 1:33:12, the
+   * moment the first phone registered. Nobody wants to be told four things
+   * that stopped being true minutes ago.
+   *
+   * Recorded as dropped rather than skipped, so /notifications still answers
+   * "why did nothing arrive" afterwards.
+   */
+  const pushSubscribers = enabledChannels(ctx.config).includes(WEBPUSH_CHANNEL)
+    ? countPushSubscriptions(ctx.db)
+    : 0
+
+  for (const channel of enabledChannels(ctx.config)) {
+    const undeliverable = channel === WEBPUSH_CHANNEL && pushSubscribers === 0
+    const added = enqueueNotification(ctx.db, {
+      ...input,
+      channel,
+      dedupeKey: channelDedupeKey(channel, input.dedupeKey),
+      drop: input.drop || undeliverable,
+      dropReason: input.drop
+        ? input.dropReason
+        : (undeliverable ? 'no push subscriptions' : input.dropReason),
+    }, ctx.now)
+    if (added) enqueued++
+  }
+  return enqueued
+}
 
 export interface NotifyContext {
   /** Display names for projects, from config. */
@@ -148,7 +211,7 @@ export function notifySessionChange(ctx: NotifyContext, sessionPk: string): Sess
   })
   if (!message) return { enqueued: false, reason: 'no_label' }
 
-  enqueueNotification(ctx.db, {
+  fanOutNotification(ctx, {
     eventType: 'session_status',
     subjectKind: 'agent_session',
     subjectId: sessionPk,
@@ -161,7 +224,7 @@ export function notifySessionChange(ctx: NotifyContext, sessionPk: string): Sess
     payload: { status: session.status, lastEventKind: session.last_event_kind },
     deviceInstanceId: ctx.deviceInstanceId,
     drop: !ctx.isNotifier,
-  }, ctx.now)
+  })
 
   // Remember what we said, so the duplicate check has something to compare to.
   ctx.db.prepare('UPDATE agent_sessions SET notify_state = ?, notified_at = ? WHERE id = ?')
@@ -208,7 +271,7 @@ export function notifyEscalations(ctx: NotifyContext): number {
     })
     if (!message) continue
 
-    enqueueNotification(ctx.db, {
+    fanOutNotification(ctx, {
       eventType: 'session_escalation',
       subjectKind: 'agent_session',
       subjectId: session.id,
@@ -218,7 +281,7 @@ export function notifyEscalations(ctx: NotifyContext): number {
       payload: { level },
       deviceInstanceId: ctx.deviceInstanceId,
       drop: !ctx.isNotifier,
-    }, ctx.now)
+    })
 
     ctx.db.prepare('UPDATE agent_sessions SET escalation_level = ?, notified_at = ? WHERE id = ?')
       .run(level, ctx.now, session.id)
@@ -254,7 +317,7 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
       config: ctx.config,
     })
 
-    enqueueNotification(ctx.db, {
+    fanOutNotification(ctx, {
       eventType: 'quota_threshold',
       subjectKind: 'quota',
       subjectId: `${crossing.tool}:${crossing.tier}`,
@@ -264,7 +327,7 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
       payload: { threshold: crossing.threshold, utilization: crossing.utilization },
       deviceInstanceId: ctx.deviceInstanceId,
       drop: !ctx.isNotifier,
-    }, ctx.now)
+    })
     enqueued++
   }
 
@@ -280,7 +343,7 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
       config: ctx.config,
     })
 
-    enqueueNotification(ctx.db, {
+    fanOutNotification(ctx, {
       eventType: 'quota_credential',
       subjectKind: 'quota',
       subjectId: failure.tool,
@@ -294,7 +357,7 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
       payload: { lastSuccessAt: failure.lastSuccessAt },
       deviceInstanceId: ctx.deviceInstanceId,
       drop: !ctx.isNotifier,
-    }, ctx.now)
+    })
     enqueued++
   }
 
@@ -312,7 +375,7 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
         now: ctx.now,
         config: ctx.config,
       })
-      enqueueNotification(ctx.db, {
+      fanOutNotification(ctx, {
         eventType: 'quota_reset',
         subjectKind: 'quota',
         subjectId: `${reset.tool}:${reset.tier}`,
@@ -321,7 +384,7 @@ export function notifyQuotaSummary(ctx: QuotaNotifyContext, summary: RecordSumma
         body: message.body,
         deviceInstanceId: ctx.deviceInstanceId,
         drop: !ctx.isNotifier,
-      }, ctx.now)
+      })
       enqueued++
     }
   }

@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import { renderDiscordContent } from '@aiusage/core'
 import { DISCORD_WEBHOOK_CREDENTIAL, loadConfig, loadCredential } from '../config.js'
 import {
+  DISCORD_CHANNEL,
   claimPendingNotifications,
   markNotificationFailed,
   markNotificationSent,
@@ -125,20 +126,33 @@ export async function runNotificationTick(deps: SenderDeps): Promise<TickResult>
   const config = loadConfig()
   if (config?.notifications?.enabled !== true) return { ...result, skipped: 'disabled' }
 
+  /**
+   * A missing webhook used to end the tick.
+   *
+   * That was fine while Discord was the only way out. Now it would mean that
+   * someone who uses push and never set up Discord gets nothing, with
+   * "no_webhook" as the only explanation — for a channel they are not using.
+   * Each channel decides for itself whether it can send.
+   */
   const webhook = loadCredential(DISCORD_WEBHOOK_CREDENTIAL)
-  if (!webhook) return { ...result, skipped: 'no_webhook' }
 
-  // 1. Claim, inside the write queue.
-  const claimed = await deps.runDbWrite(() =>
-    claimPendingNotifications(deps.db, now(), MAX_SENDS_PER_TICK))
+  // 1. Claim, inside the write queue. Per channel, so one that cannot send
+  //    does not hold the other's messages in 'sending' forever.
+  const claimed = webhook
+    ? await deps.runDbWrite(() =>
+      claimPendingNotifications(deps.db, now(), MAX_SENDS_PER_TICK, DISCORD_CHANNEL))
+    : []
   result.claimed = claimed.length
-  if (claimed.length === 0) return result
+  if (claimed.length === 0) {
+    return webhook ? result : { ...result, skipped: 'no_webhook' }
+  }
 
   // 2. Send, outside it. Sequential rather than parallel: five concurrent
   //    POSTs to one webhook is the fastest way to get rate limited.
   const outcomes: SendOutcome[] = []
   for (const row of claimed) {
-    outcomes.push(await postToDiscord(webhook, row))
+    // Non-null by construction: nothing was claimed without a webhook.
+    outcomes.push(await postToDiscord(webhook as string, row))
   }
 
   // 3. Record, back inside the queue.

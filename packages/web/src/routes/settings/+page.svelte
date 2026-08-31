@@ -1,7 +1,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { t } from '$lib/i18n.js'
-  import { fetchConfig, saveConfig, fetchCredential, fetchDetectedTools, importKelivoBackup, notifySettingsUpdated, refreshExchangeRate, fetchSyncStatus, triggerSync, fetchCloudSyncStatus, sendNotificationTest } from '$lib/api.js'
+  import { fetchConfig, saveConfig, fetchCredential, fetchDetectedTools, importKelivoBackup, notifySettingsUpdated, refreshExchangeRate, fetchSyncStatus, triggerSync, fetchCloudSyncStatus, sendNotificationTest, fetchPushStatus, savePushSubscription, deletePushSubscription, sendPushTest } from '$lib/api.js'
+  import { pushSupport, subscribeToPush, localSubscriptionId, unsubscribeLocally } from '$lib/push.js'
   import { displayCurrency, exchangeRate } from '$lib/stores.js'
   import { splitSettingsSources } from '$lib/settings-sources.js'
 
@@ -304,6 +305,9 @@
       }
 
       loadSyncStatusData()
+      // Reads only. The permission prompt lives behind the button in the
+      // Web Push card, never here.
+      loadPushState()
       if (cfg.siteUrl) {
         fetchCloudSyncStatus(cfg.siteUrl).then(s => { cloudSyncAvailable = s.enabled })
       }
@@ -713,6 +717,13 @@
 
     notif = {
       enabled: n.enabled === true,
+      // Unset means on, so a config that predates channels keeps sending to
+      // Discord exactly as it did.
+      channelDiscord: n.channels?.discord !== false,
+      // Off unless switched on: the server treats it the same way, and a
+      // toggle showing "on" for a channel with no keys and no devices would
+      // be describing something that cannot happen.
+      channelWebpush: n.channels?.webpush === true,
       prefix: n.prefix ?? '',
       notifierDevice: n.notifierDevice !== false,
       includeAssistantMessage: n.includeAssistantMessage === true,
@@ -754,6 +765,7 @@
       await saveConfig({
         notifications: {
           enabled: notif.enabled === true,
+          channels: { discord: notif.channelDiscord === true, webpush: notif.channelWebpush === true },
           prefix: notif.prefix || undefined,
           notifierDevice: notif.notifierDevice === true,
           includeAssistantMessage: notif.includeAssistantMessage === true,
@@ -773,6 +785,143 @@
       notifError = e instanceof Error ? e.message : 'Failed to save'
     } finally {
       notifSaving = false
+    }
+  }
+
+  /**
+   * Web Push.
+   *
+   * Nothing here runs on mount except reading the server's state and the
+   * permission this browser already granted. Reading Notification.permission
+   * does not prompt; requesting it does, and that only happens under the
+   * subscribe button.
+   */
+  /** @type {any} */
+  let push = { publicKey: null, configured: false, enabled: false, subject: '', subscriptions: [] }
+  /** @type {'default'|'granted'|'denied'} */
+  let pushPermission = 'default'
+  let pushSupported = false
+  let pushStandalone = false
+  /** True when this very browser holds a subscription, not just some device. */
+  let pushSubscribedHere = false
+  /** @type {string|null} Which row in the list is this browser. */
+  let pushLocalId = null
+  let pushBusy = false
+  /** @type {string} */
+  let pushError = ''
+  /** @type {string} */
+  let pushResult = ''
+  /** @type {string} */
+  let pushLabel = ''
+  /** @type {string} */
+  let vapidSubject = ''
+
+  async function loadPushState() {
+    const support = pushSupport()
+    pushSupported = support.supported
+    pushPermission = /** @type {any} */ (support.permission)
+    pushStandalone = support.standalone === true
+    if (!pushSupported) return
+    try {
+      push = await fetchPushStatus()
+      vapidSubject = push.subject ?? ''
+      // "This device" means the server has the row this browser's endpoint
+      // maps to — a local subscription the server never received, or one it
+      // has since pruned as gone, is not subscribed in any useful sense.
+      pushLocalId = await localSubscriptionId()
+      pushSubscribedHere = pushLocalId != null
+        && push.subscriptions.some((/** @type {any} */ s) => s.id === pushLocalId)
+    } catch (e) {
+      pushError = e instanceof Error ? e.message : 'Failed'
+    }
+  }
+
+  /**
+   * Called from a click, and only from a click.
+   *
+   * A permission prompt raised on page load is answered "block" often enough
+   * that it is worth treating as the failure case it is: once denied, the
+   * site cannot ask again.
+   */
+  async function enablePush() {
+    pushBusy = true; pushError = ''; pushResult = ''
+    try {
+      if (!push.publicKey) throw new Error($t('settings.push.errorNoKey'))
+      const subscription = await subscribeToPush(push.publicKey)
+      await savePushSubscription(subscription, pushLabel.trim())
+      pushPermission = 'granted'
+      pushLabel = ''
+      push = await fetchPushStatus()
+      pushLocalId = await localSubscriptionId()
+      pushSubscribedHere = true
+      pushResult = $t('settings.push.subscribed')
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e)
+      pushError = reason === 'denied'
+        ? $t('settings.push.errorDenied')
+        : reason === 'dismissed'
+          ? $t('settings.push.errorDismissed')
+          : reason === 'unsupported'
+            ? $t('settings.push.errorUnsupported')
+            : reason
+    } finally {
+      pushBusy = false
+    }
+  }
+
+  /** @param {string} id */
+  async function removePushDevice(id) {
+    pushBusy = true; pushError = ''; pushResult = ''
+    try {
+      await deletePushSubscription(id)
+      // Deleting this browser's own row also releases the browser's
+      // subscription. Leaving it in place would keep a live endpoint that
+      // nothing sends to, and the next subscribe would silently reuse it.
+      if (id === pushLocalId) {
+        await unsubscribeLocally()
+        pushLocalId = null
+        pushSubscribedHere = false
+      }
+      push = await fetchPushStatus()
+    } catch (e) {
+      pushError = e instanceof Error ? e.message : 'Failed'
+    } finally {
+      pushBusy = false
+    }
+  }
+
+  /**
+   * The RFC 8292 contact, saved on its own.
+   *
+   * Separate from the notifications form because it is not a preference: the
+   * push service is told this on every delivery, so it leaves the machine in
+   * a way none of the other settings do.
+   */
+  async function saveVapidSubject() {
+    pushBusy = true; pushError = ''; pushResult = ''
+    try {
+      await saveConfig({ vapidSubject: vapidSubject.trim() })
+      push = await fetchPushStatus()
+      vapidSubject = push.subject ?? ''
+      pushResult = $t('settings.saved')
+    } catch (e) {
+      pushError = e instanceof Error ? e.message : 'Failed'
+    } finally {
+      pushBusy = false
+    }
+  }
+
+  async function sendPushTestMessage() {
+    pushBusy = true; pushError = ''; pushResult = ''
+    try {
+      const result = await sendPushTest()
+      pushResult = result?.enqueued
+        ? $t('settings.push.testQueued')
+        : $t('settings.push.testSkipped')
+    } catch (e) {
+      pushError = e instanceof Error ? e.message : 'Failed'
+    } finally {
+      pushBusy = false
     }
   }
 
@@ -894,6 +1043,104 @@
       </div>
     </div>
 
+    <!-- Web Push -->
+    <div class="card">
+      <div class="group-title">{$t('settings.push.title')}</div>
+      <div class="fields">
+        {#if !pushSupported}
+          <div class="field">
+            <div class="field-hint warn-hint">
+              {$t('settings.push.unsupported')}
+              {#if !pushStandalone}{' '}{$t('settings.push.unsupportedIos')}{/if}
+            </div>
+          </div>
+        {:else if !push.configured}
+          <div class="field">
+            <div class="field-hint warn-hint">{$t('settings.push.noKey')}</div>
+            <pre class="cli-hint">aiusage generate-vapid-keys</pre>
+          </div>
+        {:else}
+          <div class="field">
+            <div class="field-label">{$t('settings.push.thisDevice')}</div>
+            <div class="webhook-state">
+              {pushSubscribedHere
+                ? $t('settings.push.stateSubscribed')
+                : pushPermission === 'denied'
+                  ? $t('settings.push.stateDenied')
+                  : $t('settings.push.stateNotSubscribed')}
+            </div>
+            {#if !pushSubscribedHere && pushPermission !== 'denied'}
+              <input
+                type="text"
+                bind:value={pushLabel}
+                class="field-input"
+                placeholder={$t('settings.push.labelPlaceholder')}
+                aria-label={$t('settings.push.label')} />
+              <div class="field-hint">{$t('settings.push.labelHint')}</div>
+              <div class="test-row">
+                <!-- The permission prompt is raised here and nowhere else. -->
+                <button type="button" class="btn-ghost" on:click={enablePush} disabled={pushBusy}>
+                  {pushBusy ? '...' : $t('settings.push.enable')}
+                </button>
+              </div>
+            {:else if pushPermission === 'denied'}
+              <div class="field-hint warn-hint">{$t('settings.push.deniedHint')}</div>
+            {/if}
+          </div>
+
+          <div class="field">
+            <div class="field-label">{$t('settings.push.devices')}</div>
+            {#if push.subscriptions.length === 0}
+              <div class="field-hint">{$t('settings.push.noDevices')}</div>
+            {:else}
+              <ul class="push-devices">
+                {#each push.subscriptions as device (device.id)}
+                  <li class="push-device">
+                    <div class="push-device-name">
+                      {device.label || $t('settings.push.unnamedDevice')}
+                      {#if device.id === pushLocalId}<span class="push-here">{$t('settings.push.hereTag')}</span>{/if}
+                    </div>
+                    <div class="push-device-meta">
+                      {#if device.consecutiveFailures > 0}
+                        <span class="warn-hint">{$t('settings.push.failing').replace('{count}', String(device.consecutiveFailures))}</span>
+                      {/if}
+                    </div>
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      on:click={() => removePushDevice(device.id)}
+                      disabled={pushBusy}>{$t('settings.push.remove')}</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if push.subscriptions.length > 0 && !push.enabled}
+              <div class="field-hint warn-hint">{$t('settings.push.channelOff')}</div>
+            {/if}
+            <div class="test-row">
+              <button type="button" class="btn-ghost" on:click={sendPushTestMessage}
+                disabled={pushBusy || push.subscriptions.length === 0}>
+                {pushBusy ? '...' : $t('settings.push.sendTest')}
+              </button>
+              {#if pushResult}<span class="test-result">{pushResult}</span>{/if}
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="field-vapid-subject">{$t('settings.push.subject')}</label>
+            <input id="field-vapid-subject" type="text" bind:value={vapidSubject} class="field-input" />
+            <div class="field-hint">{$t('settings.push.subjectHint')}</div>
+            <div class="test-row">
+              <button type="button" class="btn-ghost" on:click={saveVapidSubject} disabled={pushBusy}>
+                {$t('settings.save')}
+              </button>
+            </div>
+          </div>
+        {/if}
+        {#if pushError}<div class="field-hint warn-hint">{pushError}</div>{/if}
+      </div>
+    </div>
+
     <!-- Notifications -->
     <div class="card">
       <div class="group-title">{$t('settings.notifications.title')}</div>
@@ -904,6 +1151,19 @@
             {$t('settings.notifications.enabled')}
           </label>
           <div class="field-hint">{$t('settings.notifications.enabledHint')}</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">{$t('settings.notifications.channels')}</div>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={notif.channelDiscord} />
+            {$t('settings.notifications.channelDiscord')}
+          </label>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={notif.channelWebpush} />
+            {$t('settings.notifications.channelWebpush')}
+          </label>
+          <div class="field-hint">{$t('settings.notifications.channelsHint')}</div>
         </div>
 
         <div class="field">
@@ -1986,6 +2246,52 @@
   .test-result {
     font-size: 0.75rem;
     color: var(--text-secondary);
+  }
+
+  /* A command to run in a terminal, shown as one. */
+  .cli-hint {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    background: var(--surface);
+    border: var(--border-width) solid var(--border-subtle);
+    padding: 0.4rem 0.6rem;
+    margin: 0.4rem 0 0;
+    overflow-x: auto;
+  }
+
+  .push-devices {
+    list-style: none;
+    margin: 0.3rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .push-device {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.8125rem;
+  }
+
+  .push-device-name {
+    /* Takes the slack so the remove button stays at the right edge. */
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .push-device-meta {
+    font-size: 0.75rem;
+  }
+
+  .push-here {
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    margin-left: 0.4rem;
   }
 
   /* Sending response text off the machine deserves more than the usual grey. */

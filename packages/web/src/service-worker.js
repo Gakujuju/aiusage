@@ -91,3 +91,76 @@ self.addEventListener('fetch', (event) => {
     }
   })())
 })
+
+/**
+ * Web Push.
+ *
+ * Nothing below touches the cache. A push carries its own text and the fetch
+ * handler above is left exactly as it was — in particular /api/ still never
+ * reaches the cache in either direction.
+ */
+
+/** Where a tap on this notification should land. */
+function targetPathFor(subjectKind) {
+  if (subjectKind === 'agent_session') return '/agents'
+  if (subjectKind === 'quota') return '/quotas'
+  return '/'
+}
+
+self.addEventListener('push', (event) => {
+  /**
+   * A push with no readable payload still has to show something. The push
+   * service can wake us with an empty body, and on most platforms a service
+   * worker that returns from `push` without calling showNotification gets a
+   * generic "site updated in the background" notice instead — which is worse
+   * than a vague one of our own.
+   */
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {
+    data = {}
+  }
+
+  const title = typeof data.title === 'string' && data.title ? data.title : 'aiusage'
+  const body = typeof data.body === 'string' ? data.body : ''
+  const subjectKind = typeof data.subjectKind === 'string' ? data.subjectKind : ''
+
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    /**
+     * Same subject replaces rather than stacks: a quota that crosses two
+     * thresholds while the phone is locked should leave one notification
+     * saying where it ended up, not two saying where it passed.
+     */
+    tag: typeof data.tag === 'string' && data.tag ? data.tag : undefined,
+    data: { path: targetPathFor(subjectKind), subjectKind },
+  }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+
+  const path = event.notification.data?.path ?? '/'
+  const url = new URL(path, self.location.origin)
+
+  event.waitUntil((async () => {
+    /**
+     * Reuse a tab that is already open rather than piling up windows. Only
+     * our own origin is considered, and `includeUncontrolled` matters because
+     * a tab loaded before this worker took over is still the tab the user
+     * means.
+     */
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    for (const client of clients) {
+      if (new URL(client.url).origin !== url.origin) continue
+      // Navigate first so the focused tab shows the thing that was announced,
+      // not wherever it happened to be left.
+      if ('navigate' in client) await client.navigate(url.href).catch(() => undefined)
+      return client.focus()
+    }
+    return self.clients.openWindow(url.href)
+  })())
+})

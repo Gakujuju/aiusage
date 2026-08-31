@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
 import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
 import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL,
-  DASHBOARD_PASSWORD_CREDENTIAL, HIDEABLE_ROUTES, buildConsentConfig, loadConfig, saveConfig,
+  DASHBOARD_PASSWORD_CREDENTIAL, DEFAULT_VAPID_SUBJECT, HIDEABLE_ROUTES, VAPID_PRIVATE_KEY_CREDENTIAL,
+  buildConsentConfig, loadConfig, saveConfig,
   loadCredential, normalizeHiddenRoutes } from '../config.js'
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent, getIngestToken } from '../init.js'
@@ -38,6 +39,7 @@ import {
   listNotifications,
   retryNotification,
   summariseNotifications,
+  WEBPUSH_CHANNEL,
 } from '../db/notifications.js'
 import {
   AgentSessionEmitter,
@@ -48,6 +50,9 @@ import {
   type AgentEventInput,
 } from '../db/agent-sessions.js'
 import { openAgentStream } from './agent-stream.js'
+import {
+  deletePushSubscription, savePushSubscription, summarisePushSubscriptions,
+} from '../db/push-subscriptions.js'
 import { AsyncTaskQueue, type AsyncTaskQueueStatus } from '../db/write-queue.js'
 import { getPricingRegistrySummary, getUserAliasBindings, hasUserPrice, listLocalModelBindings, listPricingAliasTargets, listPricingModels, loadPricingRuntime, removeUserPricingAlias, resetUserPriceToSynced, resolvePriceFromRegistry, setUserPrice, setUserPricingAlias, syncPricingFromLitellm } from '../pricing-registry.js'
 import type { DetectedTool } from '../discovery.js'
@@ -1610,6 +1615,94 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         }
       }
 
+      // ── /api/push ─────────────────────────────────────────────────
+      // Everything here is behind the same auth gate as the rest of /api/.
+      // p256dh and auth go in and are never read back out: they are the keys
+      // that let anyone push to that browser.
+      if (url.pathname.startsWith('/api/push')) {
+        try {
+          if (url.pathname === '/api/push/status' && req.method === 'GET') {
+            const cfg = loadConfig()
+            json(res, {
+              // The public key is meant to be public — the browser needs it
+              // to subscribe at all.
+              publicKey: cfg?.vapid?.publicKey ?? null,
+              configured: cfg?.vapid?.publicKey != null
+                && loadCredential(VAPID_PRIVATE_KEY_CREDENTIAL) != null,
+              enabled: cfg?.notifications?.channels?.webpush === true,
+              subject: cfg?.vapid?.subject ?? DEFAULT_VAPID_SUBJECT,
+              subscriptions: summarisePushSubscriptions(db),
+            })
+            return
+          }
+
+          if (url.pathname === '/api/push/subscribe' && req.method === 'POST') {
+            const body = await readJsonBody(req)
+            const endpoint = typeof body.endpoint === 'string' ? body.endpoint : ''
+            const keys = (body.keys ?? {}) as { p256dh?: unknown; auth?: unknown }
+            if (!endpoint || typeof keys.p256dh !== 'string' || typeof keys.auth !== 'string') {
+              json(res, {
+                error: { code: 'INVALID_PARAM', message: 'endpoint and keys are required' },
+              }, 400)
+              return
+            }
+            const id = await runDbWrite(() => savePushSubscription(db, {
+              endpoint,
+              p256dh: keys.p256dh as string,
+              auth: keys.auth as string,
+              label: typeof body.label === 'string' ? body.label.slice(0, 60) : '',
+              userAgent: String(req.headers['user-agent'] ?? '').slice(0, 200),
+              deviceInstanceId: options?.currentDeviceInstanceId ?? '',
+            }, Date.now()))
+            json(res, { ok: true, id })
+            return
+          }
+
+          if (url.pathname === '/api/push/test' && req.method === 'POST') {
+            const cfg = loadConfig()
+            const enqueued = await runDbWrite(() => enqueueNotification(db, {
+              channel: WEBPUSH_CHANNEL,
+              eventType: 'test',
+              subjectKind: 'system',
+              subjectId: 'test',
+              dedupeKey: `webpush:test:${Date.now()}:${randomBytes(4).toString('hex')}`,
+              title: `${cfg?.notifications?.prefix ?? '[aiusage] '}✅ ${getDeviceName()}｜通知テスト`,
+              body: 'aiusage からスマートフォンへの疎通確認です。',
+              deviceInstanceId: options?.currentDeviceInstanceId ?? '',
+              drop: cfg?.notifications?.notifierDevice !== true,
+              dropReason: 'not the notifier device',
+            }, Date.now()))
+            json(res, {
+              ok: true,
+              enqueued,
+              enabled: cfg?.notifications?.enabled === true,
+              channelEnabled: cfg?.notifications?.channels?.webpush === true,
+              subscriptions: summarisePushSubscriptions(db).length,
+              notifierDevice: cfg?.notifications?.notifierDevice === true,
+            })
+            return
+          }
+
+          const pushDelete = /^\/api\/push\/subscriptions\/([^/]+)$/.exec(url.pathname)
+          if (pushDelete && req.method === 'DELETE') {
+            const removed = await runDbWrite(() =>
+              deletePushSubscription(db, decodeURIComponent(pushDelete[1])))
+            if (!removed) {
+              json(res, { error: { code: 'NOT_FOUND', message: 'Unknown subscription' } }, 404)
+              return
+            }
+            json(res, { ok: true })
+            return
+          }
+        } catch (error) {
+          if (isDatabaseLockedError(error)) {
+            json(res, { error: { code: 'BUSY', message: 'Database is busy' } }, 503)
+            return
+          }
+          throw error
+        }
+      }
+
       // ── /api/notifications ────────────────────────────────────────
       // The outbox never stores the webhook, and last_error is masked before
       // it is written, so nothing returned here can carry the URL.
@@ -2436,6 +2529,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             // with it, and an absent value would have to be special-cased at
             // every use.
             ui: { hiddenRoutes: normalizeHiddenRoutes(rest.ui?.hiddenRoutes) },
+            // Public by design: a browser cannot subscribe without it. The
+            // private half stays in credentials and is never returned.
+            vapidPublicKey: rest.vapid?.publicKey ?? null,
+            vapidSubject: rest.vapid?.subject ?? DEFAULT_VAPID_SUBJECT,
             hideableRoutes: [...HIDEABLE_ROUTES],
           })
           return
@@ -2514,7 +2611,28 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
               const incoming = (update.notifications ?? {}) as Record<string, unknown>
               delete incoming.webhook
               delete incoming.webhookUrl
+              // channels is an object, so the spread above would replace it
+              // whole: sending { discord: false } alone would also erase the
+              // webpush setting. Merge it one level deeper for the same reason
+              // the rest of the section is merged.
+              const channels = incoming.channels
+              delete incoming.channels
               existing.notifications = { ...(existing.notifications ?? {}), ...incoming }
+              if (channels && typeof channels === 'object') {
+                const merged = { ...(existing.notifications.channels ?? {}) } as Record<string, boolean>
+                for (const [name, value] of Object.entries(channels as Record<string, unknown>)) {
+                  if (name === 'discord' || name === 'webpush') merged[name] = value === true
+                }
+                existing.notifications.channels = merged
+              }
+            }
+            if ('vapidSubject' in update) {
+              // Only the subject. The key pair is created by the CLI command;
+              // the private half never travels over this API in either
+              // direction, and the public half would orphan every existing
+              // subscription if it could be edited here.
+              const subject = typeof update.vapidSubject === 'string' ? update.vapidSubject.trim() : ''
+              existing.vapid = { ...(existing.vapid ?? {}), subject: subject || DEFAULT_VAPID_SUBJECT }
             }
             if ('leaderboardAutoUpload' in update) {
               existing.leaderboardAutoUpload = update.leaderboardAutoUpload === true
