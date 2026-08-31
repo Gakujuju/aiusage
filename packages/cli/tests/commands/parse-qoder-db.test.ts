@@ -14,7 +14,25 @@ vi.mock('node:os', async () => {
   }
 })
 
-const { runParse } = await import('../../src/commands/parse.js')
+const { runParse: runParseIn } = await import('../../src/commands/parse.js')
+const { mkdtempSync: mkTempHome } = await import('node:fs')
+const { tmpdir: sysTmp } = await import('node:os')
+const { join: joinHome } = await import('node:path')
+
+/*
+ * This file's own state and watermark, replaced before every test.
+ *
+ * runParse used to read the installation directory from a module constant,
+ * so these tests read the developer's state.json and wrote the developer's
+ * watermark.json — the same shape as the bug that stopped ingestion for 38
+ * minutes. Per test rather than per file, because a run that shares a
+ * watermark with the test before it is not testing what it says it is.
+ */
+let aiusageHome: string
+beforeEach(() => { aiusageHome = mkTempHome(joinHome(sysTmp(), `aiusage-parse-`)) })
+
+const runParse: typeof runParseIn = (db, filterTool?, options?) =>
+  runParseIn(db, filterTool, options, aiusageHome)
 
 function createQoderDb(db: Database.Database): void {
   db.exec(`

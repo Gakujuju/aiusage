@@ -386,3 +386,29 @@ DB を疑う前に、この4つを見れば切り分けが済む:
 内訳と同時に確定させるか、少なくとも `loadData()` の
 `tTokens.set(0)` をやめて前の値から動かす。
 **画面を撮ると嘘の数字が写る状態**が、2回続けて調査を発生させている。
+
+## ウィジェットは AIUSAGE_HOME で隔離できない（起票・未着手）
+
+`resolveAiusageDir` を通らず、`homedir()` から直に組み立てている箇所が8つある。
+
+    widget/src/main.ts:25      DB_PATH       = join(homedir(), '.aiusage', 'cache.db')
+    widget/src/main.ts:26      PORT_FILE
+    widget/src/main.ts:27      FX_CACHE_FILE
+    widget/src/main.ts:274     dir
+    widget/src/settings.ts:17  SETTINGS_PATH
+    widget/src/settings.ts:43  dir
+    widget/bin/launcher.js:9   aiusageDir
+
+**`AIUSAGE_HOME` を設定しても、必ず本番の `~/.aiusage/` を開く。**
+CLI と serve は複製に対して検証できるが、ウィジェットだけはできない。
+
+書き込み事故は起きない（main.ts:54 と 400 で `readonly: true`）。
+ただし**古いウィジェットが新しいスキーマを読む経路**は開いている。
+
+見つかった経緯: フェーズ3の洗い出しで、grep の条件に
+「homedir から直に組み立てている箇所」を足して初めて出た。
+`AIUSAGE_DIR` だけを引くと**0件**になる。
+語彙が列挙の範囲を決める、の実例。
+
+現在ウィジェットは使用していないので優先度は低い。
+直すなら `resolveAiusageDir` を import する形に変えるだけ。

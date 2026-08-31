@@ -500,8 +500,19 @@ function parseKiroWorkspaceSession(options: {
   return { records, errors }
 }
 
-export async function runParse(db: Database.Database, filterTool?: string, options?: { openCodeDbPath?: string; hermesDbPath?: string; qoderDbPath?: string; cursorDbPath?: string; onProgress?: (info: ProgressInfo) => void }): Promise<ParseResult> {
-  const state = getState(AIUSAGE_DIR)
+/**
+ * @param aiusageDir Where this installation keeps its state and watermark.
+ *
+ * Taken as an argument, defaulted, for the reason cleanAll takes one: the
+ * path used to be read from the module constant inside this function, so
+ * every caller got the real installation whether it wanted it or not. Eleven
+ * test files call runParse, and each of them was reading the developer's
+ * state.json and writing the developer's watermark.json — the same shape as
+ * the bug that stopped ingestion for 38 minutes, still open in a second
+ * place. A default keeps every production caller unchanged.
+ */
+export async function runParse(db: Database.Database, filterTool?: string, options?: { openCodeDbPath?: string; hermesDbPath?: string; qoderDbPath?: string; cursorDbPath?: string; onProgress?: (info: ProgressInfo) => void }, aiusageDir: string = AIUSAGE_DIR): Promise<ParseResult> {
+  const state = getState(aiusageDir)
   const config = loadConfig()
   const exchangeRate = resolveExchangeRate(config ?? {})
   const device = config?.device || hostname() || state?.deviceInstanceId?.slice(0, 8) || 'unknown'
@@ -522,7 +533,7 @@ export async function runParse(db: Database.Database, filterTool?: string, optio
    */
   const devicePlatform = config?.platform || osPlatform()
 
-  const watermarkPath = join(AIUSAGE_DIR, 'watermark.json')
+  const watermarkPath = join(aiusageDir, 'watermark.json')
   const wm = new WatermarkManager(watermarkPath)
 
   const toolPaths = discoverLogFiles()
