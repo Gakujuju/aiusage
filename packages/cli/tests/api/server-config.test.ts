@@ -10,8 +10,9 @@ vi.mock('../../src/config.js', async (importOriginal) => {
     ...actual,
     loadConfig: vi.fn(() => null),
     saveConfig: vi.fn(),
-    AIUSAGE_DIR: '/tmp/test-aiusage',
-    CONFIG_PATH: '/tmp/test-aiusage/config.json',
+    // No AIUSAGE_DIR or CONFIG_PATH here: tests/setup.ts already points them
+    // at an isolated directory, and naming a second one only invites the two
+    // to disagree. What this mock is for is the config *values* below.
     buildConsentConfig: vi.fn(() => null),
     loadCredential: vi.fn(() => null),
     saveCredential: vi.fn(),
@@ -226,7 +227,7 @@ describe('PUT /api/config', () => {
     expect(vi.mocked(saveConfig)).toHaveBeenCalledWith(expect.objectContaining({
       sync: expect.objectContaining({ backend: 'github', repo: 'user/repo' }),
     }))
-    expect(vi.mocked(setSyncConsent)).toHaveBeenCalledWith('\/tmp\/test-aiusage', 'github:user/repo', expect.objectContaining({
+    expect(vi.mocked(setSyncConsent)).toHaveBeenCalledWith(process.env.AIUSAGE_HOME, 'github:user/repo', expect.objectContaining({
       syncConsentAt: expect.any(Number),
       syncConsentTarget: expect.any(String),
     }))

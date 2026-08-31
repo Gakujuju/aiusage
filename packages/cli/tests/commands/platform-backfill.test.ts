@@ -47,8 +47,8 @@ vi.mock('../../src/discovery.js', async () => {
 
 const { initializeDatabase } = await import('../../src/db/index.js')
 const { insertRecord } = await import('../../src/db/records.js')
-// This file isolates by mocking AIUSAGE_DIR above, which is what runParse
-// now defaults to — so it needs no directory argument of its own.
+// tests/setup.ts isolates the directory, and runParse defaults to it, so this
+// file needs no directory argument of its own.
 const { runParse } = await import('../../src/commands/parse.js')
 
 const THIS_MACHINE = 'dev-this-machine'

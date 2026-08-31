@@ -1,15 +1,28 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
  * Every test runs against its own installation directory.
  *
- * **Do not mock homedir() or AIUSAGE_DIR in individual test files.** This
- * is the one place isolation is arranged, and it is arranged for every
- * test at once. Three different mechanisms had grown up before this line
- * existed — a homedir mock here, an AIUSAGE_DIR mock there, and everywhere
- * else nothing at all, reading and writing the real installation.
+ * **Never mock AIUSAGE_DIR or CONFIG_PATH.** There are no exceptions left
+ * in this suite, and one added here would be copied: a rule with a visible
+ * exception teaches the exception. Three mechanisms had grown up before
+ * this line existed — a homedir mock here, an AIUSAGE_DIR mock there, and
+ * everywhere else nothing at all, reading and writing the real
+ * installation.
+ *
+ * Mocking homedir() is a different thing and stays allowed, for one
+ * purpose: telling discovery where a tool's fixture logs live. It no
+ * longer moves the installation directory — AIUSAGE_HOME wins over
+ * homedir() in resolveAiusageDir — so the two concerns are separate now
+ * and a homedir mock cannot quietly isolate anything.
+ *
+ * If such a test also keeps its config.json under that fake home, derive
+ * the fake home from AIUSAGE_HOME (dirname of it) rather than naming a
+ * second directory. Naming one is what let the fixture logs and the
+ * installation directory drift apart, and nine tests failed the moment
+ * they did.
  *
  * The cost of "nothing at all" is on the record twice. The test suite
  * deleted the watermark and stopped ingestion for 38 minutes, and the note
@@ -37,6 +50,11 @@ import { join } from 'node:path'
  */
 const testHomeRoot = mkdtempSync(join(tmpdir(), 'aiusage-test-'))
 process.env.AIUSAGE_HOME = join(testHomeRoot, '.aiusage')
+
+// Created, not just named. A real installation directory exists before
+// anything writes into it, and tests that drop a state.json or a spool file
+// straight in expect the same.
+mkdirSync(process.env.AIUSAGE_HOME, { recursive: true })
 import { vi } from 'vitest'
 import { setRuntimePriceTable, type PriceEntry } from '@aiusage/core'
 

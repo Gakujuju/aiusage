@@ -3,8 +3,10 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-// We need to mock AIUSAGE_DIR before importing credentials
-// Use dynamic import after setting env
+// No mock, and none needed: this file exercises the file operations directly
+// against its own directory rather than going through the module that reads
+// AIUSAGE_DIR. The comment here used to describe a mock that was never
+// written.
 let testDir: string
 
 describe('credentials', () => {

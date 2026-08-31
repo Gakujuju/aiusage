@@ -23,7 +23,8 @@ const { home, cfg } = vi.hoisted(() => {
   const { join } = require('node:path') as typeof import('node:path')
   const { tmpdir } = require('node:os') as typeof import('node:os')
   return {
-    home: mkdtempSync(join(tmpdir(), 'aiusage-forward-')),
+    // The directory tests/setup.ts isolated for this file.
+    home: process.env.AIUSAGE_HOME as string,
     cfg: { value: null as Record<string, unknown> | null },
   }
 })
@@ -33,7 +34,7 @@ vi.mock('../../src/config.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/config.js')>('../../src/config.js')
   return {
     ...actual,
-    AIUSAGE_DIR: home,
+    // AIUSAGE_DIR is left alone — setup.ts owns it. Only values here.
     loadConfig: () => cfg.value,
     loadCredential: (key: string) =>
       key === actual.HUB_FORWARD_TOKEN_CREDENTIAL ? credential : null,
