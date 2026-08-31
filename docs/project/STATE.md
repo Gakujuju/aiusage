@@ -220,18 +220,29 @@ DB は直接変更しない。
    フィンガープリントが変わるため既存の同意は取り直しになるが、
    それが正しい挙動だと判断している。
 
-8. `mergeSyncedRecordsIntoRecords` が platform を落とす
-   synced_records は platform を持ち、records も v4 以降は
-   列を持っているのに、マージの INSERT が列名を挙げていない。
-   結果、他機から来たレコードは platform が空のまま入り、
-   デバイス一覧の OS 欄が空白になる。
-   例外も警告も出ないので気づけない。
+8. platform が端末に伝わらない。**原因が2つある**
+   症状は1つ（レコードの platform が空）だが、別々の原因が2つある。
+   1つの issue にまとめてよいが、両方書くこと。
 
-   ※ 別件として、ローカル解析でも platform が入っていない
-     （本番の records 13,280行すべてが空）。
-     insertRecord は platform を書いているので、
-     パーサが StatsRecord.platform を設定していない。
-     こちらは未調査。マージの件とは別の原因。
+   (a) `mergeSyncedRecordsIntoRecords` の INSERT が platform を挙げていない
+       synced_records は値を持ち、records も v4 以降は列を持っているのに、
+       マージが列名を書いていない。他機から来た行が空になる。
+
+   (b) パーサに渡す platform が config.platform だけから来る
+       `runParse` の `const devicePlatform = config?.platform` にフォールバックが無い。
+       config.platform を書くのは `aiusage init` だけなので、
+       それを通していない config では undefined になり、
+       **ローカルで解析した行も全部空になる**。
+       すぐ下にある platform のバックフィルも `if (devicePlatform)` で
+       守られているため、一度も走らない。
+       同じ関数の device は `config?.device || hostname()` と
+       フォールバックしているので、platform だけが取り残されている。
+
+   本番では (b) により records 13,280行が全件空だった。
+   我々の側では devicePlatform に `os.platform()` のフォールバックを足し、
+   バックフィルの条件を source_file ではなく device_instance_id に変えた
+   （`source_file NOT LIKE 'synced/%'` は「他機由来」の代用として
+   機能しなくなっている。実 source_file を持ったまま届く行があるため）。
 
 方針: 1・2・3・6・8 は挙動を壊さない明確なバグ修正なので
 1つの PR にまとめてよい。4・5 は影響が大きいので個別に issue から始める。

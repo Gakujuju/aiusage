@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { readFileSync, statSync, existsSync, openSync, readSync, closeSync } from 'node:fs'
 import { basename, join, dirname } from 'node:path'
-import { hostname } from 'node:os'
+import { hostname, platform as osPlatform } from 'node:os'
 import { Aggregator, resolveExchangeRate, generateToolCallId, inferProvider, calculateCost, resolvePrice, generateRecordId, normalizeCodeFuseModel, parseTimestamp, type StatsRecord, type Tool } from '@aiusage/core'
 import type { ToolCallRecord } from '@aiusage/core'
 import { insertRecord } from '../db/records.js'
@@ -506,7 +506,21 @@ export async function runParse(db: Database.Database, filterTool?: string, optio
   const exchangeRate = resolveExchangeRate(config ?? {})
   const device = config?.device || hostname() || state?.deviceInstanceId?.slice(0, 8) || 'unknown'
   const deviceInstanceId = state?.deviceInstanceId ?? 'unknown'
-  const devicePlatform = config?.platform
+  /*
+   * The OS is the fallback, the way hostname() is for the device name above.
+   *
+   * config.platform is only ever written by `aiusage init`, and a config
+   * that never went through it — or that predates the field — left this
+   * undefined, which every parser then passed down and every record stored
+   * as ''. All 13,280 rows in the production database were blank, and
+   * nothing said so: the device list quietly falls back to guessing the OS
+   * from the device name.
+   *
+   * Unlike most missing values this one is not in doubt. These records are
+   * being parsed on the machine that produced them, so the platform is
+   * whatever this process is running on.
+   */
+  const devicePlatform = config?.platform || osPlatform()
 
   const watermarkPath = join(AIUSAGE_DIR, 'watermark.json')
   const wm = new WatermarkManager(watermarkPath)
@@ -1229,11 +1243,39 @@ export async function runParse(db: Database.Database, filterTool?: string, optio
     ).run(deviceInstanceId, device)
   }
 
-  // Backfill platform for existing records that have an empty platform field.
+  /*
+   * Fill in the platform on rows this machine parsed before it knew its own.
+   *
+   * This backfill is not new — it has been here all along and never once ran,
+   * because devicePlatform came only from config.platform and that key was
+   * never written. Giving it the OS fallback is what brings it to life.
+   *
+   * Matched on device_instance_id rather than on the source file alone. The
+   * old 'synced/%' test was a proxy for "came from another machine" and it
+   * stopped being one: a record that arrives with a real source_file — which
+   * is most of them, over sync or over the direct upload — keeps that path,
+   * so on its own it would have stamped the local OS onto other machines'
+   * rows.
+   *
+   * There is no 'unknown' guard, and that is deliberate. This machine's own
+   * id *is* 'unknown' (D1 keeps it that way), so refusing to match it would
+   * have meant the backfill skipping all 13,576 production rows — the exact
+   * thing it exists to fix. Rows genuinely from elsewhere carry the sending
+   * machine's id, and the 'synced/%' test stays as a second filter for the
+   * one case the id cannot separate: another install that is also still
+   * 'unknown' and whose records arrived here.
+   *
+   * updated_at moves with it, so the corrected value reaches the hub on the
+   * next upload. Without the bump the row is already "sent" and the fix would
+   * live only here.
+   */
   if (devicePlatform) {
     db.prepare(
-      `UPDATE records SET platform = ? WHERE platform = '' AND source_file NOT LIKE 'synced/%'`
-    ).run(devicePlatform)
+      `UPDATE records SET platform = ?, updated_at = ?
+       WHERE platform = ''
+         AND device_instance_id = ?
+         AND source_file NOT LIKE 'synced/%'`
+    ).run(devicePlatform, Date.now(), deviceInstanceId)
   }
 
   // Backfill Hermes records that used a bare dbPath as source_file.
