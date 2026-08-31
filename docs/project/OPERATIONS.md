@@ -359,6 +359,39 @@ source_file が空だった行だけ。
 （置き換えではなく AND）。
 platform の埋め戻しで実際にこの順序で間違えかけた。
 
+### バックアップの検証は複製に対して行う
+
+ロールバックできるか確かめようとして backup の cache.db を
+read-write で開き、**WAL がチェックポイントされて -wal と -shm が消えた**。
+中身は無事だった（`PRAGMA integrity_check` = ok）が、
+復旧手段そのものを書き換える操作だった。
+
+**読むだけのつもりでも SQLite は開いた時点で書く。**
+`cp` してから開くこと。`readonly: true` でも -shm を触るので、
+バックアップ本体には使わない。
+
+### AIUSAGE_HOME を設定せずに DB のパスだけ差し替えない
+
+`watermark.json` は DB の外にあり、`AIUSAGE_DIR`（＝ AIUSAGE_HOME）から
+解決される。DB だけ複製に向けても watermark は本番のものが使われる。
+複製に対するパースが本番の watermark を書き換える。
+
+**隔離は AIUSAGE_HOME で行うこと。DBパスの差し替えは隔離ではない。**
+
+あわせて watermark.json 自体の性質:
+
+  ・`WatermarkManager.load()` は **JSON の解析に失敗すると
+    黙って全ツール分を空にして返す**（watermark.ts の catch）。
+    その状態でパースすると全ログを先頭から読み直し、
+    `insertRecord` が INSERT OR REPLACE なので既存行が
+    **そのときのパーサの値で上書きされる**。
+  ・複数プロセスが同時に書く（serve とステータスラインなど）と、
+    片方が読んだ瞬間に他方が書いていれば解析に失敗しうる。
+
+実際に codex 449行が 14:53 に全件再挿入された
+（ingested_at が2秒幅に集中）。watermark が空になった以外に
+説明の付く経路が見つからなかった。
+
 ## Tailscale 経由でスマホから見る
 
 端末:
