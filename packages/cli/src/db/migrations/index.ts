@@ -48,6 +48,22 @@ const MIGRATIONS = [
   { version: 22, migrate: migrateV22 },
 ]
 
+/**
+ * The newest schema this build knows how to produce.
+ *
+ * Read by the commands that are not allowed to migrate, so they can tell a
+ * database that is merely older from one they can safely use.
+ */
+export const EXPECTED_SCHEMA_VERSION = MIGRATIONS.reduce(
+  (max, m) => (m.version > max ? m.version : max), 0)
+
+export function currentSchemaVersion(db: Database.Database): number {
+  const row = db.prepare(
+    "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+  ).get() as { version: number } | undefined
+  return row?.version ?? 0
+}
+
 export function runMigrations(db: Database.Database): void {
   createSchemaVersionTable(db)
 

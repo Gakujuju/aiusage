@@ -23,7 +23,9 @@ import { runLeaderboardStatus } from './commands/leaderboard-status.js'
 import { runLeaderboardLogout } from './commands/leaderboard-logout.js'
 import { runLeaderboardView } from './commands/leaderboard-view.js'
 import { runMenu } from './commands/menu.js'
-import { createDatabase } from './db/index.js'
+// createDatabase is for serve alone here — it is the one command allowed to
+// bring the schema forward. Every other command below uses the other door.
+import { createDatabase, openWithoutMigrating } from './db/index.js'
 import { getState } from './init.js'
 import { AIUSAGE_DIR } from './config.js'
 import { join } from 'node:path'
@@ -50,7 +52,15 @@ program
       process.exit(1)
     }
 
-    const db = createDatabase(DB_PATH)
+    // The status line runs this every few seconds. It gets one line and
+    // a clean exit rather than a stack of advice it cannot act on, and
+    // it is emphatically not allowed to migrate anything: v21 and v22
+    // reached production through exactly this command.
+    const db = openWithoutMigrating(DB_PATH, { quiet: true })
+    if (!db) {
+      console.log('aiusage: database not ready — run: aiusage serve')
+      return
+    }
     const state = getState(AIUSAGE_DIR)
     const summary = generateSummary(db, {
       currentDeviceInstanceId: state?.deviceInstanceId,
@@ -87,7 +97,8 @@ program
   .option('--device <id>', 'Filter by device instance ID')
   .option('--tool <tool>', 'Filter by any supported tool id')
   .action((options) => {
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     const state = getState(AIUSAGE_DIR)
     const summary = generateSummary(db, {
       currentDeviceInstanceId: state?.deviceInstanceId,
@@ -116,7 +127,8 @@ program
   .command('status')
   .description('Show current status')
   .action(() => {
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     const status = generateStatus(db)
     console.log(`Version:     ${status.version}`)
     console.log(`Device:      ${status.deviceName}`)
@@ -147,7 +159,8 @@ program
       console.error('Invalid format. Use csv, json, or ndjson.')
       process.exit(1)
     }
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     const data = exportData(db, format)
     if (options.output) {
       writeFileSync(options.output, data, 'utf-8')
@@ -165,7 +178,8 @@ program
   .option('--tool <tool>', 'Specific supported tool id to parse')
   .option('--no-progress', 'Hide real-time progress')
   .action(async (options) => {
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     const reporter = options.progress !== false ? new ProgressReporter() : undefined
     try {
       const result = await runParse(db, options.tool, {
@@ -275,7 +289,8 @@ program
     }
 
     // Execute local clean
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     if (isAll) {
       console.log('\nDeleting all local data...')
       const result = cleanAll(db)
@@ -324,7 +339,8 @@ program
   .description('Recalculate costs')
   .option('--pricing', 'Recalculate using latest pricing')
   .action(() => {
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     const result = recalcPricing(db)
     console.log(`Updated ${result.updatedCount} records, skipped ${result.skippedCount}.`)
     db.close()
@@ -409,7 +425,8 @@ program
   .command('notify-status')
   .description('Show the notification outbox summary')
   .action(() => {
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     runNotifyStatus(db)
     db.close()
   })
@@ -469,7 +486,8 @@ program
   .command('sync')
   .description('Sync data with cloud storage')
   .action(async () => {
-    const db = createDatabase(DB_PATH)
+    const db = openWithoutMigrating(DB_PATH)
+    if (!db) { process.exitCode = 1; return }
     const reporter = new SyncProgressReporter()
     reporter.start()
     try {
