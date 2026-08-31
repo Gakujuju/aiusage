@@ -36,7 +36,7 @@ import { clearCredentials, hasCredentials, loadCredentials, saveCredentials } fr
 import { base64url, sha256Buffer } from '../leaderboard/crypto.js'
 import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
-import { countUnpricedRecords, insertRecord } from '../db/records.js'
+import { countUnpricedRecords, insertRecord, type UnpricedScope } from '../db/records.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import {
   enqueueNotification,
@@ -461,6 +461,38 @@ const LOCAL_ONLY_FILTER = PRODUCED_HERE
 const LOCAL_ONLY_FILTER_R = PRODUCED_HERE_R
 
 const NOT_ALREADY_MERGED = NOT_YET_MERGED
+
+/**
+ * The rows a screen's uncosted counts should be taken over.
+ *
+ * Built from the same fragments the screen uses for its own figures, so
+ * the count cannot describe a different set of rows than the numbers
+ * beside it. The band once read "334 records" over all time while every
+ * figure under it was one day's.
+ *
+ * Written once because four screens need it. Three predicates that were
+ * each spelled out by hand went wrong three separate ways in one day.
+ *
+ * Under a union the records side is left unfiltered and the synced side
+ * drops what has already been merged — filtering both would count a
+ * merged row zero times instead of twice.
+ */
+function unpricedScopeFor(
+  dr: { where: string; params: Record<string, unknown> },
+  df: DeviceFilter,
+  tf: { where: string; params: Record<string, unknown> },
+): UnpricedScope {
+  return {
+    source: df.useUnion ? 'union' : (df.where ? 'synced' : 'records'),
+    recordsWhere: df.useUnion
+      ? `${dr.where} ${tf.where}`
+      : `${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}`,
+    syncedWhere: df.useUnion
+      ? `AND device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}`
+      : `${df.where} ${dr.where} ${tf.where}`,
+    params: { ...dr.params, ...df.params, ...tf.params },
+  }
+}
 
 function getDeviceFilter(
   device: string | null | undefined,
@@ -1059,21 +1091,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           // beside it was one day's — a number that does not mean what it
           // appears to mean, which is the whole family of faults this pass
           // has been closing.
-          ...countUnpricedRecords(db, {
-            source: df.useUnion ? 'union' : (df.where ? 'synced' : 'records'),
-            // Unfiltered under a union, for the same reason the SQL above
-            // is: the synced side already drops merged rows, so filtering
-            // here too would count them zero times instead of twice.
-            recordsWhere: df.useUnion
-              ? `${dr.where} ${tf.where}`
-              : `${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}`,
-            syncedWhere: df.useUnion
-              // Same dedup as the totals above: this band sat beside them
-              // reading 594 while the log, which never unions, said 297.
-              ? `AND device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}`
-              : `${df.where} ${dr.where} ${tf.where}`,
-            params: { ...dr.params, ...df.params, ...tf.params },
-          }),
+          ...countUnpricedRecords(db, unpricedScopeFor(dr, df, tf)),
         })
         return
       }
@@ -1323,7 +1341,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             : 0,
         }))
 
-        json(res, { models })
+        // The same counts the home screen carries, over this screen's own rows.
+        // A figure of $0 reads as "not used much" unless something says the
+        // price is missing, and a lump-total row can never be priced at all.
+        json(res, { models, ...countUnpricedRecords(db, unpricedScopeFor(dr, df, tf)) })
         return
       }
 
@@ -1553,6 +1574,14 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
 
         json(res, {
           sessions,
+          // dr and tf above are prefixed for the aliased "records r"; the
+          // counts read the table unaliased, so they need the same filters
+          // spelled without the prefix.
+          ...countUnpricedRecords(db, unpricedScopeFor(
+            getDateRangeFilter(range, from, to, '', weekStart),
+            df,
+            getToolFilter(tool),
+          )),
           total: totalRow.total,
           page,
           pageSize,
@@ -1919,7 +1948,8 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           }))
           .sort((a, b) => b.tokens - a.tokens)
 
-        json(res, { projects })
+        // See /api/models: the counts follow this screen's own scope.
+        json(res, { projects, ...countUnpricedRecords(db, unpricedScopeFor(dr, df, tf)) })
         return
       }
 

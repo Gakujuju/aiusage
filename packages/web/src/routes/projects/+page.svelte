@@ -2,11 +2,17 @@
   import { dateRange, selectedDevice, selectedTool, formatTokens, formatCost, formatNumber } from '$lib/stores.js'
   import { fetchProjects } from '$lib/api.js'
   import { t } from '$lib/i18n.js'
+  import CostCaveats from '$lib/components/CostCaveats.svelte'
   import DateRangeSelector from '$lib/components/DateRangeSelector.svelte'
   import DeviceSelector from '$lib/components/DeviceSelector.svelte'
   import ToolSelector from '$lib/components/ToolSelector.svelte'
 
+  /** @type {any} */
+
+
   let data = null
+  /** @type {any} */
+
   let error = null
   let loading = true
 
@@ -29,6 +35,12 @@
 <svelte:head>
   <title>{$t('projects.title')} — AIUsage</title>
 </svelte:head>
+
+<CostCaveats
+  unpricedRecords={data?.unpricedRecords ?? 0}
+  unpricedModels={data?.unpricedModels ?? []}
+  breakdownMissingRecords={data?.breakdownMissingRecords ?? 0}
+/>
 
 <div class="page-header">
   <h1>{$t('projects.title')}</h1>
