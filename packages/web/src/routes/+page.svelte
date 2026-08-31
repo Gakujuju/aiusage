@@ -1,7 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { tweened } from 'svelte/motion'
-  import { cubicOut } from 'svelte/easing'
+
   import { fetchSummary, refreshData as triggerRefresh, fetchConfig, fetchQuotas, SETTINGS_UPDATED_EVENT } from '$lib/api.js'
   import CostCaveats from '$lib/components/CostCaveats.svelte'
   import { t } from '$lib/i18n.js'
@@ -54,10 +53,19 @@
   let refreshing = false
   let barsReady  = false
 
-  const tTokens   = tweened(0, { duration: 2600, easing: cubicOut })
-  const tCost     = tweened(0, { duration: 2300, easing: cubicOut })
-  const tSessions = tweened(0, { duration: 1900, easing: cubicOut })
-  const tDays     = tweened(0, { duration: 1600, easing: cubicOut })
+  /*
+   * The figures used to be tweened stores that restarted from zero on every
+   * load and took up to 2.6 seconds to arrive, while the breakdown beside
+   * them rendered its final value at once. For those seconds the screen
+   * showed a total that was in no database, and twice someone photographed
+   * one and reported the number as a drop — costing an evening each time.
+   *
+   * A figure on screen is now always the figure that was fetched. The
+   * entrance is still animated, but in CSS and on appearance only: opacity
+   * and a small rise, which cannot misreport anything because the digits
+   * are correct in the first painted frame.
+   */
+  let revealed = false
 
   async function fetchAndApply(fast = false) {
     const d = fast ? 500 : 2600
@@ -66,10 +74,9 @@
       const newData = await fetchSummary({ range: display.range })
       if (newData) {
         data = newData
-        tTokens.set(newData.totalTokens,       { duration: d })
-        tCost.set(newData.totalCost,           { duration: Math.round(d * 0.88) })
-        tSessions.set(newData.totalSessions || 0, { duration: Math.round(d * 0.73) })
-        tDays.set(newData.activeDays,          { duration: Math.round(d * 0.62) })
+        revealed = true
+        // The bars are a picture of the split, not a reading of it — their
+        // widths may grow. Every number they stand for is in the titles.
         barsReady = false
         setTimeout(() => { barsReady = true }, fast ? 80 : 400)
       }
@@ -81,10 +88,7 @@
 
   async function loadData() {
     loading = true
-    tTokens.set(0, { duration: 0 })
-    tCost.set(0,   { duration: 0 })
-    tSessions.set(0, { duration: 0 })
-    tDays.set(0,   { duration: 0 })
+    revealed = false
     barsReady = false
     await fetchAndApply(false)
     loading = false
@@ -172,7 +176,7 @@
   $: rangeKey     = RANGE_OPTIONS.find(r => r.value === display.range)?.tKey ?? 'range.allTime'
 
   // Reactive cost formatting — depends on $displayCurrency and $exchangeRate so it re-evaluates on currency change
-  $: formattedCost = (() => { void $displayCurrency; void $exchangeRate; return formatCost($tCost) })()
+  $: formattedCost = (() => { void $displayCurrency; void $exchangeRate; return formatCost(data?.totalCost ?? 0) })()
 
   // Quota warning: load once on mount, show banner when any tier >= 80%
   let quotaWarnings = []
@@ -338,8 +342,8 @@
   <section class="counter-section">
     <div class="counter-label">{$t('home.counterLabel')}</div>
 
-    <div class="counter-number" class:refreshing>
-      {fmtMain($tTokens)}
+    <div class="counter-number" class:refreshing class:revealed>
+      {fmtMain(data.totalTokens)}
     </div>
 
     <div class="counter-sub">
@@ -387,11 +391,11 @@
     </div>
     <div class="stat-block">
       <span class="stat-label">{$t('overview.totalSessions')}</span>
-      <span class="stat-value">{Math.round($tSessions).toLocaleString()}</span>
+      <span class="stat-value">{(data.totalSessions || 0).toLocaleString()}</span>
     </div>
     <div class="stat-block">
       <span class="stat-label">{$t('overview.activeDays')}</span>
-      <span class="stat-value">{Math.round($tDays).toLocaleString()}</span>
+      <span class="stat-value">{(data.activeDays || 0).toLocaleString()}</span>
     </div>
   </div>
 
@@ -531,9 +535,29 @@
     line-height: 1;
     color: var(--text);
     font-variant-numeric: tabular-nums;
-    transition: opacity 0.2s;
+    /* The entrance, now that the digits do not move.
+
+       Opacity and a small rise: the number is right in the first painted
+       frame, so a screenshot taken at any moment is a screenshot of the
+       real figure. Honouring prefers-reduced-motion below, which the
+       count-up never did. */
+    opacity: 0;
+    transform: translateY(0.25rem);
+    transition: opacity 0.45s ease-out, transform 0.45s ease-out;
+  }
+  .counter-number.revealed {
+    opacity: 1;
+    transform: none;
   }
   .counter-number.refreshing { opacity: 0.5; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .counter-number {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+  }
 
   .counter-sub {
     display: flex;
