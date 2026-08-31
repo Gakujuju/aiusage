@@ -84,10 +84,32 @@ describe('extractProject', () => {
     ).toBe('hermes')
   })
 
-  it('falls back for codex paths without cwd', () => {
-    // Codex paths have no project info — project comes from cwd field
-    const result = extractProject('/Users/alice/.codex/sessions/2026/05/22/rollout-abc123.jsonl')
-    expect(result).not.toBe('unknown') // should extract something from generic path
+  /*
+   * This asserted the opposite, and its own comment said why it should not:
+   * "Codex paths have no project info". It then required that something be
+   * extracted anyway, and what came out was the username — so two machines
+   * with the same login were reported as one project named after the person.
+   *
+   * A test that demands a name be produced from a path carrying no name can
+   * only ever be satisfied by inventing one.
+   */
+  it('reports nothing for a codex path, which carries no project', () => {
+    expect(
+      extractProject('/Users/alice/.codex/sessions/2026/05/22/rollout-abc123.jsonl')
+    ).toBe('unknown')
+  })
+
+  it('never reports a Windows username as the project', () => {
+    expect(
+      extractProject('C:\\Users\\alice\\.codex\\sessions\\2026\\08\\31\\rollout-abc.jsonl')
+    ).toBe('unknown')
+  })
+
+  it('still reads a project out of a path that has one', () => {
+    // The strip removes the home prefix, not the walk that follows it.
+    expect(
+      extractProject('/Users/alice/Projects/myapp/.opencode/sessions/ses-1.json')
+    ).toBe('myapp')
   })
 })
 

@@ -166,10 +166,46 @@ function extractProjectFromKnownToolPath(sourceFile: string): string | null {
   return null
 }
 
+/**
+ * A home directory, in every shape this sees.
+ *
+ * The same strip extractProjectFromCwd has done all along; the walk below
+ * never had it, which is why it reached the username.
+ */
+const HOME_PREFIX = [
+  /^[A-Za-z]:\/(?:Users|home)\/[^/]+(?:\/|$)/,
+  /^\/(?:Users|home)\/[^/]+(?:\/|$)/,
+  /^\/root(?:\/|$)/,
+]
+
 function extractProjectFromGenericPath(sourceFile: string): string | null {
   const normalized = sourceFile.replace(/\\/g, '/')
   const directory = path.posix.dirname(normalized)
-  const parts = directory.split('/').filter(Boolean)
+
+  /*
+   * A username is not a project. The third time this file has had to say so.
+   *
+   * The first was the drive letter, which made "C:" a project. The second was
+   * the home directory itself, which made "Users" one. Both are recorded
+   * above as the same mistake: inventing a project that does not exist,
+   * because the walk had nothing left to return and returned the last thing
+   * it saw anyway.
+   *
+   * This is the third and the one that survived. Codex desktop sessions are
+   * logged at ~/.codex/sessions/<year>/<month>/<day>/rollout-<uuid>.jsonl and
+   * carry no working directory at all — 1750 of 2199 rows here have an empty
+   * cwd — so the walk skipped the date parts, skipped sessions and .codex,
+   * and landed on the username. Two machines with the same username were
+   * reported as one project named after the person using them.
+   *
+   * Consuming the home prefix first means the walk has nothing to reach past,
+   * and the honest answer comes out instead: the path does not say which
+   * project this was, so nothing here does.
+   */
+  const withoutHome = HOME_PREFIX.reduce((acc, re) => acc.replace(re, ''), directory)
+  if (!withoutHome) return null
+
+  const parts = withoutHome.split('/').filter(Boolean)
 
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const candidate = parts[index]
