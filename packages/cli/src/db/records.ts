@@ -167,6 +167,33 @@ export interface UnpricedSummary {
 }
 
 /**
+ * Which rows the counts are taken over.
+ *
+ * The caller passes the SQL it already composed for its own totals rather
+ * than describing the filters again here. Two descriptions of one filter
+ * drift, and a count that drifts from the figures beside it is exactly the
+ * fault this scope exists to fix: the band read "334 records" over all time
+ * while every number under it was one day's.
+ *
+ * The default is every local record, which is what a caller with no filters
+ * — the startup warning — means.
+ */
+export interface UnpricedScope {
+  /** Extra SQL for the records table, e.g. a date range and a tool. */
+  recordsWhere?: string
+  /** Extra SQL for synced_records. */
+  syncedWhere?: string
+  /** Which tables to read. 'union' is local plus every other device. */
+  source?: 'records' | 'synced' | 'union'
+  params?: Record<string, unknown>
+}
+
+/** The columns both tables share that the counts need. */
+const UNPRICED_COLUMNS = `
+  model, cost, cost_source, breakdown_missing, input_tokens, output_tokens,
+  cache_read_tokens, cache_write_tokens, thinking_tokens`
+
+/**
  * How much usage is going uncosted, and why.
  *
  * Two causes, counted separately, because only one of them is anybody's to
@@ -185,26 +212,44 @@ export interface UnpricedSummary {
  * could ever silence. A warning whose stated remedy does not work is worse
  * than no warning, because it spends the reader's attention on a task that
  * cannot succeed.
+ *
+ * One pass over the scope for both, grouped by cause, so the two can never
+ * be taken over different sets of rows.
  */
-export function countUnpricedRecords(db: Database.Database): UnpricedSummary {
-  const rows = db.prepare(`
-    SELECT model, COUNT(*) AS n
-    FROM records
-    WHERE breakdown_missing = 0
-      AND (cost_source = 'unknown'
-           OR (cost = 0 AND (input_tokens + output_tokens + cache_read_tokens
-                             + cache_write_tokens + thinking_tokens) > 0))
-    GROUP BY model
-    ORDER BY n DESC
-  `).all() as Array<{ model: string; n: number }>
+export function countUnpricedRecords(
+  db: Database.Database,
+  scope: UnpricedScope = {},
+): UnpricedSummary {
+  const source = scope.source ?? 'records'
+  const recordsWhere = scope.recordsWhere ?? ''
+  const syncedWhere = scope.syncedWhere ?? ''
 
-  const breakdownMissing = db.prepare(`
-    SELECT COUNT(*) AS n FROM records WHERE breakdown_missing = 1
-  `).get() as { n: number }
+  const scoped =
+    source === 'synced'
+      ? `SELECT ${UNPRICED_COLUMNS} FROM synced_records WHERE 1=1 ${syncedWhere}`
+      : source === 'union'
+        ? `SELECT ${UNPRICED_COLUMNS} FROM records WHERE 1=1 ${recordsWhere}
+           UNION ALL
+           SELECT ${UNPRICED_COLUMNS} FROM synced_records WHERE 1=1 ${syncedWhere}`
+        : `SELECT ${UNPRICED_COLUMNS} FROM records WHERE 1=1 ${recordsWhere}`
+
+  const rows = db.prepare(`
+    SELECT model, breakdown_missing AS bm, COUNT(*) AS n
+    FROM (${scoped})
+    WHERE breakdown_missing = 1
+       OR cost_source = 'unknown'
+       OR (cost = 0 AND (input_tokens + output_tokens + cache_read_tokens
+                         + cache_write_tokens + thinking_tokens) > 0)
+    GROUP BY model, breakdown_missing
+  `).all(scope.params ?? {}) as Array<{ model: string; bm: number; n: number }>
+
+  const priced = rows.filter((r) => r.bm === 0).sort((a, b) => b.n - a.n)
 
   return {
-    unpricedRecords: rows.reduce((acc, r) => acc + r.n, 0),
-    unpricedModels: rows.map((r) => r.model),
-    breakdownMissingRecords: breakdownMissing.n,
+    unpricedRecords: priced.reduce((acc, r) => acc + r.n, 0),
+    unpricedModels: priced.map((r) => r.model),
+    breakdownMissingRecords: rows
+      .filter((r) => r.bm === 1)
+      .reduce((acc, r) => acc + r.n, 0),
   }
 }

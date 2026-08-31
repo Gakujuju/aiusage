@@ -1058,10 +1058,25 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           byTool,
           topToolCalls,
           topMcpServers,
-          // A total of $0 read as "no usage" for months when it actually meant
-          // "no prices for the models in use". Surfacing the count makes the
-          // difference visible without anyone having to go looking.
-          ...countUnpricedRecords(db),
+          // A total of $0 read as "no usage" for months when it actually
+          // meant "no prices for the models in use". Surfacing the count
+          // makes the difference visible without anyone having to go
+          // looking.
+          //
+          // Given the same filters as the totals above, from the same
+          // fragments rather than a second description of them. Counted over
+          // everything, the band said "334 records" while every figure
+          // beside it was one day's — a number that does not mean what it
+          // appears to mean, which is the whole family of faults this pass
+          // has been closing.
+          ...countUnpricedRecords(db, {
+            source: df.useUnion ? 'union' : (df.where ? 'synced' : 'records'),
+            recordsWhere: `${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}`,
+            syncedWhere: df.useUnion
+              ? `AND device_instance_id != @currentDeviceId ${dr.where} ${tf.where}`
+              : `${df.where} ${dr.where} ${tf.where}`,
+            params: { ...dr.params, ...df.params, ...tf.params },
+          }),
         })
         return
       }

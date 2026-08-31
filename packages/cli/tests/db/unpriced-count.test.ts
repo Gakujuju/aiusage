@@ -124,4 +124,113 @@ describe('countUnpricedRecords separates the two reasons a cost is missing', () 
 
     expect(countUnpricedRecords(db).unpricedRecords).toBe(0)
   })
+
+  /*
+   * The band used to say "334 records" while every figure beside it was one
+   * day's. The count was taken over the whole table no matter what the reader
+   * had selected, so the number did not mean what it appeared to mean —
+   * the same fault as counting lump totals as unpriced, one level up.
+   */
+  describe('the counts follow the same filters as the figures beside them', () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const T0 = 1776700000000
+
+    function seed() {
+      // Two days, two tools, both causes present on each day.
+      insertRecord(db, aRecord({
+        id: 'old-noprice', ts: T0, model: 'codex-auto-review',
+      }))
+      insertRecord(db, aRecord({
+        id: 'old-lump', ts: T0, breakdownMissing: true,
+      }))
+      insertRecord(db, aRecord({
+        id: 'new-noprice', ts: T0 + DAY, model: 'codex-auto-review',
+      }))
+      insertRecord(db, aRecord({
+        id: 'new-lump', ts: T0 + DAY, breakdownMissing: true,
+      }))
+      insertRecord(db, aRecord({
+        id: 'new-other-tool', ts: T0 + DAY, tool: 'claude-code',
+        model: 'some-unpriced-model',
+      }))
+    }
+
+    it('counts everything when given no scope', () => {
+      // What the startup warning means: this machine, all of it.
+      seed()
+
+      const summary = countUnpricedRecords(db)
+
+      expect(summary.unpricedRecords).toBe(3)
+      expect(summary.breakdownMissingRecords).toBe(2)
+    })
+
+    it('counts only the selected range', () => {
+      seed()
+
+      const summary = countUnpricedRecords(db, {
+        recordsWhere: 'AND ts >= @start AND ts < @end',
+        params: { start: T0 + DAY, end: T0 + 2 * DAY },
+      })
+
+      expect(summary.unpricedRecords).toBe(2)
+      expect(summary.breakdownMissingRecords).toBe(1)
+    })
+
+    it('counts only the selected tool', () => {
+      seed()
+
+      const summary = countUnpricedRecords(db, {
+        recordsWhere: 'AND tool = @tool',
+        params: { tool: 'claude-code' },
+      })
+
+      expect(summary.unpricedRecords).toBe(1)
+      expect(summary.unpricedModels).toEqual(['some-unpriced-model'])
+      expect(summary.breakdownMissingRecords).toBe(0)
+    })
+
+    it('applies range and tool together', () => {
+      seed()
+
+      const summary = countUnpricedRecords(db, {
+        recordsWhere: 'AND ts >= @start AND ts < @end AND tool = @tool',
+        params: { start: T0 + DAY, end: T0 + 2 * DAY, tool: 'codex' },
+      })
+
+      expect(summary.unpricedRecords).toBe(1)
+      expect(summary.breakdownMissingRecords).toBe(1)
+    })
+
+    it('returns nothing for a range with no records in it', () => {
+      seed()
+
+      const summary = countUnpricedRecords(db, {
+        recordsWhere: 'AND ts >= @start AND ts < @end',
+        params: { start: T0 + 10 * DAY, end: T0 + 11 * DAY },
+      })
+
+      expect(summary.unpricedRecords).toBe(0)
+      expect(summary.unpricedModels).toEqual([])
+      expect(summary.breakdownMissingRecords).toBe(0)
+    })
+
+    /**
+     * Both halves take one pass over one scope, so they cannot end up
+     * describing different sets of rows — which is how the two came apart in
+     * the first place.
+     */
+    it('scopes both counts, not just one of them', () => {
+      seed()
+
+      const all = countUnpricedRecords(db)
+      const oneDay = countUnpricedRecords(db, {
+        recordsWhere: 'AND ts >= @start AND ts < @end',
+        params: { start: T0, end: T0 + DAY },
+      })
+
+      expect(oneDay.unpricedRecords).toBeLessThan(all.unpricedRecords)
+      expect(oneDay.breakdownMissingRecords).toBeLessThan(all.breakdownMissingRecords)
+    })
+  })
 })
