@@ -23,7 +23,7 @@ import { runPushNotificationTick } from '../notify/webpush-tick.js'
 import { requeueInFlightNotifications } from '../db/notifications.js'
 import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
-import { runHubUpload } from '../sync/hub-upload.js'
+import { runHubUpload, type HubUploadResult } from '../sync/hub-upload.js'
 import { runCodexLogTick } from '../agent/codex-log-watcher.js'
 import { queryAllQuotas } from '../quota.js'
 import { hostname, platform } from 'node:os'
@@ -192,6 +192,39 @@ const LOGGED_SKIP_REASONS: ReadonlySet<string> = new Set([
   'disabled', 'event_disabled', 'tool_disabled',
   'duplicate', 'throttled', 'quiet_hours',
 ])
+
+/**
+ * Report what an upload pass did, saying "nothing to send" only once.
+ *
+ * "Nothing to send" and "the hub is misconfigured" look identical from the
+ * outside — both are silence — and on a machine nobody has used yet the setup
+ * check has no other way to tell them apart. Saying it every twenty minutes
+ * would bury the log; saying it once answers the question the first time
+ * anyone asks it. Same reasoning as hub-status reporting a missing token
+ * rather than staying quiet.
+ *
+ * A factory rather than a module-level flag, so each serve — and each test —
+ * starts with its own.
+ */
+export function createHubUploadReporter(
+  upload: () => Promise<HubUploadResult>,
+  log: (message: string) => void = console.log,
+  warn: (message: string) => void = console.warn,
+): () => Promise<HubUploadResult> {
+  let reportedNothingToSend = false
+  return async () => {
+    const result = await upload()
+    if (result.sent > 0) {
+      log('[serve] uploaded ' + result.sent + ' record(s) to the hub')
+    } else if (result.error) {
+      warn('[serve] hub upload failed: ' + result.error)
+    } else if (result.skipped === 'nothing_to_send' && !reportedNothingToSend) {
+      reportedNothingToSend = true
+      log('[serve] hub configured; nothing to upload yet (no unsent records)')
+    }
+    return result
+  }
+}
 
 const MAX_PORT_ATTEMPTS = 10
 const AGENT_REAPER_INTERVAL_MS = 15_000
@@ -367,6 +400,9 @@ export function serve(options: ServeOptions): void {
     return summary
   }
 
+  const reportHubUpload = createHubUploadReporter(
+    () => runHubUpload({ db: options.db, runDbWrite }))
+
   const runtimeSettings = new RuntimeSettingsController({
     db: options.db,
     loadConfig,
@@ -383,15 +419,7 @@ export function serve(options: ServeOptions): void {
      * set a hub and have it take effect on the next parse rather than the
      * next restart.
      */
-    runHubUpload: async () => {
-      const result = await runHubUpload({ db: options.db, runDbWrite })
-      if (result.sent > 0) {
-        console.log('[serve] uploaded ' + result.sent + ' record(s) to the hub')
-      } else if (result.error) {
-        console.warn('[serve] hub upload failed: ' + result.error)
-      }
-      return result
-    },
+    runHubUpload: reportHubUpload,
     onSyncScheduleChanged: (ts) => syncRuntime.setNextSyncAt(ts),
   })
   runtimeSettings.start()

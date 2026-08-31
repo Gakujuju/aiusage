@@ -263,6 +263,8 @@ start-serve.cmd に --host は書かれていない。
 
 注意: 登録は schtasks ではなく PowerShell の Register-ScheduledTask で
 行った。schtasks /Create /SC ONLOGON は管理者権限を要求して失敗する。
+新しい端末を足す手順は docs/project/SETUP-NEW-MACHINE.md に分けてある。
+schtasks /End が子プロセスの node を残す件もそこに書いた。
 
 ## 画面の変更は serve の再起動を待たない
 
