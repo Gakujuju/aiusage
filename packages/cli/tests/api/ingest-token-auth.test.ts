@@ -406,3 +406,43 @@ describe('records arriving directly reach the dashboard', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM records').get()).toEqual({ n: 1 })
   })
 })
+
+/**
+ * platform was being dropped between the two tables. synced_records holds
+ * it, records has had the column since v4, and the merge simply did not name
+ * it — so every record from another machine landed with a blank OS and
+ * nothing anywhere failed.
+ */
+describe('the merge keeps the sending machine platform', () => {
+  beforeEach(() => {
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    process.env.AIUSAGE_INGEST_TOKEN = TOKEN
+    process.env.AIUSAGE_DASHBOARD_PASSWORD = PASSWORD
+  })
+
+  afterEach(() => {
+    db.close()
+    delete process.env.AIUSAGE_INGEST_TOKEN
+    delete process.env.AIUSAGE_DASHBOARD_PASSWORD
+  })
+
+  it('carries platform through to the table the dashboard reads', async () => {
+    await request(createApiServer(db, { isLoopbackBind: false }), '/api/sync/records', {
+      method: 'POST',
+      headers: { 'x-aiusage-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        records: [{
+          id: 'rec-1', ts: 1_700_000_000_000, tool: 'claude-code', model: 'm',
+          provider: 'anthropic', deviceInstanceId: 'dev-work', device: '職場PC',
+          platform: 'win32', updatedAt: 1_700_000_000_000,
+        }],
+      }),
+    })
+
+    expect(db.prepare('SELECT platform FROM synced_records WHERE id = ?').get('rec-1'))
+      .toEqual({ platform: 'win32' })
+    expect(db.prepare('SELECT platform FROM records WHERE id = ?').get('rec-1'))
+      .toEqual({ platform: 'win32' })
+  })
+})

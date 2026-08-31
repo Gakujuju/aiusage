@@ -81,17 +81,28 @@ export function mergeSyncedRecordsIntoRecords(db: Database.Database): number {
 
   if (newRows.length === 0) return 0
 
+  /*
+   * platform is carried across like every other column.
+   *
+   * It was being dropped here: synced_records holds it, records has had the
+   * column since v4, and the insert simply did not name it — so every record
+   * that arrived from another machine landed with an empty platform and the
+   * device list showed a blank where the OS should be. Nothing failed, which
+   * is why it survived; the value was just quietly gone.
+   */
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO records (
       id, ts, ingested_at, synced_at, updated_at, line_offset,
       tool, model, provider, input_tokens, output_tokens,
       cache_read_tokens, cache_write_tokens, thinking_tokens,
-      cost, cost_source, session_id, source_file, device, device_instance_id
+      cost, cost_source, session_id, source_file, device, device_instance_id,
+      platform
     ) VALUES (
       @id, @ts, @ingestedAt, @syncedAt, @updatedAt, 0,
       @tool, @model, @provider, @inputTokens, @outputTokens,
       @cacheReadTokens, @cacheWriteTokens, @thinkingTokens,
-      @cost, @costSource, @sessionId, @sourceFile, @device, @deviceInstanceId
+      @cost, @costSource, @sessionId, @sourceFile, @device, @deviceInstanceId,
+      @platform
     )
   `)
 
@@ -120,6 +131,7 @@ export function mergeSyncedRecordsIntoRecords(db: Database.Database): number {
         sourceFile,
         device: row.device,
         deviceInstanceId: row.device_instance_id,
+        platform: (typeof row.platform === 'string' ? row.platform : '') || '',
         cwd: (typeof row.cwd === 'string' ? row.cwd : '') || '',
       })
     }
