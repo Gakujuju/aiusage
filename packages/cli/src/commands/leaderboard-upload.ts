@@ -64,6 +64,14 @@ interface UsageGroup extends TokenTotals {
 export interface LeaderboardUploadResult {
   totalTokens: number
   response: Awaited<ReturnType<typeof uploadSnapshots>> | null
+  /**
+   * What was deliberately left out of the upload.
+   *
+   * Reported rather than silently subtracted: a total that is quietly short
+   * reads as a total, and the reason it is short would be discoverable only
+   * by reading this file.
+   */
+  withheld: { records: number; tokens: number }
 }
 
 function zeroTotals(): TokenTotals {
@@ -141,6 +149,60 @@ function canonicalSnapshot(snapshot: Omit<UploadSnapshot, 'token_snapshot_hash'>
   }
 }
 
+/**
+ * Kept out of what gets published: rows whose log gave no token split.
+ *
+ * The snapshot has a column per token kind, and a breakdown_missing row has
+ * its whole total sitting in input_tokens because that is where a lump sum
+ * lands. Sending it would put a number in the input column that is really
+ * input plus output plus cache, and the schema is the leaderboard's, so
+ * there is no field in which to say so.
+ *
+ * That leaves two choices, and they are not symmetric. Included, the
+ * published split is wrong and this machine looks like one that only ever
+ * reads. Excluded, the published total is short by those tokens, and every
+ * figure that is published is true. A number sent to someone else's server
+ * cannot be corrected later by us, so the honest shortfall wins.
+ *
+ * countWithheldTokens exists so the shortfall is stated at upload time
+ * rather than being a silent subtraction.
+ */
+const BREAKDOWN_FILTER = 'AND breakdown_missing = 0'
+
+/** Tokens left out of the snapshot above, for saying so out loud. */
+export function countWithheldTokens(
+  db: Database.Database,
+  currentDeviceInstanceId: string | undefined,
+  startTs: number,
+  endTs: number,
+): { records: number; tokens: number } {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS records,
+           COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens
+                        + cache_write_tokens + thinking_tokens), 0) AS tokens
+    FROM (
+      SELECT input_tokens, output_tokens, cache_read_tokens,
+             cache_write_tokens, thinking_tokens
+      FROM records
+      WHERE breakdown_missing = 1
+        AND source_file NOT LIKE 'synced/%'
+        AND ts >= @startTs AND ts <= @endTs
+      UNION ALL
+      SELECT input_tokens, output_tokens, cache_read_tokens,
+             cache_write_tokens, thinking_tokens
+      FROM synced_records
+      WHERE breakdown_missing = 1
+        AND device_instance_id != @currentId
+        AND ts >= @startTs AND ts <= @endTs
+    )
+  `).get({
+    currentId: currentDeviceInstanceId ?? '',
+    startTs,
+    endTs,
+  }) as { records: number; tokens: number }
+  return row
+}
+
 function getPeriodUsageGroups(
   db: Database.Database,
   currentDeviceInstanceId: string | undefined,
@@ -169,7 +231,7 @@ function getPeriodUsageGroups(
                CASE WHEN cache_write_tokens > 0 THEN cache_write_tokens ELSE 0 END AS cache_write_tokens,
                CASE WHEN thinking_tokens > 0 THEN thinking_tokens ELSE 0 END AS thinking_tokens
         FROM records
-        WHERE 1=1 ${localOnlyFilter} ${timeWhere}
+        WHERE 1=1 ${BREAKDOWN_FILTER} ${localOnlyFilter} ${timeWhere}
         UNION ALL
         SELECT COALESCE(NULLIF(tool, ''), 'unknown') AS tool,
                COALESCE(NULLIF(model, ''), 'unknown') AS model,
@@ -179,7 +241,7 @@ function getPeriodUsageGroups(
                CASE WHEN cache_write_tokens > 0 THEN cache_write_tokens ELSE 0 END AS cache_write_tokens,
                CASE WHEN thinking_tokens > 0 THEN thinking_tokens ELSE 0 END AS thinking_tokens
         FROM synced_records
-        WHERE device_instance_id != @currentId ${timeWhere}
+        WHERE device_instance_id != @currentId ${BREAKDOWN_FILTER} ${timeWhere}
       )
       GROUP BY tool, model
       ORDER BY total_tokens DESC, tool ASC, model ASC
@@ -202,7 +264,7 @@ function getPeriodUsageGroups(
              (CASE WHEN thinking_tokens > 0 THEN thinking_tokens ELSE 0 END)
            ) AS total_tokens
     FROM records
-    WHERE 1=1 ${timeWhere}
+    WHERE 1=1 ${BREAKDOWN_FILTER} ${timeWhere}
     GROUP BY tool, model
     ORDER BY total_tokens DESC, tool ASC, model ASC
   `).all({ startTs, endTs }) as UsageGroup[]
@@ -273,12 +335,21 @@ export async function uploadLeaderboardData(
   })
 
   if (summary.totalTokens === 0) {
-    return { totalTokens: 0, response: null }
+    return { totalTokens: 0, response: null, withheld: { records: 0, tokens: 0 } }
   }
 
   // Generate snapshots for all periods
   const periods = getCurrentPeriods()
   const snapshots: UploadSnapshot[] = periods.map(period => buildSnapshot(db, currentDeviceInstanceId, period))
+
+  // Across everything the snapshots cover, so the caller can say how much the
+  // published figure falls short of what was actually used.
+  const withheld = countWithheldTokens(
+    db,
+    currentDeviceInstanceId,
+    Math.min(...periods.map(p => Date.parse(p.period_start))),
+    Math.max(...periods.map(p => Date.parse(p.period_end))),
+  )
 
   const payload: UploadRequest = {
     schema_version: 1,
@@ -295,7 +366,7 @@ export async function uploadLeaderboardData(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const response = await uploadSnapshots(serverUrl, payload)
-      return { totalTokens: summary.totalTokens, response }
+      return { totalTokens: summary.totalTokens, response, withheld }
     } catch (error) {
       if (error instanceof LeaderboardApiError) {
         lastError = error
@@ -348,6 +419,14 @@ export async function runLeaderboardUpload(): Promise<void> {
     }
 
     console.log(`Preparing upload: ${result.totalTokens.toLocaleString()} tokens`)
+    if (result.withheld.records > 0) {
+      // Said, not subtracted quietly. The leaderboard schema has a column
+      // per token kind and no way to mark a lump total, so these are left
+      // out rather than published under a split that is not theirs.
+      console.log(
+        `Withheld ${result.withheld.tokens.toLocaleString()} tokens from ${result.withheld.records} ` +
+        `record(s) whose logs gave no input/output split.`)
+    }
     console.log('\n=== Upload Results ===')
     for (const snap of result.response.snapshots) {
       const icon = snap.status === 'accepted' ? '✓' :
