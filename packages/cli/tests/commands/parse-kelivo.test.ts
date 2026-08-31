@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { deflateRawSync } from 'node:zlib'
 import { initializeDatabase } from '../../src/db/index.js'
@@ -10,29 +10,19 @@ vi.mock('node:os', async () => {
   const actual = await vi.importActual('node:os')
   return {
     ...actual,
-    homedir: () => join(tmpdir(), 'aiusage-parse-kelivo-test'),
+    // The root tests/setup.ts isolated for this file. Mocked so discovery
+    // looks for fixture logs there, while AIUSAGE_HOME — already pointing
+    // at its .aiusage — keeps the installation directory in the same
+    // place. Deriving it rather than naming a second directory is what
+    // stops the two from drifting apart.
+    homedir: () => dirname(process.env.AIUSAGE_HOME as string),
   }
 })
 
-const { runParse: runParseIn } = await import('../../src/commands/parse.js')
-const { mkdtempSync: mkTempHome } = await import('node:fs')
-const { tmpdir: sysTmp } = await import('node:os')
-const { join: joinHome } = await import('node:path')
-
-/*
- * This file's own state and watermark, replaced before every test.
- *
- * runParse used to read the installation directory from a module constant,
- * so these tests read the developer's state.json and wrote the developer's
- * watermark.json — the same shape as the bug that stopped ingestion for 38
- * minutes. Per test rather than per file, because a run that shares a
- * watermark with the test before it is not testing what it says it is.
- */
-let aiusageHome: string
-beforeEach(() => { aiusageHome = mkTempHome(joinHome(sysTmp(), `aiusage-parse-`)) })
-
-const runParse: typeof runParseIn = (db, filterTool?, options?) =>
-  runParseIn(db, filterTool, options, aiusageHome)
+// The fixture home above is this file's installation directory, and each
+// test rewrites its watermark.json in beforeEach — so the default is
+// right here and a per-test directory would only disagree with it.
+const { runParse } = await import('../../src/commands/parse.js')
 
 function crc32(buffer: Buffer): number {
   let crc = 0xffffffff
@@ -97,7 +87,7 @@ function zipSingleFile(name: string, content: string): Buffer {
 }
 
 describe('runParse with Kelivo exports', () => {
-  const testDir = join(tmpdir(), 'aiusage-parse-kelivo-test')
+  const testDir = dirname(process.env.AIUSAGE_HOME as string)
   let cacheDb: Database.Database
 
   beforeEach(() => {

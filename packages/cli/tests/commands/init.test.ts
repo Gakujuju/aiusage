@@ -1,20 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { mkdirSync, rmSync, readFileSync } from 'node:fs'
 
 vi.mock('node:os', async () => {
   const actual = await vi.importActual('node:os')
   return {
     ...actual,
-    homedir: () => join(tmpdir(), 'aiusage-init-cmd-test'),
+    // The root tests/setup.ts isolated for this file. Mocked so discovery
+    // looks for fixture logs there, while AIUSAGE_HOME — already pointing
+    // at its .aiusage — keeps the installation directory in the same
+    // place. Deriving it rather than naming a second directory is what
+    // stops the two from drifting apart.
+    homedir: () => dirname(process.env.AIUSAGE_HOME as string),
   }
 })
 
 // Must import after mock
 const { runInit } = await import('../../src/commands/init.js')
 
-const testDir = join(tmpdir(), 'aiusage-init-cmd-test')
+const testDir = dirname(process.env.AIUSAGE_HOME as string)
 const configPath = join(testDir, '.aiusage', 'config.json')
 
 describe('Init Command', () => {

@@ -21,14 +21,17 @@ const { cfg, home } = vi.hoisted(() => {
   const { join } = require('node:path') as typeof import('node:path')
   const { tmpdir } = require('node:os') as typeof import('node:os')
   return {
-    home: mkdtempSync(join(tmpdir(), 'aiusage-platform-')),
+    home: process.env.AIUSAGE_HOME as string,
     cfg: { value: null as Record<string, unknown> | null },
   }
 })
 
 vi.mock('../../src/config.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/config.js')>('../../src/config.js')
-  return { ...actual, AIUSAGE_DIR: home, loadConfig: () => cfg.value }
+  // Only the config values. AIUSAGE_DIR is left alone: tests/setup.ts has
+  // already pointed it at an isolated directory, and overriding it here
+  // again was the second of three ways this suite isolated itself.
+  return { ...actual, loadConfig: () => cfg.value }
 })
 
 /*
