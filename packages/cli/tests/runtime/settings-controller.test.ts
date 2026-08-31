@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   RuntimeSettingsController,
+  DEFAULT_PARSE_INTERVAL_MS,
   DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS,
   QUOTA_SNAPSHOT_RETRY_DELAY_MS,
 } from '../../src/runtime/settings-controller.js'
@@ -28,7 +29,9 @@ describe('RuntimeSettingsController', () => {
     expect(runCleanup).not.toHaveBeenCalled()
   })
 
-  it('does not schedule when refreshInterval is blank or zero', async () => {
+  // Named for zero alone now: blank no longer means the same thing, and the
+  // case below covers it.
+  it('does not schedule when refreshInterval is zero', async () => {
     const loadConfig = vi.fn(() => ({ refreshInterval: 0 }))
     const runParse = vi.fn(async () => {})
     const runCleanup = vi.fn(() => {})
@@ -394,5 +397,125 @@ describe('RuntimeSettingsController', () => {
       await vi.advanceTimersByTimeAsync(500)
       controller.stop()
     })
+  })
+})
+
+/**
+ * Parsing has to happen without anyone watching.
+ *
+ * Upstream leaves the interval off and lets the dashboard drive a parse when
+ * someone opens it, which is coherent for one machine. The spokes run
+ * headless and nobody opens their dashboard, and the upload to the hub is
+ * driven by the parse — so with no interval a spoke sends its records once at
+ * startup and then goes quiet. The laptop did exactly that.
+ */
+describe('RuntimeSettingsController — parsing without a dashboard', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+
+  const build = (config: Record<string, unknown>) => {
+    const runParse = vi.fn(async () => {})
+    const controller = new RuntimeSettingsController({
+      db: {} as any,
+      loadConfig: () => config as any,
+      runParse,
+      runCleanup: vi.fn(() => {}),
+    })
+    return { controller, runParse }
+  }
+
+  it('parses on a five-minute timer when the config says nothing', async () => {
+    const { controller, runParse } = build({})
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS - 1)
+    expect(runParse).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runParse).toHaveBeenCalledTimes(1)
+
+    // And keeps going, rather than firing once.
+    await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+    expect(runParse).toHaveBeenCalledTimes(2)
+  })
+
+  it('stays off when the interval is explicitly zero', async () => {
+    const { controller, runParse } = build({ refreshInterval: 0 })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 3)
+
+    // The escape hatch has to keep working: someone who turned this off
+    // deliberately must not have it turned back on by an upgrade.
+    expect(runParse).not.toHaveBeenCalled()
+  })
+
+  it('uses the configured interval when there is one', async () => {
+    const { controller, runParse } = build({ refreshInterval: 60_000 })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(runParse).toHaveBeenCalledTimes(1)
+  })
+
+  it('still honours the older parseInterval name', async () => {
+    const { controller, runParse } = build({ parseInterval: 30_000 })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(runParse).toHaveBeenCalledTimes(1)
+  })
+
+  it('prefers refreshInterval when both are set', async () => {
+    const { controller, runParse } = build({ refreshInterval: 10_000, parseInterval: 90_000 })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(runParse).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Once the timer exists, a failing parse must say so. Nothing was logged
+   * during the incident, and the reason turned out to be that nothing ran —
+   * so this pins down the case where something does run and throws.
+   */
+  it('logs when a parse throws, rather than failing silently', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const controller = new RuntimeSettingsController({
+      db: {} as any,
+      loadConfig: () => ({}) as any,
+      runParse: vi.fn(async () => { throw new Error('disk on fire') }),
+      runCleanup: vi.fn(() => {}),
+    })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+
+    expect(error).toHaveBeenCalled()
+    expect(error.mock.calls.flat().join(' ')).toContain('parse failed')
+  })
+
+  it('keeps parsing after one throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const runParse = vi.fn()
+      .mockRejectedValueOnce(new Error('transient'))
+      .mockResolvedValue(undefined)
+    const controller = new RuntimeSettingsController({
+      db: {} as any,
+      loadConfig: () => ({}) as any,
+      runParse,
+      runCleanup: vi.fn(() => {}),
+    })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+    await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+
+    // A failure must not leave parseInFlight stuck and silence every tick
+    // after it — that shape is exactly what an outage looks like from here.
+    expect(runParse).toHaveBeenCalledTimes(2)
   })
 })

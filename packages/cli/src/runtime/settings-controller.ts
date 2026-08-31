@@ -20,6 +20,26 @@ const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000
 const DEFAULT_LEADERBOARD_UPLOAD_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 export const DEFAULT_QUOTA_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000
 
+/**
+ * How often serve parses logs when the config does not say.
+ *
+ * Upstream leaves this off, and for a single machine that is coherent:
+ * opening the dashboard triggers a parse, so the person looking at the
+ * numbers is the one who refreshes them. Nobody is worse off for a parse
+ * that did not happen while they were not looking.
+ *
+ * It does not hold here. The spokes run headless — their serve exists to
+ * read their own logs and hand the results to the hub — and nobody ever
+ * opens their dashboard, so nothing drives them. Worse, the upload to the
+ * hub is driven by the parse, so a spoke without this sends its records
+ * once at startup and then never again; the laptop's only "uploaded 72
+ * record(s)" line came immediately after a restart.
+ *
+ * So this is not a tuning improvement, it is what makes more than one
+ * machine work at all. Setting refreshInterval to 0 still switches it off.
+ */
+export const DEFAULT_PARSE_INTERVAL_MS = 5 * 60 * 1000
+
 /** How long to wait before the single retry of a parse-blocked snapshot. */
 export const QUOTA_SNAPSHOT_RETRY_DELAY_MS = 30 * 1000
 
@@ -119,7 +139,10 @@ export class RuntimeSettingsController {
     this.quotaSnapshotTimer = null
 
     const config = this.loadConfigFn()
-    const parseInterval = Number(config?.refreshInterval ?? config?.parseInterval ?? 0)
+    // Defaults to on, for the reason above DEFAULT_PARSE_INTERVAL_MS.
+    // parseInterval is the older name and still honoured.
+    const parseInterval = Number(
+      config?.refreshInterval ?? config?.parseInterval ?? DEFAULT_PARSE_INTERVAL_MS)
     const retentionDays = Number(config?.retentionDays ?? 0)
     const leaderboardUploadInterval = Number(config?.leaderboardUploadInterval ?? DEFAULT_LEADERBOARD_UPLOAD_INTERVAL_MS)
 
