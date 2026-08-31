@@ -1,3 +1,4 @@
+import { HAS_TOKEN_BREAKDOWN } from '../db/row-scope.js'
 import { createDatabase } from '../db/index.js'
 import { getState } from '../init.js'
 import { AIUSAGE_DIR } from '../config.js'
@@ -167,7 +168,7 @@ function canonicalSnapshot(snapshot: Omit<UploadSnapshot, 'token_snapshot_hash'>
  * countWithheldTokens exists so the shortfall is stated at upload time
  * rather than being a silent subtraction.
  */
-const BREAKDOWN_FILTER = 'AND breakdown_missing = 0'
+const BREAKDOWN_FILTER = HAS_TOKEN_BREAKDOWN
 
 /** Tokens left out of the snapshot above, for saying so out loud. */
 export function countWithheldTokens(

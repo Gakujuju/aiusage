@@ -83,7 +83,9 @@ describe('Database Schema', () => {
     const viewNames = views.map((v: any) => v.name)
     expect(viewNames).toContain('v_usage_records')
     expect(viewNames).toContain('v_tool_calls')
-    expect(viewNames).toContain('v_sessions')
+    // v_sessions was dropped in v23: nothing read it, and it aggregated
+    // without the corrections the rest of the code has since grown.
+    expect(viewNames).not.toContain('v_sessions')
   })
 
   it('creates all required indexes', () => {
@@ -117,7 +119,7 @@ describe('Database Schema', () => {
   it('records latest schema version', () => {
     initializeDatabase(db)
     const version = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get()
-    expect((version as any).version).toBe(22)
+    expect((version as any).version).toBe(23)
   })
 
   it('queries visualization views successfully', () => {
@@ -152,9 +154,6 @@ describe('Database Schema', () => {
     expect(toolCallRow.name).toBe('Read')
     expect(toolCallRow.session_id).toBe('s1')
 
-    const sessionRow = db.prepare('SELECT * FROM v_sessions WHERE session_id = ?').get('s1') as any
-    expect(sessionRow.record_count).toBe(1)
-    expect(sessionRow.total_tokens).toBe(185)
-    expect(sessionRow.total_cost).toBe(1.25)
+    // No v_sessions query here any more; see above.
   })
 })

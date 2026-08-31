@@ -52,28 +52,10 @@ export function createReadonlyViews(db: Database.Database): void {
     FROM tool_calls tc
     LEFT JOIN records r ON r.id = tc.record_id;
 
-    CREATE VIEW IF NOT EXISTS v_sessions AS
-    SELECT
-      session_id,
-      tool,
-      model,
-      provider,
-      device,
-      device_instance_id,
-      COUNT(*) AS record_count,
-      MIN(ts) AS first_ts,
-      datetime(MIN(ts) / 1000, 'unixepoch') || '.' || printf('%03d', MIN(ts) % 1000) || 'Z' AS first_timestamp,
-      MAX(ts) AS last_ts,
-      datetime(MAX(ts) / 1000, 'unixepoch') || '.' || printf('%03d', MAX(ts) % 1000) || 'Z' AS last_timestamp,
-      SUM(input_tokens) AS input_tokens,
-      SUM(output_tokens) AS output_tokens,
-      SUM(cache_read_tokens) AS cache_read_tokens,
-      SUM(cache_write_tokens) AS cache_write_tokens,
-      SUM(thinking_tokens) AS thinking_tokens,
-      SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS total_tokens,
-      SUM(cost) AS total_cost
-    FROM records
-    GROUP BY session_id, tool, model, provider, device, device_instance_id;
+    /* v_sessions was here. Dropped in v23: nothing selected from it, and it
+       knew nothing about counting a merged row once or about rows with no
+       token breakdown, so it would have shown the inflated figures the rest
+       of the code has stopped showing. See v23.ts. */
   `)
 
   // The tables behind the views below arrive in later migrations, but

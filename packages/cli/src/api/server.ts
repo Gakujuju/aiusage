@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
 import { calculateCostForPrice, removePriceOverride, inferProvider, normalizeQoderModel, resolveExchangeRate, fetchExchangeRate, forecastQuota, p90FinalUtilization, classifyQuotaError, isAgentEventKind, isAgentStatus, TOOLS, type PriceEntry, type QuotaErrorInput } from '@aiusage/core'
+import { PRODUCED_HERE, PRODUCED_HERE_R, NOT_YET_MERGED } from '../db/row-scope.js'
 import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL,
   DASHBOARD_PASSWORD_CREDENTIAL, DEFAULT_VAPID_SUBJECT, HIDEABLE_ROUTES, VAPID_PRIVATE_KEY_CREDENTIAL,
   buildConsentConfig, loadConfig, saveConfig,
@@ -470,59 +471,13 @@ function getToolTypeFilter(toolType: string | null): string {
   return ''
 }
 
-/*
- * Rows this machine produced, as opposed to ones that arrived from a spoke.
- *
- * This used to read source_file NOT LIKE 'synced/%'. The merge only invents
- * that prefix for rows that arrived without a source_file of their own, and
- * direct sync always sends one, so the test matched almost nothing it was
- * meant to match. Two separate faults fell out of that:
- *
- * - the all-devices union counted every merged row twice, once from each
- *   table — 3829 rows, 1,021,475,505 tokens and $357 on this hub, about a
- *   tenth of every figure on the site;
- * - "this device" showed 18219 rows where the hub had produced 14390, the
- *   rest being other machines' rows still wearing their original paths.
- *
- * Asking whether the row also exists in synced_records answers the actual
- * question — did this come from somewhere else — and cannot drift the way
- * a path convention does.
- *
- * Only for the single-table queries. The union leaves its records side
- * unfiltered and dedups on the synced side instead, because filtering both
- * halves would drop a merged row from each of them.
- */
-const LOCAL_ONLY_FILTER = 'AND NOT EXISTS (SELECT 1 FROM synced_records s WHERE s.id = records.id)'
+// The predicates live in row-scope.ts. Three copies of these were wrong in
+// three different ways on one day; the predicate is what was wrong each
+// time, so the predicate is what is shared.
+const LOCAL_ONLY_FILTER = PRODUCED_HERE
+const LOCAL_ONLY_FILTER_R = PRODUCED_HERE_R
 
-/** The same test where the query has aliased records to r. */
-const LOCAL_ONLY_FILTER_R = 'AND NOT EXISTS (SELECT 1 FROM synced_records s WHERE s.id = r.id)'
-
-/*
- * Rows the merge has not copied into records yet.
- *
- * LOCAL_ONLY_FILTER was meant to keep the union from counting another
- * machine's rows twice, on the assumption that a merged copy carries a
- * source_file starting with 'synced/'. It does not:
- * mergeSyncedRecordsIntoRecords keeps the original source_file and only
- * falls back to that prefix when the row arrived without one. Rows that
- * come in over direct sync always have one, so every merged copy slipped
- * past the filter and was counted again from synced_records.
- *
- * Measured on the hub: 3829 rows, 1,021,475,505 tokens and $357 of cost
- * counted twice — about a tenth of every all-devices figure on the site.
- *
- * Matching on the id instead of guessing from the path cannot drift the
- * same way. records is preferred and synced_records fills the gap, which
- * is the right way round: records is the table the hub corrects (recalc,
- * backfills) and the one D28 will make the merge keep current.
- *
- * The gap is real, not hypothetical. The merge only runs during a parse,
- * so a row uploaded by a spoke waits for the next one: measured here at
- * 18.7 minutes on average and up to 19.7, with 314 rows sitting in that
- * state. Dropping the synced side outright would have blanked them for
- * that whole window.
- */
-const NOT_ALREADY_MERGED = 'AND NOT EXISTS (SELECT 1 FROM records r WHERE r.id = synced_records.id)'
+const NOT_ALREADY_MERGED = NOT_YET_MERGED
 
 function getDeviceFilter(
   device: string | null | undefined,

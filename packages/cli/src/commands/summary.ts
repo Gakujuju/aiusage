@@ -1,3 +1,4 @@
+import { PRODUCED_HERE, NOT_YET_MERGED } from '../db/row-scope.js'
 import type Database from 'better-sqlite3'
 import { getToolCallStats } from '../db/tool-calls.js'
 
@@ -28,8 +29,8 @@ export function generateSummary(db: Database.Database, options?: SummaryOptions)
   let byToolSql: string
   let byToolParams: Record<string, unknown> = {}
 
-  /*
-   * Rows this machine produced, and the reason it is an id test.
+  /* See row-scope.ts. Shared because these predicates, not the queries
+   * around them, are what was wrong three separate times.
    *
    * This read source_file NOT LIKE 'synced/%' until the same false
    * assumption was found in the API: the merge keeps a row's original
@@ -41,10 +42,10 @@ export function generateSummary(db: Database.Database, options?: SummaryOptions)
    * tenth larger than the dashboard beside it — and the status line runs
    * this command, so the two disagreed on screen all day.
    */
-  const localOnlyFilter = 'AND NOT EXISTS (SELECT 1 FROM synced_records s WHERE s.id = records.id)'
+  const localOnlyFilter = PRODUCED_HERE
 
   /** Rows the merge has not copied into records yet, so nothing is lost. */
-  const notAlreadyMerged = 'AND NOT EXISTS (SELECT 1 FROM records r WHERE r.id = synced_records.id)'
+  const notAlreadyMerged = NOT_YET_MERGED
   const toolWhere = options?.tool ? 'AND tool = @tool' : ''
   const toolParam = options?.tool ? { tool: options.tool } : {}
   const timeWhere = [
