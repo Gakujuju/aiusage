@@ -12,8 +12,39 @@ export interface RuntimeSettingsControllerOptions {
   runQuotaSnapshot?: () => Promise<unknown>
   /** Upload this machine's records to the hub. Absent when there is no hub. */
   runHubUpload?: () => Promise<unknown>
+  /**
+   * Called once each time parsing goes quiet for longer than it should, and
+   * not again until it recovers. Absent means nobody is listening, which is
+   * the spokes' situation — see the note on checkParseHealth.
+   */
+  onParseStalled?: (info: ParseHealth & { stalledSince: number }) => void
+  /** Injected so the tests can drive it. */
+  now?: () => number
   onSyncScheduleChanged?: (nextSyncAt: number | undefined) => void
   cleanupIntervalMs?: number
+}
+
+/**
+ * How often to ask whether parsing is still happening.
+ *
+ * Deliberately not the parse interval: this timer's whole purpose is to
+ * outlive the one it watches. A minute is fine — it only reads two numbers.
+ */
+const PARSE_HEALTH_CHECK_INTERVAL_MS = 60 * 1000
+
+/** Missed roughly this many parses before anyone is told. */
+const PARSE_STALL_INTERVALS = 3
+
+export interface ParseHealth {
+  /** When a parse last finished without throwing. Null before the first. */
+  lastParseOkAt: number | null
+  /** The interval in force right now, not the one at startup. */
+  intervalMs: number
+  /** How long a silence has to last before it counts. */
+  thresholdMs: number
+  stalled: boolean
+  /** When the current silence began, or null when it is not stalled. */
+  stalledSince: number | null
 }
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000
@@ -61,6 +92,18 @@ export class RuntimeSettingsController {
   private quotaSnapshotTimer: ReturnType<typeof setInterval> | null = null
   private quotaSnapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
   private parseInFlight = false
+  private readonly onParseStalledFn: RuntimeSettingsControllerOptions['onParseStalled']
+  private readonly now: () => number
+  /**
+   * Set only when a parse completes without throwing.
+   *
+   * "Attempted" is not the thing worth recording: a run that threw, or one
+   * that returned early because another was still in flight, leaves the data
+   * exactly as stale as no run at all.
+   */
+  private lastParseOkAt: number | null = null
+  private parseStalledSince: number | null = null
+  private stallTimer: ReturnType<typeof setInterval> | null = null
   private cleanupInFlight = false
   private leaderboardUploadInFlight = false
   private quotaSnapshotInFlight = false
@@ -79,6 +122,8 @@ export class RuntimeSettingsController {
     this.runSyncFn = options.runSync
     this.runQuotaSnapshotFn = options.runQuotaSnapshot
     this.runHubUploadFn = options.runHubUpload
+    this.onParseStalledFn = options.onParseStalled
+    this.now = options.now ?? Date.now
     this.onSyncScheduleChangedFn = options.onSyncScheduleChanged
     this.cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS
   }
@@ -86,6 +131,26 @@ export class RuntimeSettingsController {
   start(): void {
     if (this.started) return
     this.started = true
+    /*
+     * Its own timer, started here rather than in applyConfig.
+     *
+     * A watcher that lives on the thing it watches cannot report that the
+     * thing has stopped — and applyConfig tears every other timer down and
+     * rebuilds them, so putting this one there would mean a config reload
+     * could silently drop the only thing that would have noticed.
+     *
+     * Nothing about this timer depends on the parse interval, so a reload
+     * has no reason to touch it.
+     */
+    this.stallTimer = setInterval(() => {
+      this.checkParseHealth()
+    }, PARSE_HEALTH_CHECK_INTERVAL_MS)
+    this.stallTimer.unref?.()
+
+    // Silence only counts from when we started watching; before that there
+    // was nothing to be silent about.
+    this.lastParseOkAt = this.now()
+
     this.applyConfig()
   }
 
@@ -105,6 +170,8 @@ export class RuntimeSettingsController {
 
   stop(): void {
     this.started = false
+    if (this.stallTimer) clearInterval(this.stallTimer)
+    this.stallTimer = null
     if (this.hubUploadTimer) clearInterval(this.hubUploadTimer)
     this.hubUploadTimer = null
     if (this.parseTimer) clearInterval(this.parseTimer)
@@ -193,6 +260,9 @@ export class RuntimeSettingsController {
     this.parseInFlight = true
     try {
       await this.runParseFn(this.db)
+      // Only here: reached solely when the parse ran to completion.
+      this.lastParseOkAt = this.now()
+      this.parseStalledSince = null
     } catch (err) {
       // Keep scheduling active after individual parse failures.
       console.error('[settings-controller] parse failed:', err)
@@ -250,6 +320,70 @@ export class RuntimeSettingsController {
    */
   async uploadToHubNow(): Promise<void> {
     await this.runHubUploadSafely()
+  }
+
+  /**
+   * The one place that decides whether parsing has gone quiet.
+   *
+   * Both outputs — the notification and /api/health — read this rather than
+   * working it out again, so they cannot come to different conclusions.
+   *
+   * The interval is read now, not remembered from startup: the config can be
+   * reloaded while serve runs, and a threshold derived from a stale interval
+   * would either cry wolf or stay silent for hours after someone slowed the
+   * poller down.
+   */
+  parseHealth(): ParseHealth {
+    const intervalMs = this.parseIntervalMs()
+    const thresholdMs = intervalMs * PARSE_STALL_INTERVALS
+    const lastParseOkAt = this.lastParseOkAt
+
+    // Parsing switched off on purpose is not a stall.
+    if (intervalMs <= 0 || lastParseOkAt == null) {
+      return { lastParseOkAt, intervalMs, thresholdMs, stalled: false, stalledSince: null }
+    }
+
+    const stalled = this.now() - lastParseOkAt > thresholdMs
+    return {
+      lastParseOkAt,
+      intervalMs,
+      thresholdMs,
+      stalled,
+      stalledSince: stalled ? lastParseOkAt : null,
+    }
+  }
+
+  /**
+   * Tell someone, once per silence.
+   *
+   * On a spoke there is nobody to tell: no webhook, no push subscription.
+   * The check still runs and /api/health still answers, but the notification
+   * goes nowhere. That is a property of the arrangement rather than of this
+   * code — a machine nobody watches cannot raise an alarm on its own — and
+   * it is written down in OPERATIONS.md next to the hub setup.
+   */
+  private checkParseHealth(): void {
+    const health = this.parseHealth()
+
+    if (!health.stalled) {
+      this.parseStalledSince = null
+      return
+    }
+    // Already reported this one. A second message adds nothing and the first
+    // is still true.
+    if (this.parseStalledSince != null) return
+
+    this.parseStalledSince = health.stalledSince
+    console.warn(
+      `[settings-controller] no parse has completed for ${Math.round((this.now() - (health.lastParseOkAt ?? 0)) / 60000)} ` +
+      `minute(s); the interval is ${Math.round(health.intervalMs / 60000)} minute(s)`)
+    this.onParseStalledFn?.({ ...health, stalledSince: health.stalledSince! })
+  }
+
+  /** The interval in force, resolved the same way applyConfig resolves it. */
+  private parseIntervalMs(): number {
+    const config = this.loadConfigFn()
+    return Number(config?.refreshInterval ?? config?.parseInterval ?? DEFAULT_PARSE_INTERVAL_MS)
   }
 
   /** Minutes in config, milliseconds here. 0 switches record upload off. */

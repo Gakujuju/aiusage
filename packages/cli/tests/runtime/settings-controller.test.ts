@@ -518,4 +518,208 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
     // after it — that shape is exactly what an outage looks like from here.
     expect(runParse).toHaveBeenCalledTimes(2)
   })
+  /*
+   * The detector.
+   *
+   * A clock is injected rather than left to the fake timers alone, because
+   * the thing under test is the gap between two readings of it, and the
+   * production clock does not advance when vitest advances a timer.
+   */
+  describe('parse stall detection', () => {
+    /** Never resolves: a parse that started and never came back. */
+    const hungParse = () => new Promise<void>(() => {})
+
+    function build(overrides: Record<string, unknown> = {}) {
+      let clock = 1_000_000
+      const onParseStalled = vi.fn()
+      const controller = new RuntimeSettingsController({
+        db: {} as any,
+        loadConfig: () => ({}) as any,
+        runParse: vi.fn(async () => {}),
+        runCleanup: vi.fn(() => {}),
+        onParseStalled,
+        now: () => clock,
+        ...overrides,
+      } as any)
+      return {
+        controller,
+        onParseStalled,
+        advanceClock: (ms: number) => { clock += ms },
+        get clock() { return clock },
+      }
+    }
+
+    it('says nothing while parses keep completing', async () => {
+      const h = build()
+      h.controller.start()
+
+      // Four parses, each on time. The clock moves only in step with them.
+      for (let i = 0; i < 4; i++) {
+        h.advanceClock(DEFAULT_PARSE_INTERVAL_MS)
+        await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+      }
+
+      expect(h.onParseStalled).not.toHaveBeenCalled()
+      expect(h.controller.parseHealth().stalled).toBe(false)
+      h.controller.stop()
+    })
+
+    it('reports once after three intervals of silence', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 3)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 3)
+      // Exactly three intervals is not yet more than three.
+      expect(h.onParseStalled).not.toHaveBeenCalled()
+
+      h.advanceClock(60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalled()
+      h.controller.stop()
+    })
+
+    it('does not say it again while the same silence continues', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      // Long past the threshold, and then a good while longer.
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 10)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 10)
+
+      expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      h.controller.stop()
+    })
+
+    /*
+     * A failing parse rather than a hanging one, because a hang cannot
+     * recover: the run that never returns leaves parseInFlight set, so every
+     * later tick returns early and nothing can put it right short of a
+     * restart. Failure is the recoverable kind, and the kind worth testing
+     * here.
+     */
+    it('reports again after a recovery and a second silence', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      let failing = true
+      const h = build({
+        runParse: vi.fn(async () => { if (failing) throw new Error('down') }),
+      })
+      h.controller.start()
+
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+      expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      const firstStart = h.onParseStalled.mock.calls[0][0].stalledSince
+
+      // It comes back.
+      failing = false
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+      expect(h.controller.parseHealth().stalled).toBe(false)
+
+      // And stops again. A different outage, so it is said again — and the
+      // start time differs, which is what stops the dedupe key swallowing it.
+      failing = true
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+
+      expect(h.onParseStalled).toHaveBeenCalledTimes(2)
+      expect(h.onParseStalled.mock.calls[1][0].stalledSince).not.toBe(firstStart)
+      h.controller.stop()
+    })
+
+    /**
+     * The point of the separate timer.
+     *
+     * With parsing switched off there is nothing to be silent about, so the
+     * case that matters is a parse timer that exists and never comes back.
+     * Here the parse hangs forever: its callback never returns, which is
+     * precisely the shape that would take the detector down with it if the
+     * two shared a timer.
+     */
+    it('still reports when the parse itself is what is stuck', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+
+      expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      h.controller.stop()
+    })
+
+    /**
+     * Config is reloadable, so a threshold frozen at startup would be wrong
+     * from the moment someone changed the interval — crying wolf if they
+     * slowed it down, staying quiet for hours if they sped it up.
+     */
+    it('moves the threshold when the interval changes', async () => {
+      let refreshInterval = DEFAULT_PARSE_INTERVAL_MS
+      const h = build({
+        loadConfig: () => ({ refreshInterval }) as any,
+        runParse: vi.fn(hungParse),
+      })
+      h.controller.start()
+
+      // Twelve minutes of silence: past 3x a one-minute interval, nowhere
+      // near 3x five minutes.
+      h.advanceClock(12 * 60_000)
+      expect(h.controller.parseHealth().stalled).toBe(false)
+
+      refreshInterval = 60_000
+      h.controller.reload()
+
+      const health = h.controller.parseHealth()
+      expect(health.intervalMs).toBe(60_000)
+      expect(health.thresholdMs).toBe(3 * 60_000)
+      expect(health.stalled).toBe(true)
+      h.controller.stop()
+    })
+
+    it('reports when a parse last completed', async () => {
+      const h = build()
+      h.controller.start()
+      const startedAt = h.clock
+
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+
+      expect(h.controller.parseHealth().lastParseOkAt).toBe(startedAt + DEFAULT_PARSE_INTERVAL_MS)
+      h.controller.stop()
+    })
+
+    /** A parse that threw leaves the data as stale as one that never ran. */
+    it('does not count a failed parse as a completed one', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(async () => { throw new Error('disk on fire') }) })
+      h.controller.start()
+      const startedAt = h.clock
+
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+
+      expect(h.controller.parseHealth().lastParseOkAt).toBe(startedAt)
+      expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      h.controller.stop()
+    })
+
+    it('is not stalled when parsing is switched off on purpose', async () => {
+      const h = build({ loadConfig: () => ({ refreshInterval: 0 }) as any })
+      h.controller.start()
+
+      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 100)
+      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 100)
+
+      expect(h.controller.parseHealth().stalled).toBe(false)
+      expect(h.onParseStalled).not.toHaveBeenCalled()
+      h.controller.stop()
+    })
+  })
 })
