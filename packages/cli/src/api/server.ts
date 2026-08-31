@@ -470,7 +470,59 @@ function getToolTypeFilter(toolType: string | null): string {
   return ''
 }
 
-const LOCAL_ONLY_FILTER = "AND source_file NOT LIKE 'synced/%'"
+/*
+ * Rows this machine produced, as opposed to ones that arrived from a spoke.
+ *
+ * This used to read source_file NOT LIKE 'synced/%'. The merge only invents
+ * that prefix for rows that arrived without a source_file of their own, and
+ * direct sync always sends one, so the test matched almost nothing it was
+ * meant to match. Two separate faults fell out of that:
+ *
+ * - the all-devices union counted every merged row twice, once from each
+ *   table — 3829 rows, 1,021,475,505 tokens and $357 on this hub, about a
+ *   tenth of every figure on the site;
+ * - "this device" showed 18219 rows where the hub had produced 14390, the
+ *   rest being other machines' rows still wearing their original paths.
+ *
+ * Asking whether the row also exists in synced_records answers the actual
+ * question — did this come from somewhere else — and cannot drift the way
+ * a path convention does.
+ *
+ * Only for the single-table queries. The union leaves its records side
+ * unfiltered and dedups on the synced side instead, because filtering both
+ * halves would drop a merged row from each of them.
+ */
+const LOCAL_ONLY_FILTER = 'AND NOT EXISTS (SELECT 1 FROM synced_records s WHERE s.id = records.id)'
+
+/** The same test where the query has aliased records to r. */
+const LOCAL_ONLY_FILTER_R = 'AND NOT EXISTS (SELECT 1 FROM synced_records s WHERE s.id = r.id)'
+
+/*
+ * Rows the merge has not copied into records yet.
+ *
+ * LOCAL_ONLY_FILTER was meant to keep the union from counting another
+ * machine's rows twice, on the assumption that a merged copy carries a
+ * source_file starting with 'synced/'. It does not:
+ * mergeSyncedRecordsIntoRecords keeps the original source_file and only
+ * falls back to that prefix when the row arrived without one. Rows that
+ * come in over direct sync always have one, so every merged copy slipped
+ * past the filter and was counted again from synced_records.
+ *
+ * Measured on the hub: 3829 rows, 1,021,475,505 tokens and $357 of cost
+ * counted twice — about a tenth of every all-devices figure on the site.
+ *
+ * Matching on the id instead of guessing from the path cannot drift the
+ * same way. records is preferred and synced_records fills the gap, which
+ * is the right way round: records is the table the hub corrects (recalc,
+ * backfills) and the one D28 will make the merge keep current.
+ *
+ * The gap is real, not hypothetical. The merge only runs during a parse,
+ * so a row uploaded by a spoke waits for the next one: measured here at
+ * 18.7 minutes on average and up to 19.7, with 314 rows sitting in that
+ * state. Dropping the synced side outright would have blanked them for
+ * that whole window.
+ */
+const NOT_ALREADY_MERGED = 'AND NOT EXISTS (SELECT 1 FROM records r WHERE r.id = synced_records.id)'
 
 function getDeviceFilter(
   device: string | null | undefined,
@@ -902,10 +954,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           // All devices: UNION records + synced_records (excluding current device's synced copy)
           const unionSql = `
             SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, ts, session_id, breakdown_missing
-            FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+            FROM records WHERE 1=1 ${dr.where} ${tf.where}
             UNION ALL
             SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, ts, session_key AS session_id, breakdown_missing
-            FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where}
+            FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}
           `
           totals = db.prepare(`
             SELECT
@@ -935,13 +987,13 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
               SELECT tool,
                      SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS tokens,
                      SUM(cost) AS cost
-              FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+              FROM records WHERE 1=1 ${dr.where} ${tf.where}
               GROUP BY tool
               UNION ALL
               SELECT tool,
                      SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS tokens,
                      SUM(cost) AS cost
-              FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where}
+              FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}
               GROUP BY tool
             ) GROUP BY tool ORDER BY cost DESC
           `).all({ ...dr.params, ...df.params, ...tf.params }) as any[]
@@ -1071,9 +1123,16 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           // has been closing.
           ...countUnpricedRecords(db, {
             source: df.useUnion ? 'union' : (df.where ? 'synced' : 'records'),
-            recordsWhere: `${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}`,
+            // Unfiltered under a union, for the same reason the SQL above
+            // is: the synced side already drops merged rows, so filtering
+            // here too would count them zero times instead of twice.
+            recordsWhere: df.useUnion
+              ? `${dr.where} ${tf.where}`
+              : `${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}`,
             syncedWhere: df.useUnion
-              ? `AND device_instance_id != @currentDeviceId ${dr.where} ${tf.where}`
+              // Same dedup as the totals above: this band sat beside them
+              // reading 594 while the log, which never unions, said 297.
+              ? `AND device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}`
               : `${df.where} ${dr.where} ${tf.where}`,
             params: { ...dr.params, ...df.params, ...tf.params },
           }),
@@ -1101,9 +1160,9 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
                    SUM(cache_write_tokens) AS cacheWriteTokens,
                    SUM(thinking_tokens) AS thinkingTokens
             FROM (
-              SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, ts FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+              SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, ts FROM records WHERE 1=1 ${dr.where} ${tf.where}
               UNION ALL
-              SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, ts FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where}
+              SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, ts FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}
             )
             GROUP BY date ORDER BY date`
           params = { ...dr.params, currentDeviceId: df.params.currentDeviceId, ...tf.params }
@@ -1153,26 +1212,26 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
             SELECT strftime('%Y-%m-%d', ts/1000, 'unixepoch') AS date,
                    SUM(cost) AS cost
             FROM (
-              SELECT cost, ts FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+              SELECT cost, ts FROM records WHERE 1=1 ${dr.where} ${tf.where}
               UNION ALL
-              SELECT cost, ts FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where}
+              SELECT cost, ts FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}
             )
             GROUP BY date ORDER BY date
           `).all({ ...dr.params, currentDeviceId: df.params.currentDeviceId, ...tf.params }) as any[]
 
           byToolRows = db.prepare(`
             SELECT tool, SUM(cost) AS cost FROM (
-              SELECT tool, SUM(cost) AS cost FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where} GROUP BY tool
+              SELECT tool, SUM(cost) AS cost FROM records WHERE 1=1 ${dr.where} ${tf.where} GROUP BY tool
               UNION ALL
-              SELECT tool, SUM(cost) AS cost FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where} GROUP BY tool
+              SELECT tool, SUM(cost) AS cost FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where} GROUP BY tool
             ) GROUP BY tool ORDER BY cost DESC
           `).all({ ...dr.params, currentDeviceId: df.params.currentDeviceId, ...tf.params }) as any[]
 
           byModelRows = db.prepare(`
             SELECT model, SUM(cost) AS cost FROM (
-              SELECT model, SUM(cost) AS cost FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where} GROUP BY model
+              SELECT model, SUM(cost) AS cost FROM records WHERE 1=1 ${dr.where} ${tf.where} GROUP BY model
               UNION ALL
-              SELECT model, SUM(cost) AS cost FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where} GROUP BY model
+              SELECT model, SUM(cost) AS cost FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where} GROUP BY model
             ) GROUP BY model ORDER BY cost DESC
           `).all({ ...dr.params, currentDeviceId: df.params.currentDeviceId, ...tf.params }) as any[]
         } else if (device && device !== options?.currentDeviceInstanceId) {
@@ -1247,7 +1306,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
                    SUM(thinking_tokens) AS thinkingTokens,
                    SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS totalTokens,
                    SUM(cost) AS totalCost
-            FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+            FROM records WHERE 1=1 ${dr.where} ${tf.where}
             GROUP BY model, provider
             UNION ALL
             SELECT model, provider,
@@ -1259,7 +1318,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
                    SUM(thinking_tokens) AS thinkingTokens,
                    SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS totalTokens,
                    SUM(cost) AS totalCost
-            FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where} ${tf.where}
+            FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}
             GROUP BY model, provider
           `
           const mergedRows = db.prepare(`
@@ -1531,7 +1590,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         const totalRow = db.prepare(`
           SELECT COUNT(DISTINCT r.session_id) AS total
           FROM records r
-          WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+          WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER_R : ''} ${tf.where}
         `).get(params) as any
 
         const sessions = db.prepare(`
@@ -1548,7 +1607,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
                  COUNT(DISTINCT tc.id) AS toolCallCount
           FROM records r
           LEFT JOIN tool_calls tc ON tc.record_id = r.id
-          WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''} ${tf.where}
+          WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER_R : ''} ${tf.where}
           GROUP BY r.session_id
           ORDER BY MIN(r.ts) DESC
           LIMIT @limit OFFSET @offset
@@ -2663,9 +2722,9 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         if (df.useUnion) {
           rows = db.prepare(`
             SELECT tool, COUNT(DISTINCT session_id) AS sessionCount FROM (
-              SELECT tool, session_id FROM records WHERE 1=1 ${dr.where} ${df.localOnly ? LOCAL_ONLY_FILTER : ''}
+              SELECT tool, session_id FROM records WHERE 1=1 ${dr.where}
               UNION ALL
-              SELECT tool, session_key AS session_id FROM synced_records WHERE device_instance_id != @currentDeviceId ${dr.where}
+              SELECT tool, session_key AS session_id FROM synced_records WHERE device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where}
             ) GROUP BY tool ORDER BY sessionCount DESC
           `).all({ ...dr.params, ...df.params }) as any[]
         } else if (df.where) {
