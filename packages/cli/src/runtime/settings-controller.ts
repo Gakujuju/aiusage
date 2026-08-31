@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { Config } from '../config.js'
+import { DEFAULT_HUB_UPLOAD_INTERVAL_MS } from '../sync/hub-upload.js'
 
 export interface RuntimeSettingsControllerOptions {
   db: Database.Database
@@ -9,6 +10,8 @@ export interface RuntimeSettingsControllerOptions {
   runLeaderboardUpload?: (db: Database.Database) => Promise<unknown>
   runSync?: () => void
   runQuotaSnapshot?: () => Promise<unknown>
+  /** Upload this machine's records to the hub. Absent when there is no hub. */
+  runHubUpload?: () => Promise<unknown>
   onSyncScheduleChanged?: (nextSyncAt: number | undefined) => void
   cleanupIntervalMs?: number
 }
@@ -28,6 +31,7 @@ export class RuntimeSettingsController {
   private readonly runLeaderboardUploadFn: RuntimeSettingsControllerOptions['runLeaderboardUpload']
   private readonly runSyncFn: RuntimeSettingsControllerOptions['runSync']
   private readonly runQuotaSnapshotFn: RuntimeSettingsControllerOptions['runQuotaSnapshot']
+  private readonly runHubUploadFn: RuntimeSettingsControllerOptions['runHubUpload']
   private readonly onSyncScheduleChangedFn: RuntimeSettingsControllerOptions['onSyncScheduleChanged']
   private readonly cleanupIntervalMs: number
   private parseTimer: ReturnType<typeof setInterval> | null = null
@@ -40,6 +44,9 @@ export class RuntimeSettingsController {
   private cleanupInFlight = false
   private leaderboardUploadInFlight = false
   private quotaSnapshotInFlight = false
+  private hubUploadInFlight = false
+  private hubUploadTimer: ReturnType<typeof setInterval> | null = null
+  private lastHubUploadAt = 0
   private quotaSnapshotRetrying = false
   private started = false
 
@@ -51,6 +58,7 @@ export class RuntimeSettingsController {
     this.runLeaderboardUploadFn = options.runLeaderboardUpload
     this.runSyncFn = options.runSync
     this.runQuotaSnapshotFn = options.runQuotaSnapshot
+    this.runHubUploadFn = options.runHubUpload
     this.onSyncScheduleChangedFn = options.onSyncScheduleChanged
     this.cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS
   }
@@ -77,6 +85,8 @@ export class RuntimeSettingsController {
 
   stop(): void {
     this.started = false
+    if (this.hubUploadTimer) clearInterval(this.hubUploadTimer)
+    this.hubUploadTimer = null
     if (this.parseTimer) clearInterval(this.parseTimer)
     if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     if (this.leaderboardUploadTimer) clearInterval(this.leaderboardUploadTimer)
@@ -166,6 +176,66 @@ export class RuntimeSettingsController {
     } finally {
       this.parseInFlight = false
     }
+
+    /*
+     * A parse is the only thing that produces new records, so this is the
+     * one moment there is anything to upload. Running on a timer of its own
+     * would mean most passes find nothing and the ones that find something
+     * are waiting on the next tick rather than on the parse that made them.
+     *
+     * Outside the flag above: better-sqlite3 holds the event loop while a
+     * parse runs, so an upload started inside it would have its timeout
+     * expire without the response ever being read. The interval below is
+     * what keeps this from firing on every parse.
+     */
+    void this.runHubUploadSafely()
+  }
+
+  /**
+   * Upload if enough time has passed since the last one.
+   *
+   * Rate-limited here rather than by a timer so it can be driven by parses
+   * while still not running on every one of them.
+   */
+  private async runHubUploadSafely(): Promise<void> {
+    if (!this.runHubUploadFn) return
+    if (this.hubUploadInFlight) return
+
+    const interval = this.hubUploadIntervalMs()
+    if (interval <= 0) return
+    const now = Date.now()
+    if (now - this.lastHubUploadAt < interval) return
+
+    this.hubUploadInFlight = true
+    this.lastHubUploadAt = now
+    try {
+      await this.runHubUploadFn()
+    } catch (err) {
+      // A hub that is asleep must not stop this machine parsing its own logs.
+      console.error('[settings-controller] hub upload failed:', err)
+    } finally {
+      this.hubUploadInFlight = false
+    }
+  }
+
+  /**
+   * Upload now, subject to the same interval as a parse-driven one.
+   *
+   * Exposed so serve can call it after the startup parse, which does not run
+   * through runParseSafely and would otherwise leave a machine that has been
+   * off sitting on its backlog until the first interval parse.
+   */
+  async uploadToHubNow(): Promise<void> {
+    await this.runHubUploadSafely()
+  }
+
+  /** Minutes in config, milliseconds here. 0 switches record upload off. */
+  private hubUploadIntervalMs(): number {
+    const minutes = this.loadConfigFn()?.hubForward?.recordIntervalMinutes
+    if (typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 0) {
+      return minutes * 60_000
+    }
+    return DEFAULT_HUB_UPLOAD_INTERVAL_MS
   }
 
   private async runCleanupSafely(retentionDays: number): Promise<void> {

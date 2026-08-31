@@ -234,3 +234,175 @@ describe('the event stream is a read, so the token does not open it', () => {
     expect(response.status).not.toBe(401)
   })
 })
+
+/**
+ * The same token, now also good for record uploads from another machine.
+ *
+ * The rule the original narrowing expressed was never "only agent paths" —
+ * it was "the token is a write key, never a read key". A laptop posting its
+ * usage records is in the same position a hook is: another process, on
+ * another machine, with no cookie jar, whose only purpose is to write. What
+ * must not move is the other half of the rule.
+ */
+describe('the ingest token opens writes under /api/sync/, never reads', () => {
+  beforeEach(() => {
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    process.env.AIUSAGE_INGEST_TOKEN = TOKEN
+    process.env.AIUSAGE_DASHBOARD_PASSWORD = PASSWORD
+  })
+
+  afterEach(() => {
+    db.close()
+    delete process.env.AIUSAGE_INGEST_TOKEN
+    delete process.env.AIUSAGE_DASHBOARD_PASSWORD
+  })
+
+  function server() {
+    return createApiServer(db, { isLoopbackBind: false })
+  }
+
+  const payload = JSON.stringify({
+    records: [{
+      id: 'rec-1', ts: 1_700_000_000_000, tool: 'claude-code', model: 'claude-opus-4',
+      provider: 'anthropic', inputTokens: 10, outputTokens: 5, cost: 0.001,
+      costSource: 'pricing', sessionKey: 'k', device: '職場PC',
+      deviceInstanceId: 'dev-work', platform: 'win32', updatedAt: 1_700_000_000_000,
+      sourceFile: 'C:/logs/1.jsonl', cwd: 'C:/work',
+    }],
+  })
+
+  it('accepts an upload carrying a valid token', async () => {
+    const response = await request(server(), '/api/sync/records', {
+      method: 'POST',
+      headers: { 'x-aiusage-token': TOKEN, 'content-type': 'application/json' },
+      body: payload,
+    })
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body).accepted).toBe(1)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM synced_records').get()).toEqual({ n: 1 })
+  })
+
+  it('refuses the same upload with no token', async () => {
+    const response = await request(server(), '/api/sync/records', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: payload,
+    })
+    expect(response.status).toBe(401)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM synced_records').get()).toEqual({ n: 0 })
+  })
+
+  /**
+   * The point of the whole narrowing. The token travels the network on every
+   * hook and every upload; cache.db never leaves the disk. A token that
+   * opened reads would turn the first into a key for the second.
+   */
+  it('still answers 401 on a read, token or not', async () => {
+    for (const path of ['/api/summary', '/api/records', '/api/sessions', '/api/agent/stream']) {
+      const response = await request(server(), path, {
+        headers: { 'x-aiusage-token': TOKEN },
+      })
+      expect(response.status, `${path} must not open to the token`).toBe(401)
+    }
+  })
+
+  it('does not open the sync trigger, which is not a record write', async () => {
+    // /api/sync (no trailing slash) starts a GitHub sync from the dashboard.
+    // It is outside the /api/sync/ prefix on purpose.
+    const response = await request(server(), '/api/sync', {
+      headers: { 'x-aiusage-token': TOKEN },
+    })
+    expect(response.status).toBe(401)
+  })
+
+  it('refuses a batch over the record limit with 413', async () => {
+    const { MAX_SYNC_RECORDS_PER_REQUEST } = await import('../../src/sync/direct.js')
+    const many = Array.from({ length: MAX_SYNC_RECORDS_PER_REQUEST + 1 }, (_, i) => ({
+      id: `r${i}`, ts: 1_700_000_000_000, tool: 'claude-code',
+      deviceInstanceId: 'dev-work', updatedAt: 1_700_000_000_000,
+    }))
+    const response = await request(server(), '/api/sync/records', {
+      method: 'POST',
+      headers: { 'x-aiusage-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ records: many }),
+    })
+    expect(response.status).toBe(413)
+    // The sender is told both ceilings so it can split without guessing.
+    const error = JSON.parse(response.body).error
+    expect(error.maxRecords).toBe(MAX_SYNC_RECORDS_PER_REQUEST)
+    expect(error.maxBytes).toBeGreaterThan(0)
+  })
+
+  it('counts what it could not make sense of rather than failing the batch', async () => {
+    const response = await request(server(), '/api/sync/records', {
+      method: 'POST',
+      headers: { 'x-aiusage-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ records: [JSON.parse(payload).records[0], { nonsense: true }] }),
+    })
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body)).toMatchObject({ accepted: 1, rejected: 1 })
+  })
+})
+
+/**
+ * synced_records is a holding table; records is what every dashboard query
+ * reads. The merge between them runs as the last step of a sync pass — and a
+ * hub that only receives direct uploads never makes a sync pass. Without the
+ * merge on this path, uploads answered 200 and the dashboard stayed empty.
+ */
+describe('records arriving directly reach the dashboard', () => {
+  beforeEach(() => {
+    db = new Database(':memory:')
+    initializeDatabase(db)
+    process.env.AIUSAGE_INGEST_TOKEN = TOKEN
+    process.env.AIUSAGE_DASHBOARD_PASSWORD = PASSWORD
+  })
+
+  afterEach(() => {
+    db.close()
+    delete process.env.AIUSAGE_INGEST_TOKEN
+    delete process.env.AIUSAGE_DASHBOARD_PASSWORD
+  })
+
+  const upload = (records: unknown[]) => request(
+    createApiServer(db, { isLoopbackBind: false }),
+    '/api/sync/records',
+    {
+      method: 'POST',
+      headers: { 'x-aiusage-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ records }),
+    },
+  )
+
+  const record = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id, ts: 1_700_000_000_000, tool: 'claude-code', model: 'claude-opus-4',
+    provider: 'anthropic', inputTokens: 10, outputTokens: 5, cost: 0.25,
+    costSource: 'pricing', sessionKey: 'k', device: '職場PC',
+    deviceInstanceId: 'dev-work', platform: 'win32', updatedAt: 1_700_000_000_000,
+    sourceFile: 'C:/logs/1.jsonl', cwd: 'C:/work', ...overrides,
+  })
+
+  it('lands in the table the dashboard reads, not just the holding one', async () => {
+    const response = await upload([record('rec-1'), record('rec-2')])
+
+    expect(JSON.parse(response.body)).toMatchObject({ accepted: 2, merged: 2 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM records').get()).toEqual({ n: 2 })
+    expect(db.prepare('SELECT device FROM records WHERE id = ?').get('rec-1'))
+      .toEqual({ device: '職場PC' })
+  })
+
+  it('counts the other machine in the totals', async () => {
+    await upload([record('rec-1'), record('rec-2')])
+    const total = db.prepare('SELECT SUM(cost) AS c FROM records').get() as { c: number }
+    expect(total.c).toBeCloseTo(0.5)
+  })
+
+  it('does not merge the same record twice when it is sent again', async () => {
+    await upload([record('rec-1')])
+    const second = await upload([record('rec-1')])
+
+    expect(JSON.parse(second.body).merged).toBe(0)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM records').get()).toEqual({ n: 1 })
+  })
+})

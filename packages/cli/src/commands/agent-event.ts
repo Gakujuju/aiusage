@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { hostname, platform } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import { AIUSAGE_DIR, loadConfig } from '../config.js'
+import { HUB_FORWARD_TOKEN_CREDENTIAL, AIUSAGE_DIR, loadConfig, loadCredential } from '../config.js'
 import { getIngestToken, getState } from '../init.js'
 import { applyAgentEvents, type AgentEventInput, type AgentSessionEmitter } from '../db/agent-sessions.js'
 import { normalizeAssistantPreview } from '@aiusage/core'
@@ -177,6 +177,57 @@ function readPort(): number | null {
   }
 }
 
+/** Where this machine's events go, and what proves we may send them. */
+export interface EventDestination {
+  url: string
+  token: string
+  /** True when the events are leaving this machine. */
+  remote: boolean
+}
+
+/**
+ * The serve that should receive this machine's events.
+ *
+ * With nothing configured this is the serve on this machine, found through
+ * .serve-port and authorised with this machine's own ingest token — which is
+ * what every install has always done and what the machine running serve
+ * should keep doing.
+ *
+ * With a forward configured the events go to another machine instead, and the
+ * token has to be *that* machine's: the receiver checks its own.
+ */
+export function resolveDestination(): EventDestination | null {
+  const forwardUrl = loadConfig()?.hubForward?.url?.trim()
+
+  if (forwardUrl) {
+    const token = loadCredential(HUB_FORWARD_TOKEN_CREDENTIAL)
+    if (!token) return null
+    let origin: string
+    try {
+      // Origin only. The endpoint is ours to decide, and a path left in the
+      // setting by mistake should not silently post somewhere else.
+      origin = new URL(forwardUrl).origin
+    } catch {
+      return null
+    }
+    return { url: `${origin}/api/agent/events`, token, remote: true }
+  }
+
+  const port = readPort()
+  const token = getIngestToken(AIUSAGE_DIR)
+  if (port == null || !token) return null
+  return { url: `http://127.0.0.1:${port}/api/agent/events`, token, remote: false }
+}
+
+/**
+ * True when this machine hands its events to another one.
+ *
+ * serve reads this to decide whether the spool is its to drain.
+ */
+export function forwardsToHub(): boolean {
+  return Boolean(loadConfig()?.hubForward?.url?.trim())
+}
+
 function spool(event: AgentEventInput): void {
   try {
     appendFileSync(SPOOL_PATH, JSON.stringify(event) + '\n', { encoding: 'utf-8', mode: 0o600 })
@@ -186,11 +237,24 @@ function spool(event: AgentEventInput): void {
   }
 }
 
-async function post(port: number, token: string, events: AgentEventInput[]): Promise<boolean> {
+async function post(
+  destination: EventDestination,
+  events: AgentEventInput[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/agent/events`, {
+    /*
+     * No TLS opt-out, deliberately. A forward runs over Tailscale, whose
+     * certificates are ordinary publicly-trusted ones — there is nothing to
+     * work around, and turning verification off here would mean the token
+     * travels to whatever answers the name.
+     *
+     * Still the same one second as loopback. The agent must not wait on
+     * another machine being awake any more than on its own serve.
+     */
+    const res = await fetchImpl(destination.url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Aiusage-Token': token },
+      headers: { 'Content-Type': 'application/json', 'X-Aiusage-Token': destination.token },
       body: JSON.stringify({ events }),
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     })
@@ -201,10 +265,12 @@ async function post(port: number, token: string, events: AgentEventInput[]): Pro
 }
 
 /** Everything here is best-effort; the caller always exits 0. */
-export async function sendAgentEvent(event: AgentEventInput): Promise<'sent' | 'spooled'> {
-  const port = readPort()
-  const token = getIngestToken(AIUSAGE_DIR)
-  if (port == null || !token) {
+export async function sendAgentEvent(
+  event: AgentEventInput,
+  fetchImpl: typeof fetch = fetch,
+): Promise<'sent' | 'spooled'> {
+  const destination = resolveDestination()
+  if (!destination) {
     spool(event)
     return 'spooled'
   }
@@ -214,7 +280,7 @@ export async function sendAgentEvent(event: AgentEventInput): Promise<'sent' | '
   const pending = readSpool()
   const batch = pending.length > 0 ? [...pending.slice(0, 199), event] : [event]
 
-  if (await post(port, token, batch)) {
+  if (await post(destination, batch, fetchImpl)) {
     if (pending.length > 0) clearSpool()
     return 'sent'
   }
@@ -247,6 +313,21 @@ function clearSpool(): void {
  * startup, when there is no HTTP server to post to yet.
  */
 export function drainAgentEventSpool(db: Database.Database, emitter?: AgentSessionEmitter): number {
+  /*
+   * Not ours to drain when the events belong to another machine.
+   *
+   * A forwarding machine still runs serve — it has its own logs to parse —
+   * so both the hook and serve can see the same spool file. If serve drained
+   * it, every event that failed to reach the receiving machine would quietly
+   * land in the local database instead: the sessions would appear on the
+   * wrong dashboard, and the machine that is supposed to notify would never
+   * hear about them. Worse, it looks like it worked.
+   *
+   * The hook drains it instead, on its next successful send, which is the
+   * only moment the events have actually arrived where they were addressed.
+   */
+  if (forwardsToHub()) return 0
+
   const events = readSpool()
   if (events.length === 0) return 0
 

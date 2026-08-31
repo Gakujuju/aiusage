@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process'
 import { runServeCommand, serve } from './commands/serve.js'
 import { runSetDashboardPassword, runDashboardPasswordStatus } from './commands/dashboard-password.js'
 import { runGenerateVapidKeys } from './commands/vapid-keys.js'
+import { runSetHub, runHubStatus, runClearHub } from './commands/hub.js'
 import { runAgentEvent } from './commands/agent-event.js'
 import { runNotifyStatus, runNotifyTest } from './commands/notify.js'
 import { runInit } from './commands/init.js'
@@ -356,6 +357,29 @@ program
   .description('Say whether a dashboard password is set (never prints it)')
   .action(() => {
     runDashboardPasswordStatus()
+  })
+
+// The machine this one reports to
+program
+  .command('set-hub <url>')
+  .description("Send this machine's events and records to another machine's serve")
+  .action(async (url: string) => {
+    const result = await runSetHub(url)
+    if (!result.saved) process.exitCode = 1
+  })
+
+program
+  .command('hub-status')
+  .description('Say which machine this one reports to (never prints the token)')
+  .action(() => {
+    runHubStatus()
+  })
+
+program
+  .command('clear-hub')
+  .description('Keep events and records on this machine again')
+  .action(() => {
+    runClearHub()
   })
 
 // Web Push identity

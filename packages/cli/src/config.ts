@@ -125,7 +125,48 @@ export interface Config {
   ui?: UiConfig
   /** Web Push application-server identity. The private half is a credential. */
   vapid?: VapidConfig
+  /** The machine this one reports to. Unset means it reports to itself. */
+  hubForward?: HubForwardConfig
 }
+
+/**
+ * The machine this one sends its work to.
+ *
+ * Three laptops each parse their own logs, but only one of them polls quotas,
+ * decides what is worth saying and holds the push subscriptions. The other
+ * two send that one everything they produce — agent events as they happen,
+ * usage records as they are parsed — so a phone subscribes once instead of
+ * three times, /agents shows every machine in one list, and the totals are
+ * added up in one place.
+ *
+ * One destination, not one per kind of data. Two settings that must always
+ * hold the same URL is a way of eventually holding two different ones.
+ *
+ * Unset is the ordinary case and changes nothing: the machine talks to its
+ * own serve over loopback, exactly as it always has.
+ */
+export interface HubForwardConfig {
+  /**
+   * Origin of the receiving serve, e.g. https://desktop-abc.tail1234.ts.net.
+   * A path is ignored — the endpoints are ours to decide.
+   */
+  url?: string
+  /**
+   * Minutes between record uploads. Unset uses the built-in default; 0 stops
+   * records being sent without affecting agent events, which are not batched.
+   */
+  recordIntervalMinutes?: number
+}
+
+/**
+ * The hub's ingest token.
+ *
+ * A credential rather than a config field for the usual reason: it travels
+ * the network on every hook and every upload, and it is the one thing that
+ * lets a caller write into another machine's database. Same 0600 file as the
+ * webhook, and the API never returns it.
+ */
+export const HUB_FORWARD_TOKEN_CREDENTIAL = 'hubForwardToken'
 
 export interface VapidConfig {
   /** Uncompressed P-256 point, base64url. Handed to browsers when subscribing. */

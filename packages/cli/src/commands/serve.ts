@@ -23,6 +23,7 @@ import { runPushNotificationTick } from '../notify/webpush-tick.js'
 import { requeueInFlightNotifications } from '../db/notifications.js'
 import { notifyEscalations, notifyQuotaSummary, notifySessionChange } from '../notify/enqueue.js'
 import { drainAgentEventSpool } from './agent-event.js'
+import { runHubUpload } from '../sync/hub-upload.js'
 import { runCodexLogTick } from '../agent/codex-log-watcher.js'
 import { queryAllQuotas } from '../quota.js'
 import { hostname, platform } from 'node:os'
@@ -374,6 +375,23 @@ export function serve(options: ServeOptions): void {
     runLeaderboardUpload: (db) => uploadLeaderboardData(db, getState(AIUSAGE_DIR)?.deviceInstanceId).then(() => undefined),
     runSync: () => syncRuntime.start(),
     runQuotaSnapshot,
+    /*
+     * Records to the hub, when this machine reports to one.
+     *
+     * runHubUpload answers 'no_hub' on its own, so this is safe to wire
+     * unconditionally — and wiring it unconditionally is what lets someone
+     * set a hub and have it take effect on the next parse rather than the
+     * next restart.
+     */
+    runHubUpload: async () => {
+      const result = await runHubUpload({ db: options.db, runDbWrite })
+      if (result.sent > 0) {
+        console.log('[serve] uploaded ' + result.sent + ' record(s) to the hub')
+      } else if (result.error) {
+        console.warn('[serve] hub upload failed: ' + result.error)
+      }
+      return result
+    },
     onSyncScheduleChanged: (ts) => syncRuntime.setNextSyncAt(ts),
   })
   runtimeSettings.start()
@@ -428,6 +446,20 @@ export function serve(options: ServeOptions): void {
         console.error('[serve] initial quota snapshot failed:', err)
       })
     }
+
+    /*
+     * The startup parse is a parse, and this is the moment a machine that has
+     * been off has the most to hand over. It does not go through
+     * runParseSafely — that runs the interval parse — so the controller's
+     * after-a-parse hook never sees this one, and without saying so here a
+     * restart would sit on its backlog until the first interval parse came
+     * round.
+     *
+     * After the parse rather than beside it: better-sqlite3 holds the loop
+     * while parsing, so an upload started alongside would spend its timeout
+     * waiting for a turn that does not come.
+     */
+    void runtimeSettings.uploadToHubNow()
   })
   })
 

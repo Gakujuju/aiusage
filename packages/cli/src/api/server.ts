@@ -12,6 +12,8 @@ import { AIUSAGE_DIR, DISCORD_WEBHOOK_CREDENTIAL,
 import type { Config, SyncConfig } from '../config.js'
 import { setSyncConsent, getIngestToken } from '../init.js'
 import { generateConsentFingerprint } from '../sync/consent.js'
+import { MAX_SYNC_PAYLOAD_BYTES, MAX_SYNC_RECORDS_PER_REQUEST, normalizeIncomingSyncRecord } from '../sync/direct.js'
+import { insertSyncedRecord, mergeSyncedRecordsIntoRecords } from '../db/synced-records.js'
 import { getSyncTarget } from '../sync/target.js'
 import { extractProject, extractProjectFromCwd } from './project-extraction.js'
 import { discoverTools } from '../discovery.js'
@@ -249,6 +251,33 @@ function databaseBusy(res: http.ServerResponse): void {
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   let body = ''
   for await (const chunk of req) body += chunk
+  if (!body.trim()) return {}
+  return JSON.parse(body) as Record<string, unknown>
+}
+
+/**
+ * Read a JSON body, giving up once it is bigger than the caller allows.
+ *
+ * readJsonBody concatenates whatever arrives, which is fine for a settings
+ * PUT and wrong for an endpoint another machine posts to on a timer: without
+ * a ceiling, one oversized upload is bounded only by memory. Counting as the
+ * chunks arrive means the refusal costs nothing to produce.
+ */
+class PayloadTooLarge extends Error {}
+
+async function readJsonBodyLimited(
+  req: http.IncomingMessage,
+  maxBytes: number,
+): Promise<Record<string, unknown>> {
+  let size = 0
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buf.length
+    if (size > maxBytes) throw new PayloadTooLarge()
+    chunks.push(buf)
+  }
+  const body = Buffer.concat(chunks).toString('utf-8')
   if (!body.trim()) return {}
   return JSON.parse(body) as Record<string, unknown>
 }
@@ -798,7 +827,21 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
     // read, and what it reads out is the same session state the dashboard
     // shows. Letting the token open it would undo the narrowing above, since
     // the token is the thing that travels the network.
-    const tokenExempt = url.pathname.startsWith('/api/agent/')
+    //
+    // /api/sync/ was added to the same list, and the reason it belongs there
+    // is the same reason /api/agent/ does rather than a new one. A laptop
+    // uploading its usage records is in exactly the position a hook is in:
+    // another process, on another machine, with no cookie jar, whose whole
+    // purpose is to write. The rule the narrowing above expresses is not
+    // "only agent paths" — it is "the token is a write key, never a read
+    // key". So a write endpoint under /api/sync/ is inside that rule, and
+    // every read stays outside it, unchanged: /api/summary, /api/records and
+    // the rest still want a dashboard cookie and answer 401 to a token.
+    //
+    // The cost of getting this wrong is the same as before. A token that
+    // opened reads would turn the one secret that travels the network into a
+    // key for everything cache.db holds, which never leaves the disk.
+    const tokenExempt = (url.pathname.startsWith('/api/agent/') || url.pathname.startsWith('/api/sync/'))
       && url.pathname !== '/api/agent/stream'
       && hasValidIngestToken(req)
     if (
@@ -1990,6 +2033,105 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       if (url.pathname === '/api/pricing/recalc' && req.method === 'POST') {
         const result = startPricingRecalc()
         json(res, result, result.accepted ? 202 : 200)
+        return
+      }
+
+      // ── /api/sync/records ──────────────────────────────────────────
+      /**
+       * Usage records arriving from another machine on the tailnet.
+       *
+       * The hub is whichever install polls quotas and sends the
+       * notifications; the others parse their own logs and post the results
+       * here so the totals are added up in one place. One direction only —
+       * nothing is sent back, and deletions are not propagated (see D25).
+       *
+       * Nothing here decides what a record means. insertSyncedRecord already
+       * refuses to overwrite a newer row with an older one, and the id is
+       * derived from the sending device, so a resend is an update rather than
+       * a duplicate. This endpoint is the HTTP around that.
+       */
+      if (url.pathname === '/api/sync/records') {
+        if (req.method !== 'POST') {
+          json(res, { error: { code: 'METHOD_NOT_ALLOWED', message: 'POST only' } }, 405)
+          return
+        }
+        let body: Record<string, unknown>
+        try {
+          body = await readJsonBodyLimited(req, MAX_SYNC_PAYLOAD_BYTES)
+        } catch (error) {
+          if (error instanceof PayloadTooLarge) {
+            json(res, {
+              error: {
+                code: 'PAYLOAD_TOO_LARGE',
+                message: `Body exceeds ${MAX_SYNC_PAYLOAD_BYTES} bytes`,
+                maxBytes: MAX_SYNC_PAYLOAD_BYTES,
+                maxRecords: MAX_SYNC_RECORDS_PER_REQUEST,
+              },
+            }, 413)
+            return
+          }
+          json(res, { error: { code: 'INVALID_JSON', message: 'Invalid JSON body' } }, 400)
+          return
+        }
+
+        const records = Array.isArray(body.records) ? body.records : null
+        if (!records) {
+          json(res, { error: { code: 'INVALID_PARAM', message: 'records must be an array' } }, 400)
+          return
+        }
+        if (records.length > MAX_SYNC_RECORDS_PER_REQUEST) {
+          // Two ceilings, because either one can be hit first: many tiny
+          // records, or few with long paths in them. The sender is told both
+          // so it can split without guessing.
+          json(res, {
+            error: {
+              code: 'TOO_MANY_RECORDS',
+              message: `At most ${MAX_SYNC_RECORDS_PER_REQUEST} records per request`,
+              maxBytes: MAX_SYNC_PAYLOAD_BYTES,
+              maxRecords: MAX_SYNC_RECORDS_PER_REQUEST,
+            },
+          }, 413)
+          return
+        }
+
+        try {
+          let accepted = 0
+          let rejected = 0
+          let merged = 0
+          await runDbWrite(() => {
+            for (const raw of records) {
+              const record = normalizeIncomingSyncRecord(raw)
+              if (!record) { rejected++; continue }
+              // The return value is "did this change anything", which is
+              // false for a record already held at the same or a newer
+              // version. Not an error — a resend landing on a no-op is the
+              // system working.
+              insertSyncedRecord(db, record)
+              accepted++
+            }
+
+            /*
+             * synced_records is a holding table; records is what the
+             * dashboard reads. Everything else that fills the first also
+             * runs this merge, but it runs it as the last step of a sync
+             * pass — and a hub that receives records directly may never do a
+             * sync pass at all.
+             *
+             * Left out, this endpoint accepted uploads, answered 200, filled
+             * synced_records, and showed nothing: 13,497 rows arrived and
+             * the dashboard still read zero. Doing it here means arriving
+             * and appearing are the same event.
+             */
+            if (accepted > 0) merged = mergeSyncedRecordsIntoRecords(db)
+          })
+          json(res, { ok: true, accepted, rejected, merged })
+        } catch (error) {
+          if (isDatabaseLockedError(error)) {
+            json(res, { error: { code: 'BUSY', message: 'Database is busy' } }, 503)
+            return
+          }
+          throw error
+        }
         return
       }
 
