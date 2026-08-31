@@ -152,7 +152,7 @@ async function recalcCosts(db: Database.Database, onProgress?: (status: Pick<Pri
 
   while (true) {
     const records = db.prepare(
-      'SELECT id, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, cost_source FROM records WHERE id > ? ORDER BY id LIMIT ?'
+      'SELECT id, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, cost_source, breakdown_missing FROM records WHERE id > ? ORDER BY id LIMIT ?'
     ).all(lastId, BATCH_SIZE) as any[]
     if (records.length === 0) break
     const updateStmt = db.prepare('UPDATE records SET model = ?, provider = ?, cost = ?, cost_source = ?, updated_at = ? WHERE id = ?')
@@ -173,14 +173,23 @@ async function recalcCosts(db: Database.Database, onProgress?: (status: Pick<Pri
         }
         const provider = model !== r.model ? inferProvider(model) : r.provider
         const price = resolveCachedPrice(model)
-        const cost = price ? calculateCostForPrice(price, {
+        /*
+         * A row with no input/output split cannot be priced. Its whole token
+         * count sits in input_tokens because that is the only way to count it
+         * at all, so multiplying it by the input rate invents a number — here
+         * it invented $28.70 across 24 rows. The parser already refuses to
+         * price these; recalc has to refuse as well, or the button on the
+         * dashboard quietly undoes it.
+         */
+        const priceable = price != null && !r.breakdown_missing
+        const cost = priceable ? calculateCostForPrice(price!, {
           inputTokens: r.input_tokens,
           outputTokens: r.output_tokens,
           cacheReadTokens: r.cache_read_tokens,
           cacheWriteTokens: r.cache_write_tokens,
           thinkingTokens: r.thinking_tokens,
         }, exchangeRate) : 0
-        const costSource = price ? 'pricing' : 'unknown'
+        const costSource = priceable ? 'pricing' : 'unknown'
 
         if (model === r.model && provider === r.provider && cost === r.cost && costSource === r.cost_source) continue
         updateStmt.run(model, provider, cost, costSource, Date.now(), r.id)

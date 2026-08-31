@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs'
 import type { Tool } from '@aiusage/core'
 
 const CURRENT_GROK_PARSER_VERSION = 1
@@ -95,6 +95,14 @@ function defaultFileData(): FileWatermarkData {
   }
 }
 
+/** Thrown rather than swallowed: see the note in load(). */
+export class WatermarkCorruptError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'WatermarkCorruptError'
+  }
+}
+
 export class WatermarkManager {
   private data: WatermarkState
   private path: string
@@ -138,13 +146,49 @@ export class WatermarkManager {
         state.grokParserVersion = CURRENT_GROK_PARSER_VERSION
       }
       return state
-    } catch {
-      return { files: defaultFileData(), grokParserVersion: CURRENT_GROK_PARSER_VERSION }
+    } catch (error) {
+      /*
+       * An unreadable watermark must not read as "start from the beginning".
+       *
+       * Empty means every log gets re-read from byte zero, and insertRecord is
+       * INSERT OR REPLACE, so a re-read does not add history — it *rewrites*
+       * it with whatever the running parser produces. That is not a recovery,
+       * it is a silent overwrite: 449 codex rows were re-inserted inside a
+       * two-second window this way, undoing a correction that had just been
+       * applied, and nothing anywhere said so.
+       *
+       * The safe default for a corrupt position marker is to read nothing and
+       * stop. The file is moved aside rather than deleted so the next run can
+       * start cleanly while the damaged one stays available to look at.
+       */
+      const kept = `${this.path}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      try {
+        renameSync(this.path, kept)
+      } catch {
+        // Best effort. Failing to move it must not mask the original problem.
+      }
+      throw new WatermarkCorruptError(
+        `watermark.json could not be parsed (${error instanceof Error ? error.message : String(error)}). ` +
+        `It has been moved to ${kept} and parsing was stopped. ` +
+        'Continuing would re-read every log from the beginning and overwrite ' +
+        'existing records. Delete the file to start over deliberately.')
     }
   }
 
+  /*
+   * Written to a sibling file and renamed into place.
+   *
+   * writeFileSync truncates and refills, so a reader arriving mid-write sees a
+   * partial file and fails to parse it. Several processes touch this — serve,
+   * hooks, anything invoking the CLI — so that window is reachable in normal
+   * use, and until the change above it turned into "re-read every log".
+   * A rename on the same volume is atomic: a reader sees the old file or the
+   * new one.
+   */
   save(): void {
-    writeFileSync(this.path, JSON.stringify(this.data, null, 2), 'utf-8')
+    const temp = `${this.path}.tmp-${process.pid}`
+    writeFileSync(temp, JSON.stringify(this.data, null, 2), 'utf-8')
+    renameSync(temp, this.path)
   }
 
   getEntry(tool: Tool, filePath: string): WatermarkEntry | null {

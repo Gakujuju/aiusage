@@ -20,7 +20,7 @@ export function recalcPricing(db: Database.Database): RecalcResult {
 
   while (true) {
     const records = db.prepare(
-      'SELECT id, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, cost_source FROM records WHERE id > ? ORDER BY id LIMIT ?'
+      'SELECT id, tool, model, provider, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, thinking_tokens, cost, cost_source, breakdown_missing FROM records WHERE id > ? ORDER BY id LIMIT ?'
     ).all(lastId, BATCH_SIZE) as any[]
 
     if (records.length === 0) break
@@ -39,14 +39,23 @@ export function recalcPricing(db: Database.Database): RecalcResult {
 
       const provider = model !== record.model ? inferProvider(model) : record.provider
       const price = resolvePriceFromRegistry(db, model)
-      const newCost = price ? calculateCostForPrice(price, {
+        /*
+         * A row with no input/output split cannot be priced. Its whole token
+         * count sits in input_tokens because that is the only way to count it
+         * at all, so multiplying it by the input rate invents a number — here
+         * it invented $28.70 across 24 rows. The parser already refuses to
+         * price these; recalc has to refuse as well, or the button on the
+         * dashboard quietly undoes it.
+         */
+      const priceable = price != null && !record.breakdown_missing
+      const newCost = priceable ? calculateCostForPrice(price!, {
         inputTokens: record.input_tokens,
         outputTokens: record.output_tokens,
         cacheReadTokens: record.cache_read_tokens,
         cacheWriteTokens: record.cache_write_tokens,
         thinkingTokens: record.thinking_tokens,
       }, exchangeRate) : 0
-      const costSource = price ? 'pricing' : 'unknown'
+      const costSource = priceable ? 'pricing' : 'unknown'
 
       if (model !== record.model || provider !== record.provider || newCost !== record.cost || costSource !== record.cost_source) {
         updateStmt.run(model, provider, newCost, costSource, Date.now(), record.id)
