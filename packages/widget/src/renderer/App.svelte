@@ -5,6 +5,7 @@
   import TokenBreakdown from './components/TokenBreakdown.svelte'
   import ActivityChart from './components/ActivityChart.svelte'
   import SettingsPanel from './components/SettingsPanel.svelte'
+  import QuotaPanel from './components/QuotaPanel.svelte'
   import { t } from './i18n'
   import type { Locale } from './i18n'
   import { formatUsdCost } from '../currency'
@@ -26,11 +27,18 @@
     dailyHistory: DailyEntry[]
     sessionCountToday: number
     lastUpdated: number
+    quota?: {
+      tools: Array<{ tool: string; label: string; lines: Array<{ tier: string; kind: 'five_hour' | 'week'; utilization: number; resetsInMs: number | null }> }>
+      credInvalid: string[]
+      staleForMs: number | null
+      hiddenTiers: string[]
+    }
   }
   interface WidgetSettings {
     theme: 'system' | 'light' | 'dark'
     refreshIntervalSec: number
     rangeDays: number
+    showUsage: boolean
     showCost: boolean
     showHeatmap: boolean
     showTokenBreakdown: boolean
@@ -39,7 +47,12 @@
   }
 
   function detectInitialLocale(): Locale {
-    return typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+    // Only until the main process sends the saved setting, which is what
+    // actually decides. This is so the first frame is not the wrong language.
+    const tag = typeof navigator !== 'undefined' ? navigator.language.toLowerCase() : ''
+    if (tag.startsWith('ja')) return 'ja'
+    if (tag.startsWith('zh')) return 'zh'
+    return 'en'
   }
 
   let data: WidgetData | null = null
@@ -196,7 +209,20 @@
     />
   {:else}
     <div class="content">
+      <!--
+        The quota first, and above everything, because it is the reason the
+        window is open. What used to be here is still below it, behind the
+        toggles it always had.
+      -->
+      {#if data?.quota}
+        <div class="section">
+          <div class="section-title">{i18n.quotaTitle}</div>
+          <QuotaPanel quota={data.quota} {i18n} />
+        </div>
+      {/if}
+
       <!-- Primary metrics -->
+      {#if settings?.showUsage}
       <div class="section">
         <div class="metric-grid">
           <div class="metric">
@@ -215,6 +241,7 @@
           </div>
         </div>
       </div>
+      {/if}
 
       <!-- Token breakdown -->
       {#if settings?.showTokenBreakdown && data}
@@ -245,11 +272,13 @@
       {/if}
 
       <!-- Details -->
+      {#if settings?.showUsage}
       <div class="section details">
         <StatRow label={i18n.topModel} value={modelStr} sub={modelSubStr} />
         <StatRow label={i18n.topTool} value={toolStr} sub={toolSubStr} />
         <StatRow label={i18n.sessions} value={sessionStr} />
       </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -282,6 +311,8 @@
     --text-secondary: oklch(0.42 0.015 175);
     --text-muted: oklch(0.6 0.012 175);
     --accent: oklch(0.55 0.12 175);
+    /* For the two lines that say the numbers above are not to be trusted. */
+    --danger: oklch(0.5 0.2 25);
     --chart-input: oklch(0.65 0.14 175);
     --chart-output: oklch(0.6 0.15 250);
     --chart-cache-read: oklch(0.7 0.1 65);
@@ -300,6 +331,7 @@
       --text-secondary: oklch(0.76 0.01 175);
       --text-muted: oklch(0.58 0.008 175);
       --accent: oklch(0.65 0.12 175);
+      --danger: oklch(0.75 0.17 25);
       --chart-input: oklch(0.65 0.14 175);
       --chart-output: oklch(0.6 0.15 250);
       --chart-cache-read: oklch(0.7 0.1 65);

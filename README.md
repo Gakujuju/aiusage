@@ -145,9 +145,19 @@ windows and how long until they reset. It only starts on a machine that
 collects quotas — elsewhere it writes one line to `~/.aiusage/widget.log`
 saying so and exits, rather than sitting in the tray showing nothing.
 
+Clicking the icon opens a panel with the same numbers, plus a bar for each
+window. It follows the system language (English, 日本語, 中文). Tokens, cost
+and the trend chart are still there behind the "Tokens and cost" toggle in
+settings, off by default.
+
 **Windows 11 hides new tray icons by default.** To keep it visible, turn it
 on under Settings → Personalisation → Taskbar → Other system tray icons.
 Until then it lives behind the `^` at the end of the taskbar.
+
+**In that list it is called `Electron`, not `AIUsage Widget`.** Windows takes
+the name from the executable, and an unpackaged build runs Electron's own.
+Look for the green bar-chart icon. (Setting the AppUserModelID does not
+change this — only a packaged build with its own .exe would.)
 
 ## Development
 

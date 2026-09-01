@@ -9,6 +9,7 @@
     theme: 'system' | 'light' | 'dark'
     refreshIntervalSec: number
     rangeDays: number
+    showUsage: boolean
     showCost: boolean
     showHeatmap: boolean
     showTokenBreakdown: boolean
@@ -72,6 +73,7 @@
 
   const locales: Array<{ label: string; value: Locale }> = [
     { label: 'English', value: 'en' },
+    { label: '日本語', value: 'ja' },
     { label: '中文', value: 'zh' },
   ]
 </script>
@@ -176,6 +178,12 @@
   <div class="section">
     <div class="section-label">{i18n.display}</div>
     <div class="toggles">
+      <label class="toggle-row">
+        <span>{i18n.showUsage}</span>
+        <button class="toggle" class:on={local.showUsage} on:click={() => toggle('showUsage')}>
+          <span class="toggle-thumb"></span>
+        </button>
+      </label>
       <label class="toggle-row">
         <span>{i18n.showCost}</span>
         <button class="toggle" class:on={local.showCost} on:click={() => toggle('showCost')}>

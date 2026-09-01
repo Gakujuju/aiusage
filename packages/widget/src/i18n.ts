@@ -1,6 +1,30 @@
-export type Locale = 'en' | 'zh'
+/*
+ * This is the second set of translations in the repository.
+ *
+ * The dashboard has its own in packages/web/src/lib/i18n.js, with its own
+ * key names and its own locale list. Adding a language means editing both,
+ * and neither one knows the other exists. Recorded rather than merged: the
+ * two have different lifetimes and different keys, and joining them is a
+ * decision on its own. See STATE.md.
+ */
+export type Locale = 'en' | 'ja' | 'zh'
 
 export interface Translations {
+  /* ── The quota panel, which is what this widget is for ──────────── */
+  quotaTitle: string
+  tierFiveHour: string
+  tierWeek: string
+  resetsIn: (left: string) => string
+  resetsUnknown: string
+  /* Short units for a countdown, so the panel does not read as English. */
+  unitDay: string
+  unitHour: string
+  unitMinute: string
+  credInvalid: (tools: string) => string
+  quotaStale: (age: string) => string
+  tierHidden: (tiers: string) => string
+  showUsage: string
+  /* ── What used to be the whole window ───────────────────────────── */
   today: string
   lastNDays: (n: number) => string
   tokenBreakdown: string
@@ -45,6 +69,18 @@ export interface Translations {
 }
 
 const en: Translations = {
+  quotaTitle: 'Quota',
+  tierFiveHour: '5 hours',
+  tierWeek: 'Week',
+  resetsIn: (left: string) => `${left} left`,
+  resetsUnknown: 'no reset time',
+  unitDay: 'd',
+  unitHour: 'h',
+  unitMinute: 'm',
+  credInvalid: (tools: string) => `${tools}: credentials not valid`,
+  quotaStale: (age: string) => `Last read ${age} ago — not updating`,
+  tierHidden: (tiers: string) => `${tiers} is not shown: it reports no reset time`,
+  showUsage: 'Tokens and cost',
   today: 'Today',
   lastNDays: (n) => `Last ${n} days`,
   tokenBreakdown: 'Token breakdown',
@@ -88,7 +124,75 @@ const en: Translations = {
   setupFailed: 'Setup failed',
 }
 
+const ja: Translations = {
+  quotaTitle: '利用枠',
+  tierFiveHour: '5時間',
+  tierWeek: '週',
+  resetsIn: (left: string) => `あと ${left}`,
+  resetsUnknown: 'リセット時刻なし',
+  unitDay: '日',
+  unitHour: '時間',
+  unitMinute: '分',
+  credInvalid: (tools: string) => `${tools}：資格情報が無効です`,
+  quotaStale: (age: string) => `${age}前の値 — 更新が止まっています`,
+  tierHidden: (tiers: string) => `${tiers} は表示していません（リセット時刻を返さないため）`,
+  showUsage: 'トークンと費用',
+  today: '今日',
+  lastNDays: (n) => `過去${n}日`,
+  tokenBreakdown: 'トークン内訳',
+  tokenBreakdownToday: 'トークン内訳（今日）',
+  trend: '推移',
+  topModel: '最多モデル',
+  topTool: '最多ツール',
+  sessions: 'セッション',
+  settings: '設定',
+  theme: 'テーマ',
+  timeRange: '期間',
+  refreshInterval: '更新間隔',
+  display: '表示',
+  currency: '通貨',
+  exchangeRate: '為替レート',
+  exchangeRateUpdated: (time) => `${time} 更新`,
+  exchangeRateUnavailable: '為替レートを取得できません',
+  language: '言語',
+  showCost: '費用を表示',
+  tokenBreakdownToggle: 'トークン内訳',
+  activityChart: '推移グラフ',
+  syncedAt: (time) => `${time} 同期`,
+  themeSystem: 'システム',
+  themeLight: 'ライト',
+  themeDark: 'ダーク',
+  showPanel: 'パネルを表示',
+  openDashboard: 'ダッシュボードを開く',
+  refresh: '更新',
+  quit: '終了',
+  close: '閉じる',
+  installTitle: 'ダッシュボードの設定',
+  installPreparing: '準備中...',
+  installInstalling: '@juliantanx/aiusage をインストール中...',
+  installLaunching: 'ダッシュボードを起動中...',
+  installDone: '完了。開いています...',
+  installFailed: 'インストールに失敗しました',
+  setupTitle: '初回設定',
+  setupChecking: 'CLI を確認中...',
+  setupParsing: '使用ログを解析中...',
+  setupDone: '準備できました',
+  setupFailed: '設定に失敗しました',
+}
+
 const zh: Translations = {
+  quotaTitle: '用量额度',
+  tierFiveHour: '5 小时',
+  tierWeek: '每周',
+  resetsIn: (left: string) => `剩余 ${left}`,
+  resetsUnknown: '无重置时间',
+  unitDay: '天',
+  unitHour: '小时',
+  unitMinute: '分',
+  credInvalid: (tools: string) => `${tools}：凭据无效`,
+  quotaStale: (age: string) => `${age} 前读取 — 已停止更新`,
+  tierHidden: (tiers: string) => `${tiers} 未显示：它不返回重置时间`,
+  showUsage: '令牌与费用',
   today: '今日',
   lastNDays: (n) => `近 ${n} 天`,
   tokenBreakdown: 'Token 分布',
@@ -132,7 +236,7 @@ const zh: Translations = {
   setupFailed: '配置失败',
 }
 
-const translations: Record<Locale, Translations> = { en, zh }
+const translations: Record<Locale, Translations> = { en, ja, zh }
 
 export function t(locale: Locale): Translations {
   return translations[locale] ?? translations.en

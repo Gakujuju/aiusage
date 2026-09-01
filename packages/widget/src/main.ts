@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { EXCHANGE_RATE_SOURCE } from './currency'
 import type { ExchangeRateState } from './currency'
 import { queryWidgetData } from './data'
-import { buildTooltip, queryQuota, severity, shownRows } from './quota'
+import { buildTooltip, queryQuota, quotaView, severity, shownRows } from './quota'
 import type { Severity } from './quota'
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
 import { t } from './i18n'
@@ -39,6 +39,12 @@ let win: BrowserWindow | null = null
 let db: InstanceType<typeof Database> | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let positionRetryTimers: Array<ReturnType<typeof setTimeout>> = []
+/*
+ * Loaded once here for the pieces that read it before the app is ready,
+ * then re-read after whenReady so the OS language can be asked for. Electron
+ * refuses app.getLocale() before that point, and the language a first-run
+ * user sees is worth one extra read of a small JSON file.
+ */
 let settings: WidgetSettings = loadSettings()
 let exchangeRate: ExchangeRateState = loadExchangeRateCache()
 let exchangeRatePromise: Promise<ExchangeRateState> | null = null
@@ -59,12 +65,32 @@ let trayLevel: Severity | null = null
 
 app.setName('AIUsage Widget')
 
+/*
+ * The name Windows actually files this under.
+ *
+ * setName above is Electron's own idea of the name and Windows never asks
+ * for it. The taskbar, the tray settings list and the notification centre
+ * all key off the AppUserModelID, and with none set the process falls back
+ * to its executable - which is why someone looking for "AIUsage Widget" in
+ * Settings scrolled past `Electron` and nearly concluded it was not there.
+ *
+ * Set before any window exists, because Windows binds the ID to a window
+ * when the window is created and will not revisit it afterwards.
+ *
+ * The same string as electron-builder's appId, so a packaged build and this
+ * one are one identity rather than two.
+ */
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.juliantanx.aiusage-widget')
+}
+
 // Prevent dock icon on macOS
 if (process.platform === 'darwin' && app.dock) {
   app.dock.hide()
 }
 
 app.whenReady().then(async () => {
+  settings = loadSettings(app.getLocale())
   const dbExists = existsSync(DB_PATH)
 
   if (dbExists) {
@@ -269,10 +295,20 @@ function toggleWindow(): void {
 function pushDataUpdate(): void {
   if (!win || !db) return
   try {
-    const data = queryWidgetData(db, settings.rangeDays)
+    const data = buildPayload()
     win.webContents.send('widget:data-update', data)
-  } catch {
-    // DB may not be initialized yet; silently skip
+  } catch (error) {
+    /*
+     * Said, not swallowed.
+     *
+     * This used to skip in silence on the theory that the database might not
+     * be ready yet. What it actually produced, the first time anything in
+     * here threw, was a window that drew its header and nothing else - and no
+     * way at all to find out why, because a GUI Electron process has no
+     * console. An empty panel is not a state this program has; it is a
+     * failure wearing one.
+     */
+    say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -522,9 +558,25 @@ async function autoSetup(): Promise<void> {
 }
 
 // IPC handlers
+/**
+ * Everything the window draws, from one place.
+ *
+ * There were two paths building this - the pull the renderer makes when it
+ * mounts, and the push the main process sends afterwards - and they returned
+ * different shapes. Adding the quota to the push alone produced a window
+ * that drew its header and nothing else, because the pull is the one that
+ * lands first and it had never heard of quotas.
+ *
+ * The quota rides along rather than taking its own channel, so the panel
+ * cannot show a fresh quota above stale tokens or the other way round.
+ */
+function buildPayload(): ReturnType<typeof queryWidgetData> & { quota: ReturnType<typeof quotaView> } {
+  return { ...queryWidgetData(db!, settings.rangeDays), quota: quotaView(queryQuota(db!), Date.now()) }
+}
+
 ipcMain.handle('widget:get-data', () => {
   if (!db) return null
-  return queryWidgetData(db)
+  return buildPayload()
 })
 
 ipcMain.handle('widget:open-dashboard', async () => {

@@ -80,6 +80,75 @@ export function shownRows(rows: QuotaRow[]): QuotaRow[] {
       || TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier))
 }
 
+/**
+ * The window's version of the same reading.
+ *
+ * The tooltip is the summary and this is the detail behind it, so both come
+ * from one query and one set of rules. Two readers of the same table that
+ * each decided for themselves what counts as stale would eventually disagree
+ * in front of the user.
+ *
+ * Shaped for display and nothing else: no raw timestamps to subtract, no
+ * tier names to translate, no decisions left for the renderer to make.
+ */
+export interface QuotaLine {
+  tier: string
+  /** 'five_hour' | 'week' - which of the two words to print, not the raw name. */
+  kind: 'five_hour' | 'week'
+  utilization: number
+  /** Milliseconds until it resets, or null when the tier does not say. */
+  resetsInMs: number | null
+}
+
+export interface QuotaTool {
+  tool: string
+  label: string
+  lines: QuotaLine[]
+}
+
+export interface QuotaView {
+  tools: QuotaTool[]
+  /** Tools whose credential is not valid, by label. */
+  credInvalid: string[]
+  /** How old the oldest reading is, when that is worth saying; null otherwise. */
+  staleForMs: number | null
+  /**
+   * Tiers that exist in the data and are deliberately not drawn.
+   *
+   * Carried through to the window so it can say so. A row dropped in silence
+   * is indistinguishable from a row that was never there, and the person
+   * looking at the panel is the one who would otherwise wonder where their
+   * third Claude window went.
+   */
+  hiddenTiers: string[]
+}
+
+export function quotaView(rows: QuotaRow[], now: number): QuotaView {
+  const shown = shownRows(rows)
+  const tools: QuotaTool[] = []
+  for (const row of shown) {
+    let entry = tools.find((t) => t.tool === row.tool)
+    if (!entry) {
+      entry = { tool: row.tool, label: TOOL_LABELS[row.tool] ?? row.tool, lines: [] }
+      tools.push(entry)
+    }
+    entry.lines.push({
+      tier: row.tier,
+      kind: row.tier === 'five_hour' ? 'five_hour' : 'week',
+      utilization: row.utilization,
+      resetsInMs: row.resetsAt == null ? null : row.resetsAt - now,
+    })
+  }
+
+  const oldest = shown.length > 0 ? Math.min(...shown.map((r) => r.ts)) : null
+  return {
+    tools,
+    credInvalid: [...new Set(shown.filter((r) => r.credStatus !== 'valid').map((r) => TOOL_LABELS[r.tool] ?? r.tool))],
+    staleForMs: oldest != null && now - oldest > STALE_AFTER_MS ? now - oldest : null,
+    hiddenTiers: [...new Set(rows.filter((r) => !TIER_ORDER.includes(r.tier)).map((r) => r.tier))],
+  }
+}
+
 export type Severity = 'ok' | 'warn' | 'danger'
 
 /**
