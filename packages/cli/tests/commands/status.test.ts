@@ -21,7 +21,7 @@ describe('Status Command', () => {
     expect(status.deviceName).toBeDefined()
     expect(status.dbPath).toBe(':memory:')
     expect(status.databaseSize).toBeDefined()
-    expect(status.schemaVersion).toBe(24)
+    expect(status.schemaVersion).toBe(25)
     expect(status.tableCount).toBeGreaterThan(0)
     // Four now: v_sessions was dropped in v23.
     expect(status.viewCount).toBe(4)

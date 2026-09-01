@@ -701,8 +701,23 @@ export function serve(options: ServeOptions): void {
   })()
 
   if (!existsSync(webBuildDir)) {
-    console.error('Web dashboard not found. Reinstall the package: npm install -g @juliantanx/aiusage')
-    process.exit(1)
+    /*
+     * Said, not fatal.
+     *
+     * A spoke exists to read its own logs and hand the results to the hub;
+     * nobody opens its screen, and it binds to loopback so nobody could from
+     * elsewhere. Refusing to start meant a machine that needs no dashboard
+     * still had to spend a minute building one on every update.
+     *
+     * The request path below already answers 404 when there is no build, so
+     * this only ever stopped the process before that could happen.
+     *
+     * Still announced rather than passed over in silence. On the hub this
+     * line means something is wrong — the screen it serves is missing — and
+     * today the build twice erased dist/web without anyone noticing.
+     */
+    console.warn('[serve] no web dashboard in this build; /api still works.')
+    console.warn('[serve] normal on a machine that serves no screen; on the hub, rebuild the web package.')
   }
 
   /**

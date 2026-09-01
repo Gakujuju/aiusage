@@ -38,6 +38,7 @@ import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
 import { countUnpricedRecords, insertRecord, type UnpricedScope } from '../db/records.js'
 import { recordHeartbeat, hubHealth } from '../db/heartbeats.js'
+import { buildInfo } from '../build-info.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import {
   enqueueNotification,
@@ -2208,6 +2209,10 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           lastHeartbeatAt: Date.now(),
           lastRecordsSent: typeof data.recordsSent === 'number' ? data.recordsSent : 0,
           lastParseOkAt: typeof data.lastParseOkAt === 'number' ? data.lastParseOkAt : null,
+          // Absent from an older spoke, which leaves it unknown rather
+          // than out of date.
+          commit: typeof data.commit === 'string' ? data.commit : null,
+          commitTime: typeof data.commitTime === 'number' ? data.commitTime : null,
         }))
 
         json(res, { ok: true })
@@ -2241,12 +2246,17 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
          * threshold is a placeholder — the figures below are what will make
          * it choosable from evidence.
          */
+        const hub = buildInfo()
         const spokes = hubHealth(db, {
           silenceHours: loadConfig()?.hubSilenceHours ?? {},
+          hub,
         })
         json(res, {
           ok: parse ? !parse.stalled : true,
           parse,
+          // The hub's build once, at the top; each row carries the verdict
+          // rather than the raw values for the reader to compare again.
+          hub,
           spokes,
           web: { version: options?.getWebVersion?.() ?? null },
           now: Date.now(),

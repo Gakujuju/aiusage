@@ -17,9 +17,18 @@ export interface Heartbeat {
   lastHeartbeatAt: number
   lastRecordsSent: number
   lastParseOkAt: number | null
+  commit: string | null
+  commitTime: number | null
 }
 
 export interface SpokeHealth extends Heartbeat {
+  /**
+   * Whether this machine is running older code than the hub.
+   *
+   * null when either side cannot say. Decided here so that nothing reading
+   * this has to work it out again and reach a different answer.
+   */
+  behind: boolean | null
   /** How long this machine may stay quiet before it is worth remarking on. */
   thresholdHours: number
   silent: boolean
@@ -43,14 +52,16 @@ export function recordHeartbeat(db: Database.Database, beat: Heartbeat): void {
   db.prepare(`
     INSERT INTO device_heartbeats (
       device_instance_id, device, last_heartbeat_at, last_records_sent,
-      last_parse_ok_at, updated_at
+      last_parse_ok_at, commit_hash, commit_time, updated_at
     ) VALUES (@deviceInstanceId, @device, @lastHeartbeatAt, @lastRecordsSent,
-              @lastParseOkAt, @updatedAt)
+              @lastParseOkAt, @commit, @commitTime, @updatedAt)
     ON CONFLICT(device_instance_id) DO UPDATE SET
       device            = excluded.device,
       last_heartbeat_at = excluded.last_heartbeat_at,
       last_records_sent = excluded.last_records_sent,
       last_parse_ok_at  = excluded.last_parse_ok_at,
+      commit_hash       = excluded.commit_hash,
+      commit_time       = excluded.commit_time,
       updated_at        = excluded.updated_at
   `).run({
     deviceInstanceId: beat.deviceInstanceId,
@@ -58,6 +69,8 @@ export function recordHeartbeat(db: Database.Database, beat: Heartbeat): void {
     lastHeartbeatAt: beat.lastHeartbeatAt,
     lastRecordsSent: beat.lastRecordsSent,
     lastParseOkAt: beat.lastParseOkAt ?? null,
+    commit: beat.commit ?? null,
+    commitTime: beat.commitTime ?? null,
     updatedAt: Date.now(),
   })
 }
@@ -72,13 +85,19 @@ export function recordHeartbeat(db: Database.Database, beat: Heartbeat): void {
  */
 export function hubHealth(
   db: Database.Database,
-  options: { silenceHours?: Record<string, number>; now?: () => number } = {},
+  options: {
+    silenceHours?: Record<string, number>
+    now?: () => number
+    /** The hub's own build, to measure the others against. */
+    hub?: { commit: string | null; commitTime: number | null }
+  } = {},
 ): SpokeHealth[] {
   const now = (options.now ?? Date.now)()
   const configured = options.silenceHours ?? {}
 
   const rows = db.prepare(`
-    SELECT device_instance_id, device, last_heartbeat_at, last_records_sent, last_parse_ok_at
+    SELECT device_instance_id, device, last_heartbeat_at, last_records_sent, last_parse_ok_at,
+           commit_hash, commit_time
     FROM device_heartbeats
     ORDER BY device, device_instance_id
   `).all() as Array<{
@@ -87,6 +106,8 @@ export function hubHealth(
     last_heartbeat_at: number
     last_records_sent: number
     last_parse_ok_at: number | null
+    commit_hash: string | null
+    commit_time: number | null
   }>
 
   return rows.map((row) => {
@@ -98,6 +119,19 @@ export function hubHealth(
       lastHeartbeatAt: row.last_heartbeat_at,
       lastRecordsSent: row.last_records_sent,
       lastParseOkAt: row.last_parse_ok_at,
+      commit: row.commit_hash,
+      commitTime: row.commit_time,
+      /*
+       * Older code, not merely different code.
+       *
+       * The hash alone cannot order two builds and the time alone cannot
+       * tell them apart, so both are needed. Either side missing leaves this
+       * null: a machine that cannot say which build it runs is unknown, and
+       * calling it out of date would turn a missing value into a fault.
+       */
+      behind: (options.hub?.commitTime == null || row.commit_time == null)
+        ? null
+        : row.commit_time < options.hub.commitTime,
       thresholdHours,
       silent,
       silentSince: silent ? row.last_heartbeat_at : null,

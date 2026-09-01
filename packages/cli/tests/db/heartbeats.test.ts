@@ -27,6 +27,8 @@ const beat = (overrides: Partial<Parameters<typeof recordHeartbeat>[1]> = {}) =>
   lastHeartbeatAt: 1_000_000,
   lastRecordsSent: 0,
   lastParseOkAt: null,
+  commit: null,
+  commitTime: null,
   ...overrides,
 })
 
@@ -115,6 +117,65 @@ describe('the hub can tell a quiet spoke from a stopped one', () => {
     expect(health).toHaveLength(1)
     expect(health[0].lastHeartbeatAt).toBe(2_000_000)
     expect(health[0].lastRecordsSent).toBe(0)
+  })
+
+  /*
+   * Three machines are updated by hand, and what actually goes wrong is
+   * forgetting which ones were done. The hub decides this once so that no
+   * two readers can compare the same two builds and disagree.
+   */
+  describe('which machines are running older code than the hub', () => {
+    const HUB = { commit: 'bbbbbbb', commitTime: 2_000 }
+
+    it('says so when a machine is older', () => {
+      recordHeartbeat(db, beat({ commit: 'aaaaaaa', commitTime: 1_000 }))
+
+      const [spoke] = hubHealth(db, { hub: HUB, now: () => 1_000_000 })
+
+      expect(spoke.behind).toBe(true)
+      expect(spoke.commit).toBe('aaaaaaa')
+    })
+
+    it('says so when a machine is up to date', () => {
+      recordHeartbeat(db, beat({ commit: 'bbbbbbb', commitTime: 2_000 }))
+
+      expect(hubHealth(db, { hub: HUB, now: () => 1_000_000 })[0].behind).toBe(false)
+    })
+
+    it('leaves it unknown when the spoke cannot say', () => {
+      // An older spoke sends no version at all. Unknown must not become
+      // "out of date": that would turn a missing value into a verdict.
+      recordHeartbeat(db, beat())
+
+      expect(hubHealth(db, { hub: HUB, now: () => 1_000_000 })[0].behind).toBe(null)
+    })
+
+    it('leaves it unknown when the hub cannot say', () => {
+      // A hub running from source, or built without git, knows nothing to
+      // measure against — and cannot therefore convict anyone.
+      recordHeartbeat(db, beat({ commit: 'aaaaaaa', commitTime: 1_000 }))
+
+      const [spoke] = hubHealth(db, {
+        hub: { commit: null, commitTime: null },
+        now: () => 1_000_000,
+      })
+
+      expect(spoke.behind).toBe(null)
+    })
+
+    it('leaves it unknown when nobody passed the hub a version', () => {
+      recordHeartbeat(db, beat({ commit: 'aaaaaaa', commitTime: 1_000 }))
+
+      expect(hubHealth(db, { now: () => 1_000_000 })[0].behind).toBe(null)
+    })
+
+    it('does not call a newer machine behind', () => {
+      // Only older, not merely different. A machine ahead of the hub is a
+      // different situation and not the one this answers.
+      recordHeartbeat(db, beat({ commit: 'ccccccc', commitTime: 3_000 }))
+
+      expect(hubHealth(db, { hub: HUB, now: () => 1_000_000 })[0].behind).toBe(false)
+    })
   })
 
   it('carries what the spoke said about its own parsing', () => {

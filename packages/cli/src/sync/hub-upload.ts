@@ -3,6 +3,7 @@ import { HUB_FORWARD_TOKEN_CREDENTIAL, loadConfig, loadCredential } from '../con
 import { getUnsyncedRecords, markRecordsSynced } from '../db/records.js'
 import { mapStatsRecordToSyncRecord } from './mapper.js'
 import { chunkByLimits, MAX_SYNC_RECORDS_PER_REQUEST } from './direct.js'
+import { buildInfo } from '../build-info.js'
 
 /**
  * Sending this machine's usage records to the hub.
@@ -96,7 +97,14 @@ async function sendHeartbeat(
   origin: string,
   token: string,
   fetchImpl: typeof fetch,
-  body: { deviceInstanceId: string; device: string; recordsSent: number; lastParseOkAt: number | null },
+  body: {
+    deviceInstanceId: string
+    device: string
+    recordsSent: number
+    lastParseOkAt: number | null
+    commit: string | null
+    commitTime: number | null
+  },
 ): Promise<void> {
   try {
     await fetchImpl(`${origin}/api/sync/heartbeat`, {
@@ -140,6 +148,14 @@ export async function runHubUpload(deps: HubUploadDeps): Promise<HubUploadResult
       device: state.device ?? '',
       recordsSent: unsynced.length,
       lastParseOkAt: deps.lastParseOkAt?.() ?? null,
+      /*
+       * Which build is running here, not which one is checked out.
+       *
+       * Baked in at build time, so a machine that pulled without building
+       * keeps reporting the older commit. That is the honest answer: the
+       * hub is being asked what is running, not what is on disk.
+       */
+      ...buildInfo(),
     })
   }
 

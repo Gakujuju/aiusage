@@ -331,6 +331,57 @@ Get-Content "$env:USERPROFILE\.aiusage\serve.log" -Tail 14 -Encoding UTF8
 
 最後にハブのダッシュボードを開き、デバイス数が増えていることを確認する。
 
+### 10. 更新スクリプトを置く
+
+以後この端末を更新する手段。**1台ごとに生成する。**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\write-update-cmd.ps1
+```
+
+`%USERPROFILE%\.aiusage\` に2つ書かれる。
+
+| ファイル | 中身 |
+|---|---|
+| `aiusage-update.cmd` | 更新の全体。**順序が中身そのもの** |
+| `aiusage-stop-serve.ps1` | ポートを持つプロセスを名指しで止める1手順 |
+
+**チェックアウトのパスは生成時に焼き込まれる。**
+3台で場所が違う（`C:\Users\<ユーザー名>\Desktop\aiusage` と
+`C:\Users\<ユーザー名>\aiusage`）ので、手で書き換える手順は残さない。
+スクリプトは自分の置き場所からリポジトリの場所を知る。
+
+**ハブでは `-WithWeb` を付ける。**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\write-update-cmd.ps1 -WithWeb
+```
+
+画面を配るのはハブだけ。spoke で web をビルドするのは、
+誰も開かない画面のために毎回1分使うということ。
+`dist/web` が無くても serve は警告して起動し、`/api` は動く。
+
+以後の更新:
+
+```
+git pull
+%USERPROFILE%\.aiusage\aiusage-update.cmd
+```
+
+**中の順序を変えないこと。ビルド → 停止 → 起動 → ログ。**
+先に止めると、ビルドしている間この端末に serve が無い状態が続き、
+**5分ごとのウォッチドッグが書きかけの `dist` の上で serve を起動する。**
+（ノートPCで実際に起きた。）
+ビルドが失敗したときも、動いている serve はそのまま残る。
+
+`aiusage-update.cmd` は `git pull` をしない。
+**動いている版と、チェックアウトされている版は別の事実**であり、
+ハブに報告されるのは前者。詳細は OPERATIONS.md
+「どの端末がどの版で動いているか」。
+
+最後に25秒待ってログを表示する。ここまでの各手順が成功しても
+serve が起動直後に落ちることはあり、それが出るのはログだけ。
+
 ## 踏んだ罠
 
 ### schtasks /End は node を道連れにしない
