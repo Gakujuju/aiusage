@@ -30,9 +30,9 @@ cd aiusage
 pnpm install
 ```
 
-**ルートの `pnpm build` は使わない。** widget のビルドスクリプトが
-Unix の `rm -rf` を使っており、cmd.exe には `rm` が無いので失敗する。
-widget は Electron のデスクトップウィジェットで spoke には不要。
+**ルートの `pnpm build` でも通るようになった**（widget の
+`rm -rf` を `node -e` の `fs.rmSync` に置き換えたため)。
+ただし spoke に widget は要らないので、下の3つだけで足りる。
 
 ```bash
 pnpm --filter @aiusage/core build && pnpm --filter @aiusage/web build && pnpm --filter @juliantanx/aiusage build
@@ -305,8 +305,13 @@ UserId=<PC名>\<ユーザー名>  LogonType=Interactive  RunLevel=Limited
 **これが唯一のトークン検証手段。**
 
 **確認の前に、その端末で Claude Code か Codex を1回動かして
-レコードを作っておくこと。** 送るレコードが1件も無いと
-`runHubUpload` は `nothing_to_send` を返し、成功と失敗が区別できない。
+レコードを作っておくとよい。** 送るレコードが1件も無いと
+`runHubUpload` は `nothing_to_send` を返す。
+
+なお heartbeat は0件でも送られるので、**レコードが無くても
+ハブ側の `/api/health` の `spokes[]` には現れる。**
+「届いているが送るものが無い」と「届いていない」は、
+そちらで区別できる。
 
 ```powershell
 schtasks /Run /TN aiusage-serve
