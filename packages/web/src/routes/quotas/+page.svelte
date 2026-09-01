@@ -628,7 +628,7 @@
 
   .risk-critical {
     background: var(--danger-solid);
-    color: white;
+    color: var(--on-danger);
   }
 
   .tier-stale {

@@ -604,6 +604,13 @@
     --border-width:     1px;
     /* Text drawn on top of an accent fill. */
     --on-accent:        oklch(0.99 0.002 175);
+    /*
+     * And on top of a danger fill, which is a different question: the two
+     * fills do not move together from theme to theme. Three places had
+     * `color: white` written over these instead of reading a name, which is
+     * how terminal came to draw white on a 0.72 red at 2.87.
+     */
+    --on-danger:        oklch(0.99 0.002 175);
 
     /*
      * ── Status colours ──────────────────────────────────────────────────
@@ -739,6 +746,9 @@
      * same reason the text is.
      */
     --on-accent:        oklch(0.17 0.015 175);
+    /* The danger fill here is still the light one at 0.58, which near-white
+       clears at 4.62, so this does not flip with --on-accent. */
+    --on-danger:        oklch(0.99 0.002 175);
 
     /*
      * The remaining three were not a contrast problem but a contradiction:
@@ -831,6 +841,8 @@
     --chart-total:      oklch(0.45 0.060 65);
 
     --on-accent:        oklch(0.985 0.010 85);
+    /* Its danger fill stays dark enough for near-white ink (5.12). */
+    --on-danger:        oklch(0.985 0.010 85);
 
     --warn-solid:       oklch(0.68 0.140 62);
     --warn-bg:          oklch(0.935 0.040 80);
@@ -926,6 +938,8 @@
     --radius-panel:     0;
     --radius-pill:      0;
     --on-accent:        oklch(0.16 0.02 195);
+    /* Its danger fill is a light 0.72 red, so this is ink like --on-accent (6.75). */
+    --on-danger:        oklch(0.16 0.02 195);
     /* Amber warns; olive is the step before it. */
     --warn-solid:       oklch(0.80 0.15 75);
     --warn-bg:          oklch(0.80 0.15 75 / 0.14);
@@ -1327,7 +1341,7 @@
     border: 0;
     border-radius: 0.75rem;
     background: var(--accent);
-    color: white;
+    color: var(--on-accent);
     font: inherit;
     font-weight: 700;
     cursor: pointer;

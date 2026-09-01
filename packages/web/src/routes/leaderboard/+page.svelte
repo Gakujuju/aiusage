@@ -705,7 +705,7 @@
     border-radius: var(--radius-input);
     border: var(--border-width) solid var(--accent);
     background: var(--accent);
-    color: white;
+    color: var(--on-accent);
     font-size: 0.8125rem;
     font-weight: 700;
     cursor: pointer;
