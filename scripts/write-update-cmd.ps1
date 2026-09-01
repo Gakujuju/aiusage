@@ -183,8 +183,11 @@ rem /End first: killing the node child above leaves the task itself in the
 rem Running state for a moment, and /Run on a task that is still Running
 rem fails. The first real run of this script hit exactly that and was
 rem rescued by the 5-minute watchdog, which is luck rather than design.
-rem Three seconds was a guess and it was wrong twice. Waited on instead.
-powershell -NoProfile -Command "schtasks /End /TN '%AIUSAGE_TASK%' | Out-Null; `$w = 0; while ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running' -and `$w -lt 30) { Start-Sleep -Seconds 2; `$w += 2 }; if ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running') { Write-Host 'aiusage-update: the task is still Running after 30s; /Run will be refused' }; schtasks /Run /TN '%AIUSAGE_TASK%'"
+rem Three seconds was a guess and it was wrong twice, so the state is
+rem waited on instead. /End is called only when there is something to end:
+rem on a task that is already Ready it reports a failure, which is how a
+rem successful run came to print an error twice.
+powershell -NoProfile -Command "if ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running') { schtasks /End /TN '%AIUSAGE_TASK%' | Out-Null }; `$w = 0; while ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running' -and `$w -lt 30) { Start-Sleep -Seconds 2; `$w += 2 }; if ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running') { Write-Host 'aiusage-update: the task is still Running after 30s; /Run will be refused' }; schtasks /Run /TN '%AIUSAGE_TASK%'"
 
 rem --- 5. say whether it worked ---------------------------------------------
 rem Not optional. Every step above can report success while serve exits on
