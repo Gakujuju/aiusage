@@ -167,7 +167,11 @@ if errorlevel 1 (
 rem --- 5. say whether it worked ---------------------------------------------
 rem Not optional. Every step above can report success while serve exits on
 rem startup, and the log is the only place that shows it.
-timeout /t 25 /nobreak >nul
+rem Start-Sleep rather than timeout: timeout refuses to run at all when
+rem stdin is redirected, which is exactly how this gets run when anyone
+rem captures its output to a file. It would then fall straight through to
+rem the log tail and print the previous run.
+powershell -NoProfile -Command "Start-Sleep -Seconds 25"
 powershell -NoProfile -Command "Get-Content -LiteralPath '%AIUSAGE_LOG%' -Tail 16 -Encoding UTF8"
 echo.
 echo aiusage-update: if the times above are not from just now, the old serve
