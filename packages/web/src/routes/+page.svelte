@@ -178,6 +178,28 @@
   // Reactive cost formatting — depends on $displayCurrency and $exchangeRate so it re-evaluates on currency change
   $: formattedCost = (() => { void $displayCurrency; void $exchangeRate; return formatCost(data?.totalCost ?? 0) })()
 
+  /*
+   * How much of the total cost could not be worked out, and why.
+   *
+   * Two causes with nothing the reader can do about either — no published
+   * rate, and no token split to price. Added together here because beside
+   * the figure the useful fact is "this total is short", and the reasons
+   * are one click away on /cost rather than lost.
+   */
+  $: uncostedRecords = (data?.acknowledgedUnpricedRecords ?? 0)
+    + (data?.breakdownMissingRecords ?? 0)
+  $: uncostedNote = $t('home.uncostedNote').replace('{n}', String(uncostedRecords))
+  $: uncostedDetail = [
+    (data?.acknowledgedUnpricedRecords ?? 0) > 0
+      ? $t('cost.noPublishedRateNote')
+          .replace('{n}', String(data.acknowledgedUnpricedRecords))
+          .replace('{models}', (data.acknowledgedUnpricedModels ?? []).join(', '))
+      : '',
+    (data?.breakdownMissingRecords ?? 0) > 0
+      ? $t('cost.breakdownMissingNote').replace('{n}', String(data.breakdownMissingRecords))
+      : '',
+  ].filter(Boolean).join('\n')
+
   // Quota warning: load once on mount, show banner when any tier >= 80%
   let quotaWarnings = []
 
@@ -323,6 +345,7 @@
   breakdownMissingRecords={data?.breakdownMissingRecords ?? 0}
   acknowledgedUnpricedRecords={data?.acknowledgedUnpricedRecords ?? 0}
   acknowledgedUnpricedModels={data?.acknowledgedUnpricedModels ?? []}
+  showQuiet={false}
 />
 
 {#if loading}
@@ -390,6 +413,16 @@
     <div class="stat-block">
       <span class="stat-label">{$t('overview.totalCost')}</span>
       <span class="stat-value stat-cost">{formattedCost}</span>
+      <!--
+        Beside the figure it qualifies, not above the whole page. A total
+        that is short must never appear on its own; the reasons are in the
+        tooltip and in full on /cost.
+      -->
+      {#if uncostedRecords > 0}
+        <a class="stat-note" href="/cost" title={uncostedDetail}>
+          <span aria-hidden="true">ⓘ</span> {uncostedNote}
+        </a>
+      {/if}
     </div>
     <div class="stat-block">
       <span class="stat-label">{$t('overview.totalSessions')}</span>
@@ -668,6 +701,23 @@
     line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text);
+  }
+
+  /* Smaller than the figure and quieter in colour: it qualifies the number
+     above it rather than competing with it. A link, because the reasons
+     belong somewhere with room for them. */
+  .stat-note {
+    display: block;
+    margin-top: 0.35rem;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .stat-note:hover {
+    color: var(--text-secondary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   .stat-cost { color: var(--accent); }
 

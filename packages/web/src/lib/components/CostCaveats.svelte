@@ -27,6 +27,19 @@
   export let unpricedModels = []
   export let breakdownMissingRecords = 0
   export let acknowledgedUnpricedRecords = 0
+  /**
+   * Whether to render the two quiet lines here at all.
+   *
+   * They describe one number — the total cost — not the whole page. On a
+   * screen where that number is the subject, they belong beside it rather
+   * than in a full-width box above everything: put at the top they sit
+   * higher and larger than the figure they qualify, and on a phone they
+   * took a third of the screen to say something nobody can act on.
+   *
+   * The warning above them is a different matter and always renders. It can
+   * be acted on and it goes away once it is.
+   */
+  export let showQuiet = true
   /** @type {string[]} */
   export let acknowledgedUnpricedModels = []
 
@@ -71,14 +84,14 @@
   the actual reason. Both are quiet, because neither can be acted on — which
   is exactly what separates them from the warning above.
 -->
-{#if acknowledgedUnpricedRecords > 0}
+{#if showQuiet && acknowledgedUnpricedRecords > 0}
   <div class="caveat caveat-quiet" role="status">
     <span class="caveat-icon" aria-hidden="true">ⓘ</span>
     <div class="caveat-text">{acknowledgedMessage}</div>
   </div>
 {/if}
 
-{#if breakdownMissingRecords > 0}
+{#if showQuiet && breakdownMissingRecords > 0}
   <!-- Quieter than the one above: nothing is broken and there is nothing to
        do, so it states a limit rather than asking for action. -->
   <div class="caveat caveat-quiet" role="status">

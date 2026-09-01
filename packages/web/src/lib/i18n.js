@@ -467,6 +467,7 @@ const translations = {
       rateLastUpdated: 'Last updated',
     },
     home: {
+      uncostedNote: '{n} record(s) have no cost',
       counterLabel: 'AI Tokens Consumed',
       cfgTitle: 'Display Config',
       timeRange: 'Time Range',
@@ -1156,6 +1157,7 @@ const translations = {
       rateLastUpdated: '最終更新',
     },
     home: {
+      uncostedNote: '{n} 件は金額を計算できません',
       counterLabel: '消費したAIトークン',
       cfgTitle: '表示設定',
       timeRange: '期間',
@@ -1845,6 +1847,7 @@ const translations = {
       rateLastUpdated: '上次更新',
     },
     home: {
+      uncostedNote: '{n} 条记录无法计算金额',
       counterLabel: 'AI Token 消耗',
       cfgTitle: '显示配置',
       timeRange: '时间范围',
