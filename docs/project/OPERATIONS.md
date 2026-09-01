@@ -1063,3 +1063,77 @@ spoke は5分ごとに heartbeat を送っているので、そこに載せる�
 「何が動いているか」であって「何がチェックアウトされているか」
 ではない。ただし「pull したのに古いままだ」と見える場面があり、
 そのときは `aiusage-update.cmd` を通していないだけ。
+
+## 更新スクリプトを実地で通して出たこと（2026-09-01、ハブ5回）
+
+**5回かかった。4つとも、読んでいる限り見つからなかった。**
+「机上でないこと」を条件にしていなければ、全部残っていた。
+
+### 1回目 ─ CLI をビルドせずに「成功」した
+
+    pnpm --filter @aiusage/cli build
+    → No projects matched the filters "@aiusage/cli"
+
+**CLI のパッケージ名はディレクトリ名と違う**（`@juliantanx/aiusage`）。
+そして**マッチしない `--filter` は pnpm にとってエラーではない。**
+1行出して exit 0 で終わる。結果:
+
+  ・画面（web）だけビルドされた
+  ・CLI は素通り。dist は古いまま
+  ・serve は古いコードで再起動した
+  ・スクリプトは**成功として終了した**
+
+いちばん危ない形。「更新した」と思って別の端末に進む。
+今は `packages/*/package.json` の `name` を**生成時に読む**。
+打ち間違える機会を無くした。
+
+### 1回目 ─ 失敗した install を素通りした
+
+`pnpm install --frozen-lockfile` が EACCES で落ちたのに、
+`if errorlevel 1` が真にならず先へ進んだ。
+
+**`if errorlevel 1` は「1以上」の意味で、負の終了コードを通す。**
+`if not "%ERRORLEVEL%"=="0"` に変えた。
+
+EACCES 自体は既知のストアのリンク切れ（別項）。
+sharp@0.34.5 の linux-x64 系4本。消して通した。
+
+### 1・2回目 ─ 再起動がウォッチドッグ任せだった
+
+`schtasks /Run` は**タスクがまだ Running のとき拒否される。**
+node の子を落とした直後がまさにその状態で、`/Run` は失敗し、
+serve が戻ったのは**5分ごとのウォッチドッグのおかげ**だった。
+
+設計ではなく運。`/End` してから状態が Running を抜けるのを待ち、
+それから `/Run` する。
+
+### 2回目 ─ 「戻った」の判定が死体を数えていた
+
+「3秒で listening に戻った」と出たが、新しい serve が起動したのは
+その6秒後。**落としたプロセスの listening ソケットが少し残る。**
+
+止める側で**ポートが実際に空くまで待ってから**返すようにした。
+これで後段の「listening になった」が意味を持つ。
+
+### 3・4回目 ─ 成功しているのにエラーを出していた
+
+    エラー: スケジュール タスク "aiusage-serve" の実行に失敗しました。
+
+再起動は成功しているのに毎回これが出た。`schtasks` は
+状態の切り替わり中にこう言う。**成功時に出るエラー行は、
+読み飛ばす習慣を作る**（s3 の11件と同じ話）。
+
+再起動を `aiusage-restart-serve.ps1` に分けた。
+`schtasks` の出力は**捨てずに保持し、ポートが戻らなかったときだけ出す。**
+そのときは最初に読みたいものになる。
+
+### 5回目 ─ 通った
+
+    Already up to date at fe4aded.
+    ...
+    packages/cli build: Web build copied to dist/web
+    stopping serve (pid 35888)
+    aiusage-update: serve is listening on 3847 again after 3 seconds
+    aiusage serve listening on http://127.0.0.1:3847
+
+余計な行は無い。

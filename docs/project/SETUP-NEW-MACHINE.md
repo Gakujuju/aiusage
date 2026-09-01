@@ -339,12 +339,13 @@ Get-Content "$env:USERPROFILE\.aiusage\serve.log" -Tail 14 -Encoding UTF8
 powershell -ExecutionPolicy Bypass -File scripts\write-update-cmd.ps1
 ```
 
-`%USERPROFILE%\.aiusage\` に2つ書かれる。
+`%USERPROFILE%\.aiusage\` に3つ書かれる。
 
 | ファイル | 中身 |
 |---|---|
 | `aiusage-update.cmd` | 更新の全体。**順序が中身そのもの** |
 | `aiusage-stop-serve.ps1` | ポートを持つプロセスを名指しで止める1手順 |
+| `aiusage-restart-serve.ps1` | タスクを起動し、**ポートが戻ったかで判定する** |
 
 **チェックアウトのパスは生成時に焼き込まれる。**
 3台で場所が違う（`C:\Users\<ユーザー名>\Desktop\aiusage` と
