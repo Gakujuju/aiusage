@@ -790,9 +790,16 @@
     --text-secondary:   oklch(0.45 0.030 65);
     --text-muted:       oklch(0.60 0.026 68);
 
-    --accent:           oklch(0.58 0.110 68);
-    --accent-dim:       oklch(0.58 0.110 68 / 0.12);
-    --accent-hover:     oklch(0.52 0.120 66);
+    /*
+     * 0.56 rather than 0.58, which is where this started. The sign-in button
+     * puts near-white text on this fill, and at 0.58 that measured 4.21 - the
+     * same place the light palette sits (4.35). Two hundredths of lightness
+     * buys 4.57 and changes nothing anyone would see, so there was no reason
+     * to inherit the base's near miss along with its shape.
+     */
+    --accent:           oklch(0.56 0.115 68);
+    --accent-dim:       oklch(0.56 0.115 68 / 0.12);
+    --accent-hover:     oklch(0.50 0.125 66);
 
     --green:            oklch(0.55 0.110 130);
     --green-dim:        oklch(0.55 0.110 130 / 0.12);
@@ -803,7 +810,7 @@
     --rose:             oklch(0.53 0.150 30);
     --rose-dim:         oklch(0.53 0.150 30 / 0.12);
 
-    --badge-override-bg: oklch(0.58 0.110 68 / 0.14);
+    --badge-override-bg: oklch(0.56 0.115 68 / 0.14);
     --badge-override-fg: oklch(0.48 0.110 66);
     --badge-matched-bg:  oklch(0.55 0.110 130 / 0.14);
     --badge-matched-fg:  oklch(0.45 0.100 130);
