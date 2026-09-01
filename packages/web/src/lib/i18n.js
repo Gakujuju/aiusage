@@ -34,6 +34,8 @@ const translations = {
       },
     },
     common: {
+      updateReady: 'A newer version of this screen is available.',
+      updateApply: 'Reload',
       loading: 'Loading...',
       error: 'Error',
       noData: 'No data available',
@@ -306,6 +308,11 @@ const translations = {
       allTools: 'All tools',
     },
     settings: {
+      buildTitle: 'Build',
+      buildHint: 'The installed app serves its screen from a cache, so it can be running an older build than the server has. These two agreeing is the check.',
+      buildShell: 'Screen',
+      buildServer: 'Server',
+      buildStale: 'This screen is older than the one the server has. Closing and reopening the app applies the newer one.',
       navigation: {
         title: 'Navigation',
         hint: 'Untick a screen to leave it out of the sidebar. It still works if you open it directly.',
@@ -724,6 +731,8 @@ const translations = {
       },
     },
     common: {
+      updateReady: '新しい版があります。',
+      updateApply: '再読み込み',
       loading: '読み込み中...',
       error: 'エラー',
       noData: 'データがありません',
@@ -996,6 +1005,11 @@ const translations = {
       allTools: 'すべてのツール',
     },
     settings: {
+      buildTitle: 'ビルド',
+      buildHint: 'インストール済みアプリは画面をキャッシュから配るため、サーバより古い版で動いていることがあります。この2つが一致しているかどうかが確認になります。',
+      buildShell: '画面',
+      buildServer: 'サーバ',
+      buildStale: 'この画面はサーバの版より古い状態です。アプリを閉じて開き直すと新しい版になります。',
       navigation: {
         title: 'ナビゲーション',
         hint: 'チェックを外した画面はサイドバーに出しません。直接開けば動きます。',
@@ -1414,6 +1428,8 @@ const translations = {
       },
     },
     common: {
+      updateReady: '有新版本。',
+      updateApply: '重新加载',
       loading: '加载中...',
       error: '错误',
       noData: '暂无数据',
@@ -1686,6 +1702,11 @@ const translations = {
       allTools: '全部工具',
     },
     settings: {
+      buildTitle: '构建',
+      buildHint: '已安装的应用从缓存提供界面，因此可能运行着比服务器更旧的版本。两者是否一致即为检查方式。',
+      buildShell: '界面',
+      buildServer: '服务器',
+      buildStale: '当前界面比服务器的版本旧。关闭并重新打开应用即可更新。',
       navigation: {
         title: '导航',
         hint: '取消勾选的页面不会出现在侧栏。直接打开仍然可用。',

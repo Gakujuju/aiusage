@@ -1,5 +1,27 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
+  import { shellVersion, askVersion } from '$lib/sw-update.js'
+  import { fetchHealth } from '$lib/api.js'
+
+  /*
+   * Which build the screen came from, and which one the server has.
+   *
+   * Neither number means anything on its own. The question is only ever
+   * whether they match: an installed app serves its shell from the service
+   * worker cache, so it can be running a build the server replaced hours
+   * ago, and nothing about the screen says so — the figures stay correct
+   * because /api/ is never cached, and only the parts needing new code go
+   * missing. Two independently obtained values agreeing is the check.
+   *
+   * Here rather than on the home screen: it is permanent, and it needs no
+   * action until it disagrees.
+   */
+  /** @type {string | null} */
+  let serverVersion = null
+  onMount(() => {
+    askVersion()
+    fetchHealth().then((h) => { serverVersion = h?.web?.version ?? null }).catch(() => {})
+  })
   import { t } from '$lib/i18n.js'
   import { fetchConfig, saveConfig, fetchCredential, fetchDetectedTools, importKelivoBackup, notifySettingsUpdated, refreshExchangeRate, fetchSyncStatus, triggerSync, fetchCloudSyncStatus, sendNotificationTest, fetchPushStatus, savePushSubscription, deletePushSubscription, sendPushTest } from '$lib/api.js'
   import { pushSupport, subscribeToPush, localSubscriptionId, unsubscribeLocally } from '$lib/push.js'
@@ -1647,10 +1669,46 @@
       {/if}
     </div>
 
+    <section class="section">
+      <h2 class="section-title">{$t('settings.buildTitle')}</h2>
+      <p class="field-hint">{$t('settings.buildHint')}</p>
+      <div class="build-rows">
+        <div class="build-row">
+          <span class="build-label">{$t('settings.buildShell')}</span>
+          <span class="build-value mono">{$shellVersion ?? '—'}</span>
+        </div>
+        <div class="build-row">
+          <span class="build-label">{$t('settings.buildServer')}</span>
+          <span class="build-value mono">{serverVersion ?? '—'}</span>
+        </div>
+      </div>
+      {#if $shellVersion && serverVersion && $shellVersion !== serverVersion}
+        <p class="field-hint build-stale">{$t('settings.buildStale')}</p>
+      {/if}
+    </section>
+
   </div>
 {/if}
 
 <style>
+  .build-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+  }
+  .build-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: 0.8125rem;
+  }
+  .build-label { color: var(--text-secondary); }
+  .build-value { color: var(--text); font-variant-numeric: tabular-nums; }
+  /* Said plainly rather than in red: it is worth knowing and it is not a
+     fault. Coming back to the app is normally enough to clear it. */
+  .build-stale { color: var(--text-secondary); margin-top: 0.5rem; }
+
   .sections {
     display: flex;
     flex-direction: column;

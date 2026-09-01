@@ -661,6 +661,24 @@ export function serve(options: ServeOptions): void {
     getDbWriteQueueStatus: () => dbWriteQueue.getStatus(),
     // The controller decides; the endpoint only repeats it.
     getParseHealth: () => runtimeSettings.parseHealth(),
+    /*
+     * Read from disk each time, not remembered at startup.
+     *
+     * dist/web is served straight off the disk and is replaced by a build
+     * without restarting anything, so a value captured here at boot would
+     * describe a screen this process stopped serving hours ago — which is
+     * the very confusion the figure exists to clear up.
+     */
+    getWebVersion: () => {
+      try {
+        const source = readFileSync(join(webBuildDir, 'service-worker.js'), 'utf-8')
+        return source.match(/aiusage-shell-\$\{([A-Za-z_$][\w$]*)\}/)
+          ? (source.match(/"(\d{13})"/)?.[1] ?? null)
+          : (source.match(/aiusage-shell-([\w.-]+)/)?.[1] ?? null)
+      } catch {
+        return null
+      }
+    },
   })
   const webBuildDir = (() => {
     const prodDir = join(dirname(fileURLToPath(import.meta.url)), 'web')

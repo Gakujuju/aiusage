@@ -28,9 +28,39 @@ self.addEventListener('install', (event) => {
       .then((cache) => cache.addAll(SHELL))
       // A shell that fails to precache is not a reason to keep the old worker
       // around; it will fill in from the network on demand.
-      .catch(() => undefined)
-      .then(() => self.skipWaiting()),
+      .catch(() => undefined),
   )
+})
+
+/*
+ * No skipWaiting here, deliberately.
+ *
+ * It used to take over the moment it was ready, which sounds like the fast
+ * choice and is not. The page that triggered the update had already booted
+ * from the old bundle and nothing reloaded it, so the new screen still only
+ * appeared on the next launch — always exactly one behind — while activate
+ * deleted the cache the running page was still using. A route it had not
+ * loaded yet would then 404, and serve answers unknown paths with
+ * index.html, so the old page could receive HTML where it expected a script.
+ *
+ * Now the new worker waits until someone decides. The page applies it when
+ * the reader comes back to the app, or offers a button while they are
+ * looking at it. Either way the old cache stays whole until the moment of
+ * the reload.
+ */
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
+  if (event.data?.type === 'VERSION') {
+    // Answered so the app can show which shell it is running. Which build the
+    // screen came from is not otherwise knowable from inside the page, and on
+    // a phone there are no developer tools to ask with.
+    // Over the port when the asker opened one, otherwise straight back to
+    // the client. Both are used: the settings screen wants a reply it can
+    // await, and a plain postMessage is simpler from anywhere else.
+    const reply = { type: 'VERSION', version }
+    if (event.ports && event.ports[0]) event.ports[0].postMessage(reply)
+    else event.source?.postMessage(reply)
+  }
 })
 
 self.addEventListener('activate', (event) => {

@@ -391,6 +391,15 @@ async function proxyCloudSyncStatus(res: http.ServerResponse): Promise<void> {
 export interface ApiServerOptions {
   currentDeviceInstanceId?: string
   onRefresh?: () => Promise<{ parsedCount: number; toolCallCount: number; errors: string[] }>
+  /**
+   * Which build of the screen this server would hand out right now.
+   *
+   * Reported so it can be set against the build the app is actually running.
+   * Neither number means anything alone — the question is only ever whether
+   * they match, and a mismatch is exactly the state worth recognising: the
+   * app is serving a shell from its cache that the server has moved past.
+   */
+  getWebVersion?: () => string | null
   /** The parse-health verdict, decided in one place by the controller. */
   getParseHealth?: () => {
     lastParseOkAt: number | null
@@ -2177,6 +2186,7 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         json(res, {
           ok: parse ? !parse.stalled : true,
           parse,
+          web: { version: options?.getWebVersion?.() ?? null },
           now: Date.now(),
         })
         return

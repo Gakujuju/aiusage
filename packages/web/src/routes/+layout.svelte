@@ -10,6 +10,7 @@
   import { displayCurrency, exchangeRate } from '$lib/stores.js'
   import { getAuthShellState } from '$lib/auth-shell.js'
   import ParseStallBanner from '$lib/components/ParseStallBanner.svelte'
+  import { initServiceWorkerUpdates, updateReady, applyUpdate } from '$lib/sw-update.js'
   import {
     House, LayoutDashboard, Coins, DollarSign, Box,
     MessageSquare, FolderKanban, Wrench, Activity, Bell,
@@ -194,8 +195,18 @@
     loadAuthStatus().finally(() => { recheckingAuth = false })
   }
 
+  /** @type {(() => void) | null} */
+  let stopUpdates = null
+
   onMount(() => {
     initTheme()
+    // Notices a new build while the app is open, and applies it on the way
+    // back in. Without this the screen was always one launch behind.
+    //
+    // Torn down from the onDestroy below rather than by calling onDestroy
+    // here: a lifecycle function inside a callback throws, which took the
+    // rest of this handler with it and left the app on "checking access".
+    stopUpdates = initServiceWorkerUpdates()
     loadAuthStatus()
     setUnauthorizedHandler(onUnauthorized)
     const tick = () => {
@@ -213,6 +224,7 @@
   })
 
   onDestroy(() => {
+    stopUpdates?.()
     setUnauthorizedHandler(null)
     if (statusClockTimer != null) clearInterval(statusClockTimer)
   })
@@ -436,6 +448,17 @@
     </header>
 
     <main class="page-content">
+      <!--
+        Only while someone is looking. Coming back to the app applies the
+        update without asking, so this band is what is left: the case where
+        swapping the screen would interrupt a person mid-read.
+      -->
+      {#if $updateReady}
+        <div class="update-band" role="status">
+          <span>{$t('common.updateReady')}</span>
+          <button class="update-btn" on:click={applyUpdate}>{$t('common.updateApply')}</button>
+        </div>
+      {/if}
       <!-- Above the content, because everything below it is out of date. -->
       <ParseStallBanner />
       {#if routeHidden}
@@ -896,6 +919,31 @@
    * that lies about its own keys is the one part of the imitation that would
    * actually mislead someone.
    */
+  /* Quiet: a new version is good news and nothing is wrong. It asks
+     rather than announces, because the reader is mid-something. */
+  .update-band {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    background: var(--raised);
+    color: var(--text-secondary);
+    border-radius: var(--radius-card);
+    padding: 0.55rem 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.8125rem;
+  }
+  .update-btn {
+    flex-shrink: 0;
+    background: var(--accent);
+    color: var(--surface);
+    border: none;
+    border-radius: var(--radius-card);
+    padding: 0.3rem 0.7rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
   .status-line {
     display: none;
   }
