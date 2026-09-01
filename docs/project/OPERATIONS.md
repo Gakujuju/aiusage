@@ -1064,9 +1064,9 @@ spoke は5分ごとに heartbeat を送っているので、そこに載せる�
 ではない。ただし「pull したのに古いままだ」と見える場面があり、
 そのときは `aiusage-update.cmd` を通していないだけ。
 
-## 更新スクリプトを実地で通して出たこと（2026-09-01、ハブ5回）
+## 更新スクリプトを実地で通して出たこと（2026-09-01、ハブ7回）
 
-**5回かかった。4つとも、読んでいる限り見つからなかった。**
+**7回かかった。5つとも、読んでいる限り見つからなかった。**
 「机上でないこと」を条件にしていなければ、全部残っていた。
 
 ### 1回目 ─ CLI をビルドせずに「成功」した
@@ -1179,3 +1179,82 @@ origin に自分の持っていないコミットが存在せず、この分岐�
 なお**出荷しているほうの7行は `-^>`**（`^` は1つ）で、
 これは正しく矢印を出す。壊れていたのは手書きの試験のほうだけで、
 生成物ではない。
+
+### 5つ目 ─ 人の入力を待つ箇所（corepack と、資格情報のダイアログ）
+
+    ! Corepack is about to download https://registry.npmjs.org/pnpm/-/pnpm-9.15.0.tgz
+    ? Do you want to continue? [Y/n]
+
+`pnpm` はこの端末では **corepack のシム経由**で動いている
+（`%APPDATA%\npm\pnpm.cmd` の中身が `corepack/dist/pnpm.js`）。
+`package.json` の `packageManager` が版を固定しているので、
+corepack はその版を取りに行く前に確認を求める。
+
+#### 実際の条件（corepack の実装を読んだ）
+
+    if (process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT === `1`) {
+      console.error(`! Corepack is about to download ${input}`);
+      if (stdin.isTTY && !process.env.CI) {
+        stderr.write(`? Do you want to continue? [Y/n] `);
+
+**訊いてくるのは、変数が `1` で、かつ端末が TTY のときだけ。**
+だから:
+
+  ・**人が端末から実行したときだけ訊かれる**（＝答えられる状況）
+  ・タスクスケジューラや出力をファイルに落とす実行では TTY が無いので、
+    通知を1行出して**そのまま進む。止まらない。**
+
+これは前提の訂正になる。**「人が見ていない端末で止まったまま気づかれない」
+という形には、corepack はならない。** 止まるのは人がいるときだけで、
+壊れるのは「1コマンドで終わる」という約束のほう。
+
+`COREPACK_ENABLE_DOWNLOAD_PROMPT=0` を .cmd の中で設定した。
+corepack を迂回する案は採らなかった。**固定の意味が無くなる**からで、
+プロンプト1つと、3台の pnpm が静かにずれる状態を交換することになる。
+ダウンロードの通知そのものは出るので、黙って取ってくるわけではない。
+
+#### 本当に「止まったまま」になるのはこちら
+
+`git pull` は保存された資格情報が切れると訊いてくる。
+この remote は **https + credential helper が `manager`（GCM 2.9.0）**で、
+GCM は**ウィンドウを出す。** ヘッドレスの端末では、
+誰も見ないダイアログの前でプロセスが待ち続ける。
+**出力も無く、失敗もせず、終わりもしない。**
+
+  ・`GIT_TERMINAL_PROMPT=0` ─ git 自身が端末で訊くのを止める
+  ・`git -c credential.interactive=false pull --ff-only` ─
+    helper にウィンドウを出させない
+
+失敗して終わるので、`if not "%ERRORLEVEL%"=="0"` が拾い、
+**動いている serve には手を付けずに**メッセージを出す:
+
+    aiusage-update: pull failed - nothing was built or stopped.
+    If it mentions authentication, the stored credential has expired:
+    run "git pull" by hand once, where it can ask.
+
+**確かめていないこと:** 資格情報が切れた状態は作っていないので、
+ダイアログが実際に抑止されるかは未確認。
+`credential.interactive=false` は GCM の文書にある設定だが、
+この 2.9.0 のバイナリからは読み取れなかった（単一ファイルで文字列が出ない）。
+確認したのは、**この指定を足しても通常の pull が壊れないこと**だけ。
+
+#### 他に待つ箇所が無いかの確認（条件を先に決めて実行）
+
+対象は生成物3つと生成器1つ。
+
+    A  cmd が待つもの          pause / choice / runas / set /p
+    A2 timeout（/nobreak 無し）
+    B  PowerShell が待つもの   Read-Host / Get-Credential / Out-GridView /
+                               PromptForChoice / ReadKey / Wait-Event /
+                               -Confirm（-Confirm:$false は除く）
+    C  git が編集器を開くもの  rebase / add / commit / merge / mergetool /
+                               --interactive
+    D  schtasks /U（/P 無しでパスワードを訊く形）
+    E  pnpm / corepack
+
+A〜D は**該当なし**。E は上の2箇所のみ。
+
+**grep で見えないものが2つあった**ことは記録しておく。
+corepack のプロンプトは `pnpm` という語の先にあり、
+資格情報のダイアログは `git pull` という語の先にある。
+**呼んでいる語ではなく、その先が何を持っているかで決まる。**

@@ -114,6 +114,23 @@ set "AIUSAGE_LOG=%USERPROFILE%\.aiusage\serve.log"
 set "AIUSAGE_PORT=$Port"
 set "AIUSAGE_TASK=$TaskName"
 
+rem --- 0. nothing below may stop and ask a person ---------------------------
+rem This is meant to be one command on a machine nobody is watching. A step
+rem that waits for an answer does not fail and does not finish: it produces
+rem no outcome at all, which is the one result nothing here can report on.
+rem
+rem corepack asks before downloading the pnpm version that packageManager
+rem pins. Answered in advance rather than routed around, because the pin is
+rem what keeps three machines on one pnpm; going around corepack would trade
+rem a prompt for a version drift nobody would notice. It still prints what it
+rem is downloading.
+set "COREPACK_ENABLE_DOWNLOAD_PROMPT=0"
+rem
+rem And git asks for credentials when the stored ones expire. This stops it
+rem asking at the terminal; the credential helper is told not to open a
+rem window of its own on the pull itself, below.
+set "GIT_TERMINAL_PROMPT=0"
+
 rem --- 1. pull --------------------------------------------------------------
 cd /d "%AIUSAGE_REPO%"
 if errorlevel 1 (
@@ -125,9 +142,15 @@ for /f %%i in ('git rev-parse --short HEAD') do set "AIUSAGE_WAS=%%i"
 
 rem --ff-only: a merge commit made by a script at 2am, on a machine nobody
 rem is looking at, is not something anyone wants to discover later.
-git pull --ff-only
+rem -c credential.interactive=false: the helper on this remote is a GUI one,
+rem and a dialog on a machine nobody is looking at is the worst version of
+rem this problem - no output, no failure, no end. Better to fail here and
+rem have someone run git pull by hand once, where it can ask.
+git -c credential.interactive=false pull --ff-only
 if errorlevel 1 (
   echo aiusage-update: pull failed - nothing was built or stopped.
+  echo If it mentions authentication, the stored credential has expired:
+  echo run "git pull" by hand once, where it can ask.
   exit /b 1
 )
 
