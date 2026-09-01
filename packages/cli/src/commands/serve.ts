@@ -477,7 +477,13 @@ export function serve(options: ServeOptions): void {
     console.log(`[serve] parsed ${result.parsedCount} records, ${result.toolCallCount} tool calls.`)
     // Said out loud, because the alternative is a dashboard reading $0 and
     // being believed. That is exactly what happened for months.
-    const unpriced = countUnpricedRecords(options.db)
+    // The same list the screens use. Without it this line would go on
+    // naming a model the dashboard had already stopped warning about —
+    // the log and the screen disagreeing about the same count, which is
+    // the fault that cost an afternoon earlier today.
+    const unpriced = countUnpricedRecords(options.db, {
+      acknowledgedModels: loadConfig()?.acknowledgedUnpricedModels ?? [],
+    })
     if (unpriced.unpricedRecords > 0) {
       const [first, ...rest] = unpriced.unpricedModels
       const models = rest.length > 0 ? `${first} ほか${rest.length}モデル` : first
