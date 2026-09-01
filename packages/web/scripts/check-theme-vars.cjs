@@ -22,6 +22,7 @@ const path = require('node:path')
 const ROOT = path.join(__dirname, '..')
 const LAYOUT = path.join(ROOT, 'src', 'routes', '+layout.svelte')
 const THEME_JS = path.join(ROOT, 'src', 'lib', 'theme.js')
+const I18N = path.join(ROOT, 'src', 'lib', 'i18n.js')
 
 /**
  * Properties every theme may inherit from the base, and why.
@@ -195,6 +196,23 @@ for (const name of ordered) {
   if (name !== 'system' && !registered.has(name)) problems.push({ kind: 'ordered-only', theme: name })
 }
 
+/*
+ * And the fourth place: the name a person reads.
+ *
+ * A theme with no label falls through to whatever the lookup does with a
+ * missing key, which is a blank or the key itself sitting in the toggle. Every
+ * locale needs one - a theme that is named in English and blank in Japanese is
+ * a theme half the users cannot identify.
+ */
+const i18n = fs.readFileSync(I18N, 'utf8')
+const labelBlocks = [...i18n.matchAll(/\n    theme:\s*\{([^}]*)\}/g)]
+if (labelBlocks.length === 0) problems.push({ kind: 'no-labels' })
+labelBlocks.forEach((block, index) => {
+  const named = new Set([...block[1].matchAll(/([a-zA-Z0-9_-]+)\s*:/g)].map((m) => m[1]))
+  const missing = [...registered.keys()].filter((t) => !named.has(t))
+  if (missing.length) problems.push({ kind: 'no-label', names: missing, locale: index + 1 })
+})
+
 /* The base has to be a theme as well, or nothing ever points at :root. */
 if (!registered.has(BASE_THEME)) problems.push({ kind: 'no-base', theme: BASE_THEME })
 if (themeBlocks.has(BASE_THEME)) problems.push({ kind: 'base-has-block', theme: BASE_THEME })
@@ -220,6 +238,8 @@ for (const p of problems) {
   }
   if (p.kind === 'no-css') console.error(`  ${p.theme} is in THEMES with no [data-theme="${p.theme}"] palette\n`)
   if (p.kind === 'no-base') console.error(`  ${p.theme} is this file's BASE_THEME but is not in THEMES\n`)
+  if (p.kind === 'no-labels') console.error('  found no theme: {} label block in src/lib/i18n.js\n')
+  if (p.kind === 'no-label') console.error(`  locale ${p.locale} has no name for: ${p.names.join(' ')}\n`)
   if (p.kind === 'base-has-block') console.error(`  ${p.theme} is the base and also has a [data-theme] block of its own; one of the two is wrong\n`)
   if (p.kind === 'no-polarity') console.error(`  ${p.theme} declares no polarity, so scrollbars and form controls guess\n`)
   if (p.kind === 'unregistered') console.error(`  [data-theme="${p.theme}"] exists in CSS but is not in THEMES\n`)

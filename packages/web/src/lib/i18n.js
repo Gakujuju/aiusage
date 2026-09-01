@@ -207,6 +207,7 @@ const translations = {
       dark: 'Dark',
       light: 'Light',
       terminal: 'Terminal',
+      kohaku: 'Amber',
     },
     status: {
       refresh: 'refresh'
@@ -904,6 +905,7 @@ const translations = {
       dark: 'ダーク',
       light: 'ライト',
       terminal: 'ターミナル',
+      kohaku: '琥珀',
     },
     status: {
       refresh: '更新'
@@ -1601,6 +1603,7 @@ const translations = {
       dark: '深色',
       light: '浅色',
       terminal: '终端',
+      kohaku: '琥珀',
     },
     status: {
       refresh: '刷新'

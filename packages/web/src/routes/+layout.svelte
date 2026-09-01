@@ -703,6 +703,105 @@
   }
 
   /*
+   * ── 琥珀 (kohaku) ─────────────────────────────────────────────────────
+   *
+   * A warm, low-blue-light surface for reading at night without switching to
+   * a dark page. Light polarity: it is paper, not ink.
+   *
+   * Every value here was chosen for this theme rather than sampled from
+   * anywhere. The only thing borrowed is the idea - warm ground, warm text,
+   * blues pulled down in chroma so they stop being the brightest thing on a
+   * page full of numbers.
+   *
+   * Hue sits around 60-85 for everything structural. The status and chart
+   * colours keep their hue separation, because a chart with six warm-brown
+   * series is unreadable and the whole point of those names is that they can
+   * be told apart; what changes is that their chroma comes down to sit inside
+   * the same picture rather than on top of it.
+   *
+   * Geometry and typefaces are not restated - see SHARED in
+   * scripts/check-theme-vars.cjs. Everything else is, and that script fails
+   * the build if it is not.
+   */
+  :global(:root[data-theme="kohaku"]) {
+    --bg:               oklch(0.962 0.018 82);
+    --surface:          oklch(0.984 0.013 82);
+    --raised:           oklch(0.943 0.022 80);
+    --hover:            oklch(0.922 0.028 78);
+    --sidebar-bg:       oklch(0.951 0.021 82);
+    --border-subtle:    oklch(0.888 0.026 78);
+    --border-medium:    oklch(0.818 0.034 76);
+
+    /* Dark brown rather than black: the contrast is still there, the glare
+       is not. */
+    --text:             oklch(0.27 0.032 62);
+    --text-secondary:   oklch(0.45 0.030 65);
+    --text-muted:       oklch(0.60 0.026 68);
+
+    --accent:           oklch(0.58 0.110 68);
+    --accent-dim:       oklch(0.58 0.110 68 / 0.12);
+    --accent-hover:     oklch(0.52 0.120 66);
+
+    --green:            oklch(0.55 0.110 130);
+    --green-dim:        oklch(0.55 0.110 130 / 0.12);
+    --blue:             oklch(0.52 0.080 235);
+    --blue-dim:         oklch(0.52 0.080 235 / 0.12);
+    --purple:           oklch(0.52 0.110 330);
+    --purple-dim:       oklch(0.52 0.110 330 / 0.12);
+    --rose:             oklch(0.53 0.150 30);
+    --rose-dim:         oklch(0.53 0.150 30 / 0.12);
+
+    --badge-override-bg: oklch(0.58 0.110 68 / 0.14);
+    --badge-override-fg: oklch(0.48 0.110 66);
+    --badge-matched-bg:  oklch(0.55 0.110 130 / 0.14);
+    --badge-matched-fg:  oklch(0.45 0.100 130);
+    --badge-noprice-bg:  oklch(0.55 0.170 28 / 0.12);
+    --badge-noprice-fg:  oklch(0.45 0.160 28);
+
+    /* Warm shadows. Pure black on a warm ground reads as a grey smudge. */
+    --shadow-sm:        0 1px 2px oklch(0.30 0.04 60 / 0.08);
+    --shadow-md:        0 1px 3px oklch(0.30 0.04 60 / 0.10), 0 4px 12px oklch(0.30 0.04 60 / 0.06);
+    --shadow-lg:        0 4px 8px oklch(0.30 0.04 60 / 0.10), 0 12px 32px oklch(0.30 0.04 60 / 0.08);
+    --overlay:          oklch(0.25 0.03 60 / 0.28);
+
+    --chart-input:      oklch(0.62 0.120 70);
+    --chart-output:     oklch(0.55 0.090 235);
+    --chart-cache-read: oklch(0.60 0.100 130);
+    --chart-cache-write: oklch(0.55 0.120 330);
+    --chart-thinking:   oklch(0.57 0.150 30);
+    --chart-total:      oklch(0.45 0.060 65);
+
+    --on-accent:        oklch(0.985 0.010 85);
+
+    --warn-solid:       oklch(0.68 0.140 62);
+    --warn-bg:          oklch(0.935 0.040 80);
+    --warn-fg:          oklch(0.45 0.120 58);
+    --notice-bg:        oklch(0.948 0.050 72);
+    --notice-border:    oklch(0.850 0.080 70);
+    --notice-fg:        oklch(0.42 0.120 60);
+
+    --danger-fg:        oklch(0.45 0.160 28);
+    --danger-bg:        oklch(0.55 0.170 28 / 0.14);
+    --danger-solid:     oklch(0.55 0.170 28);
+    --danger-border:    oklch(0.70 0.110 28);
+    --danger-soft-bg:   oklch(0.55 0.170 28 / 0.09);
+    --danger-soft-fg:   oklch(0.40 0.130 28);
+    /* The base writes this one in sRGB for a reason that does not apply here:
+       nothing is being preserved, so it is stated like everything else. */
+    --danger-plain:     oklch(0.62 0.160 28);
+
+    --info-bg:          oklch(0.52 0.080 235 / 0.14);
+    --info-fg:          oklch(0.44 0.090 235);
+    --info-solid:       oklch(0.52 0.090 235);
+    --success-fg:       oklch(0.47 0.100 130);
+    --amber:            oklch(0.72 0.140 72);
+
+    --shadow-dropdown:  0 1px 3px oklch(0.30 0.04 60 / 0.10), 0 4px 12px oklch(0.30 0.04 60 / 0.06);
+    --shadow-modal:     0 4px 8px oklch(0.30 0.04 60 / 0.08), 0 12px 32px oklch(0.30 0.04 60 / 0.06);
+    --overlay-strong:   oklch(0.25 0.03 60 / 0.40);
+  }
+
+  /*
    * ── Terminal ──────────────────────────────────────────────────────────
    *
    * A monitoring TUI, not a nostalgia filter: dark blue-green rather than
