@@ -140,6 +140,15 @@ aiusage-widget
 
 The widget reads the same local AIUsage database and can open the full dashboard from its tray menu. See [Widget docs](https://aiusage.jtanx.com/docs#widget).
 
+The tray icon shows quota usage: hover it for each tool's 5-hour and weekly
+windows and how long until they reset. It only starts on a machine that
+collects quotas — elsewhere it writes one line to `~/.aiusage/widget.log`
+saying so and exits, rather than sitting in the tray showing nothing.
+
+**Windows 11 hides new tray icons by default.** To keep it visible, turn it
+on under Settings → Personalisation → Taskbar → Other system tray icons.
+Until then it lives behind the `^` at the end of the taskbar.
+
 ## Development
 
 ```bash

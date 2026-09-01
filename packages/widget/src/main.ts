@@ -1,11 +1,14 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, dialog, screen, nativeTheme } from 'electron'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import { EXCHANGE_RATE_SOURCE } from './currency'
 import type { ExchangeRateState } from './currency'
 import { queryWidgetData } from './data'
+import { buildTooltip, queryQuota, severity, shownRows } from './quota'
+import type { Severity } from './quota'
+import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
 import type { WidgetSettings } from './settings'
@@ -40,6 +43,20 @@ let settings: WidgetSettings = loadSettings()
 let exchangeRate: ExchangeRateState = loadExchangeRateCache()
 let exchangeRatePromise: Promise<ExchangeRateState> | null = null
 
+/*
+ * The tray refreshes on its own clock, not the window one.
+ *
+ * Five minutes because the numbers underneath it are fetched every five
+ * minutes; reading the database more often than it is written just re-reads
+ * the same row. The window keeps its own interval, which the user can set,
+ * because that one is about how fresh a panel they are looking at feels.
+ */
+const TRAY_REFRESH_MS = 5 * 60_000
+
+let trayTimer: ReturnType<typeof setInterval> | null = null
+let baseTrayBitmap: { bitmap: Buffer; width: number; height: number; scaleFactor: number } | null = null
+let trayLevel: Severity | null = null
+
 app.setName('AIUsage Widget')
 
 // Prevent dock icon on macOS
@@ -57,10 +74,26 @@ app.whenReady().then(async () => {
     })
   }
 
+  /*
+   * This is a quota display, and a spoke has no quota to display.
+   *
+   * Only the hub runs the snapshot (a spoke has quotaSnapshotInterval: 0),
+   * so on any other machine quota_current is empty and always will be. An
+   * icon that sits in the tray showing nothing is worse than no icon: it
+   * occupies the place where a real reading would be, and the way you find
+   * out is by hovering over it and seeing blanks.
+   */
+  if (!dbExists || quotaRowCount() === 0) {
+    say('no quota data in this database. This build shows quota windows, and only the hub collects them. Not starting.')
+    app.exit(0)
+    return
+  }
+
   applyTheme(settings.theme)
   createTray()
   createWindow()
   startAutoRefresh()
+  startTrayRefresh()
   void refreshExchangeRate()
 
   if (!dbExists) {
@@ -78,6 +111,35 @@ app.on('before-quit', () => {
   db?.close()
 })
 
+/**
+ * Says something where it can actually be read afterwards.
+ *
+ * A GUI Electron process on Windows has no console attached, so console.log
+ * from the main process goes nowhere - which was measured, not assumed: this
+ * exact line printed nothing at all when the app was launched from a shell
+ * with its output piped. A program that declines to start has to leave the
+ * reason somewhere, and next to the database it just read is where someone
+ * would look.
+ */
+function say(message: string): void {
+  const line = `[${new Date().toISOString()}] [widget] ${message}\n`
+  console.log(line.trimEnd())
+  try {
+    appendFileSync(join(homedir(), '.aiusage', 'widget.log'), line)
+  } catch {
+    // If even that is not writable there is nowhere left to complain to.
+  }
+}
+
+/** Zero on any machine that does not collect quotas, including a broken read. */
+function quotaRowCount(): number {
+  try {
+    return shownRows(queryQuota(db!)).length
+  } catch {
+    return 0
+  }
+}
+
 function applyTheme(theme: WidgetSettings['theme']): void {
   nativeTheme.themeSource = theme
 }
@@ -85,8 +147,22 @@ function applyTheme(theme: WidgetSettings['theme']): void {
 function createTray(): void {
   const { buffer, scaleFactor } = getTrayIconNativeImage()
   const icon = nativeImage.createFromBuffer(buffer, scaleFactor ? { scaleFactor } : undefined)
+  /*
+   * Kept as pixels so the other two states can be made from it.
+   *
+   * Electron does the PNG decoding, which is why this lives here and the
+   * recolouring lives in tray-icon.ts where it can be tested without
+   * starting a browser process to look at an icon.
+   */
+  const size = icon.getSize()
+  baseTrayBitmap = {
+    bitmap: icon.toBitmap(),
+    width: size.width,
+    height: size.height,
+    scaleFactor: scaleFactor ?? 1,
+  }
   tray = new Tray(icon)
-  tray.setToolTip('AIUsage Widget')
+  updateTray()
 
   tray.on('click', () => toggleWindow())
   tray.on('right-click', () => {
@@ -198,6 +274,44 @@ function pushDataUpdate(): void {
   } catch {
     // DB may not be initialized yet; silently skip
   }
+}
+
+/**
+ * What the tray shows, from the database, now.
+ *
+ * Both the colour and the words come from the same read, so they cannot
+ * disagree - an icon that has gone red beside a tooltip that has not caught
+ * up would be worse than either alone.
+ */
+function updateTray(): void {
+  if (!tray || !db) return
+  let rows
+  try {
+    rows = queryQuota(db)
+  } catch {
+    /*
+     * The database is there and the query failed, which is not the same as
+     * having nothing to show. Saying so is the point of a resident display:
+     * the one thing it must never do is keep presenting the last good
+     * numbers as though they were current.
+     */
+    tray.setToolTip('AIUsage — cannot read the database')
+    return
+  }
+
+  tray.setToolTip(buildTooltip(rows, Date.now()))
+
+  const level = severity(rows)
+  if (level === trayLevel || !baseTrayBitmap) return
+  trayLevel = level
+  const { bitmap, width, height, scaleFactor } = baseTrayBitmap
+  const pixels = level === 'ok' ? bitmap : tintBitmap(bitmap, SEVERITY_COLOURS[level])
+  tray.setImage(nativeImage.createFromBitmap(pixels, { width, height, scaleFactor }))
+}
+
+function startTrayRefresh(): void {
+  if (trayTimer) clearInterval(trayTimer)
+  trayTimer = setInterval(() => updateTray(), TRAY_REFRESH_MS)
 }
 
 function startAutoRefresh(): void {
