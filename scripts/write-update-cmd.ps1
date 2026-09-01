@@ -183,9 +183,8 @@ rem /End first: killing the node child above leaves the task itself in the
 rem Running state for a moment, and /Run on a task that is still Running
 rem fails. The first real run of this script hit exactly that and was
 rem rescued by the 5-minute watchdog, which is luck rather than design.
-schtasks /End /TN "%AIUSAGE_TASK%" >nul 2>&1
-powershell -NoProfile -Command "Start-Sleep -Seconds 3"
-schtasks /Run /TN "%AIUSAGE_TASK%"
+rem Three seconds was a guess and it was wrong twice. Waited on instead.
+powershell -NoProfile -Command "schtasks /End /TN '%AIUSAGE_TASK%' | Out-Null; `$w = 0; while ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running' -and `$w -lt 30) { Start-Sleep -Seconds 2; `$w += 2 }; if ((Get-ScheduledTask -TaskName '%AIUSAGE_TASK%').State -eq 'Running') { Write-Host 'aiusage-update: the task is still Running after 30s; /Run will be refused' }; schtasks /Run /TN '%AIUSAGE_TASK%'"
 
 rem --- 5. say whether it worked ---------------------------------------------
 rem Not optional. Every step above can report success while serve exits on
@@ -252,7 +251,20 @@ if (`$stopped -eq 0) {
   exit 1
 }
 
-Start-Sleep -Seconds 3
+# Waited on rather than assumed. A killed process can hold its listening
+# socket for a moment afterwards, and the caller decides that serve came
+# back by seeing something listening again - which the corpse satisfies.
+`$w = 0
+while (`$w -lt 20 -and (Get-NetTCPConnection -LocalPort `$Port -State Listen -ErrorAction SilentlyContinue)) {
+  Start-Sleep -Seconds 2
+  `$w += 2
+}
+
+if (Get-NetTCPConnection -LocalPort `$Port -State Listen -ErrorAction SilentlyContinue) {
+  Write-Host "the port is still held `$w seconds after stopping serve"
+  exit 1
+}
+
 exit 0
 "@
 
