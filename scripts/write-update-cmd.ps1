@@ -55,10 +55,28 @@ if (([char[]] $repo | Where-Object { [int] $_ -gt 127 }).Count -gt 0) {
 $dest = Join-Path $env:USERPROFILE '.aiusage'
 if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }
 
+# Read from the workspace, not typed.
+#
+# The CLI package is not called what the directory is called, and a
+# --filter that matches nothing is not an error to pnpm: it prints one
+# line and exits 0. The first real run of this script built the dashboard,
+# skipped the CLI entirely, restarted serve on the old code and reported
+# success. Reading the names removes the chance to be wrong about them.
+function Get-PackageName([string] $dir) {
+  $file = Join-Path $repo "packages\$dir\package.json"
+  if (-not (Test-Path $file)) { throw "no package.json for $dir at $file" }
+  $name = (Get-Content $file -Raw | ConvertFrom-Json).name
+  if (-not $name) { throw "packages/$dir has no name" }
+  return $name
+}
+
+$cliPackage = Get-PackageName "cli"
+$webPackage = Get-PackageName "web"
+
 $buildTargets = if ($WithWeb) {
-  '--filter @aiusage/web --filter @aiusage/cli'
+  "--filter $webPackage --filter $cliPackage"
 } else {
-  '--filter @aiusage/cli'
+  "--filter $cliPackage"
 }
 
 $webNote = if ($WithWeb) {
@@ -133,14 +151,18 @@ rem --- 2. build -------------------------------------------------------------
 $webNote
 $webNote2
 
+rem Compared against 0 rather than tested with "if errorlevel 1", which is
+rem true only for codes of 1 or more and quietly passes a negative one.
 call pnpm install --frozen-lockfile
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   echo aiusage-update: install failed - the running serve was left alone.
+  echo If this was EACCES on a linux-x64 path, it is the broken store links:
+  echo see docs\project\OPERATIONS.md - the section on pnpm and EACCES.
   exit /b 1
 )
 
 call pnpm $buildTargets build
-if errorlevel 1 (
+if not "%ERRORLEVEL%"=="0" (
   echo aiusage-update: build failed - the running serve was left alone.
   exit /b 1
 )
@@ -157,21 +179,23 @@ if errorlevel 1 (
 )
 
 rem --- 4. start the new one -------------------------------------------------
+rem /End first: killing the node child above leaves the task itself in the
+rem Running state for a moment, and /Run on a task that is still Running
+rem fails. The first real run of this script hit exactly that and was
+rem rescued by the 5-minute watchdog, which is luck rather than design.
+schtasks /End /TN "%AIUSAGE_TASK%" >nul 2>&1
+powershell -NoProfile -Command "Start-Sleep -Seconds 3"
 schtasks /Run /TN "%AIUSAGE_TASK%"
-if errorlevel 1 (
-  echo aiusage-update: could not run the task. Start it by hand:
-  echo   "%USERPROFILE%\.aiusage\start-serve.cmd"
-  exit /b 1
-)
 
 rem --- 5. say whether it worked ---------------------------------------------
 rem Not optional. Every step above can report success while serve exits on
 rem startup, and the log is the only place that shows it.
-rem Start-Sleep rather than timeout: timeout refuses to run at all when
-rem stdin is redirected, which is exactly how this gets run when anyone
-rem captures its output to a file. It would then fall straight through to
-rem the log tail and print the previous run.
-powershell -NoProfile -Command "Start-Sleep -Seconds 25"
+rem
+rem Waiting for the port rather than for a fixed number of seconds, because
+rem the question is whether serve came back, and the exit code of schtasks
+rem does not answer it either way.
+powershell -NoProfile -Command "`$w=0; while (`$w -lt 90 -and -not (Get-NetTCPConnection -LocalPort %AIUSAGE_PORT% -State Listen -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 3; `$w += 3 }; if (`$w -ge 90) { Write-Host ('aiusage-update: serve is NOT listening on %AIUSAGE_PORT% after ' + `$w + 's') } else { Write-Host ('aiusage-update: serve is listening on %AIUSAGE_PORT% again after ' + `$w + 's') }"
+powershell -NoProfile -Command "Start-Sleep -Seconds 5"
 powershell -NoProfile -Command "Get-Content -LiteralPath '%AIUSAGE_LOG%' -Tail 16 -Encoding UTF8"
 echo.
 echo aiusage-update: if the times above are not from just now, the old serve
