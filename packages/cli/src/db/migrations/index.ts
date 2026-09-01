@@ -22,6 +22,7 @@ import { migrateV20 } from './v20.js'
 import { migrateV21 } from './v21.js'
 import { migrateV22 } from './v22.js'
 import { migrateV23 } from './v23.js'
+import { migrateV24 } from './v24.js'
 import { createSchemaVersionTable } from '../schema.js'
 
 const MIGRATIONS = [
@@ -48,6 +49,7 @@ const MIGRATIONS = [
   { version: 21, migrate: migrateV21 },
   { version: 22, migrate: migrateV22 },
   { version: 23, migrate: migrateV23 },
+  { version: 24, migrate: migrateV24 },
 ]
 
 /**

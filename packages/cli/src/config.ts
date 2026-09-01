@@ -147,6 +147,17 @@ export interface Config {
    * well: resetting a price deletes that row, and the reset button sits
    * next to where this is set.
    */
+  /**
+   * How long each machine may stay quiet before the hub remarks on it, in
+   * hours, keyed by device instance id.
+   *
+   * Per machine because there is no general answer: a work computer is meant
+   * to be silent all weekend, and a laptop may go a week unopened. Absent
+   * means the generous default, which is deliberate — nobody has measured
+   * what a normal silence looks like here yet, and a threshold chosen
+   * without that evidence is a guess wearing a number.
+   */
+  hubSilenceHours?: Record<string, number>
   acknowledgedUnpricedModels?: string[]
   projectAliases?: Record<string, string>
   ui?: UiConfig

@@ -401,7 +401,20 @@ export function serve(options: ServeOptions): void {
   }
 
   const reportHubUpload = createHubUploadReporter(
-    () => runHubUpload({ db: options.db, runDbWrite }))
+    () => runHubUpload({
+      db: options.db,
+      runDbWrite,
+      // Identifies this machine to the hub, and carries what its own parse
+      // detector last saw, so the hub can tell a spoke that has stopped
+      // sending from one whose parsing has stopped.
+      getState: () => {
+        const state = getState(AIUSAGE_DIR)
+        return state?.deviceInstanceId
+          ? { deviceInstanceId: state.deviceInstanceId, device: loadConfig()?.device || hostname() }
+          : null
+      },
+      lastParseOkAt: () => runtimeSettings.parseHealth().lastParseOkAt,
+    }))
 
   const runtimeSettings = new RuntimeSettingsController({
     db: options.db,

@@ -37,6 +37,7 @@ import { base64url, sha256Buffer } from '../leaderboard/crypto.js'
 import { uploadLeaderboardData } from '../commands/leaderboard-upload.js'
 import { runParseKelivo } from '../commands/parse-kelivo.js'
 import { countUnpricedRecords, insertRecord, type UnpricedScope } from '../db/records.js'
+import { recordHeartbeat, hubHealth } from '../db/heartbeats.js'
 import { recordQuotaSnapshot } from '../db/quota-history.js'
 import {
   enqueueNotification,
@@ -2168,6 +2169,51 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
         return
       }
 
+      // ── /api/sync/heartbeat ────────────────────────────────────────
+      /*
+       * A spoke saying it is still here, whether or not it had anything
+       * to send.
+       *
+       * Without this the hub can only see when a machine last sent a
+       * record, and "broken" looks exactly like "nothing happened today".
+       * The same ambiguity the parse detector removed, one level up: the
+       * cure is not to read meaning into silence but to stop being
+       * silent.
+       *
+       * Behind the ingest token like the rest of /api/sync/, because it
+       * is another machine writing rather than a person reading.
+       */
+      if (url.pathname === '/api/sync/heartbeat' && req.method === 'POST') {
+        let body = ''
+        for await (const chunk of req) body += chunk
+        let data: Record<string, unknown>
+        try {
+          data = JSON.parse(body)
+        } catch {
+          json(res, { error: { code: 'INVALID_JSON', message: 'Invalid JSON body' } }, 400)
+          return
+        }
+
+        const deviceInstanceId = typeof data.deviceInstanceId === 'string' ? data.deviceInstanceId.trim() : ''
+        if (!deviceInstanceId) {
+          json(res, { error: { code: 'INVALID_PARAM', message: 'deviceInstanceId is required' } }, 400)
+          return
+        }
+
+        await runDbWrite(() => recordHeartbeat(db, {
+          deviceInstanceId,
+          device: typeof data.device === 'string' ? data.device : '',
+          // The hub stamps the arrival itself. A spoke with a wrong clock
+          // would otherwise be able to report itself permanently fresh.
+          lastHeartbeatAt: Date.now(),
+          lastRecordsSent: typeof data.recordsSent === 'number' ? data.recordsSent : 0,
+          lastParseOkAt: typeof data.lastParseOkAt === 'number' ? data.lastParseOkAt : null,
+        }))
+
+        json(res, { ok: true })
+        return
+      }
+
       // ── /api/health ────────────────────────────────────────────────
       /*
        * What the log cannot say.
@@ -2183,9 +2229,25 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
        */
       if (url.pathname === '/api/health') {
         const parse = options?.getParseHealth?.() ?? null
+        /*
+         * Every machine that reports here, and whether it has gone quiet.
+         *
+         * Machines that have never sent a heartbeat are absent rather than
+         * silent: an older spoke is unknown, not broken, and calling it
+         * broken would invent an outage out of a version difference.
+         *
+         * No notification is sent for any of this yet. Nobody has measured
+         * what a normal silence looks like on these machines, so the
+         * threshold is a placeholder — the figures below are what will make
+         * it choosable from evidence.
+         */
+        const spokes = hubHealth(db, {
+          silenceHours: loadConfig()?.hubSilenceHours ?? {},
+        })
         json(res, {
           ok: parse ? !parse.stalled : true,
           parse,
+          spokes,
           web: { version: options?.getWebVersion?.() ?? null },
           now: Date.now(),
         })

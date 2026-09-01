@@ -65,6 +65,10 @@ export function hubOrigin(): string | null {
 }
 
 export interface HubUploadDeps {
+  /** Who this machine is. Absent means no heartbeat is sent. */
+  getState?: () => { deviceInstanceId: string; device?: string } | null
+  /** What this machine's own parse detector last reported. */
+  lastParseOkAt?: () => number | null
   db: Database.Database
   runDbWrite: <T>(fn: () => T) => Promise<T>
   fetchImpl?: typeof fetch
@@ -75,6 +79,37 @@ export interface HubUploadDeps {
  * One upload pass. Never throws — a hub that is asleep is not an error, and
  * the records stay unsent until it is not.
  */
+/**
+ * Tell the hub this machine is still here.
+ *
+ * Sent from the upload path on purpose, rather than from a timer of its
+ * own. A separate timer could go on reporting a healthy machine while its
+ * parsing had stopped — the one combination that would make the hub's
+ * judgement worse than no judgement. Riding on the parse means the
+ * heartbeat stops exactly when the thing it vouches for stops.
+ *
+ * Failure is ignored. This is a courtesy to the hub, and a machine that
+ * cannot reach it has a bigger problem that the records upload will
+ * report on its own.
+ */
+async function sendHeartbeat(
+  origin: string,
+  token: string,
+  fetchImpl: typeof fetch,
+  body: { deviceInstanceId: string; device: string; recordsSent: number; lastParseOkAt: number | null },
+): Promise<void> {
+  try {
+    await fetchImpl(`${origin}/api/sync/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Aiusage-Token': token },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    })
+  } catch {
+    // Deliberately silent; see above.
+  }
+}
+
 export async function runHubUpload(deps: HubUploadDeps): Promise<HubUploadResult> {
   const fetchImpl = deps.fetchImpl ?? fetch
   const now = deps.now ?? Date.now
@@ -88,6 +123,26 @@ export async function runHubUpload(deps: HubUploadDeps): Promise<HubUploadResult
 
   const target = hubTarget(origin)
   const unsynced = getUnsyncedRecords(deps.db, target)
+
+  /*
+   * Before the early return, not after it.
+   *
+   * "Nothing to send" is the case the hub cannot otherwise distinguish from
+   * a machine that has died, and it is also the most common one — a spoke
+   * that has been idle all weekend takes this branch every five minutes. If
+   * the heartbeat only went out alongside records, the quiet machines would
+   * be exactly the ones that never reported being alive.
+   */
+  const state = deps.getState?.() ?? null
+  if (state?.deviceInstanceId) {
+    await sendHeartbeat(origin, token, fetchImpl, {
+      deviceInstanceId: state.deviceInstanceId,
+      device: state.device ?? '',
+      recordsSent: unsynced.length,
+      lastParseOkAt: deps.lastParseOkAt?.() ?? null,
+    })
+  }
+
   if (unsynced.length === 0) return { ...result, skipped: 'nothing_to_send' }
 
   /*
