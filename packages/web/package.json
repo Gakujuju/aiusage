@@ -7,8 +7,8 @@
     "build": "svelte-kit sync && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "check:css-vars": "node scripts/check-css-vars.cjs",
-    "pretest": "node scripts/check-css-vars.cjs && node scripts/check-theme-vars.cjs",
+    "check:css-vars": "node ../../scripts/check-css-vars.cjs .",
+    "pretest": "node ../../scripts/check-css-vars.cjs . && node scripts/check-theme-vars.cjs",
     "check:theme-vars": "node scripts/check-theme-vars.cjs"
   },
   "devDependencies": {

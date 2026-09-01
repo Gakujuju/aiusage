@@ -12,13 +12,38 @@
  * only way the mistake surfaces is when someone changes the variable it was
  * supposed to be reading and nothing moves.
  *
- * Run: node scripts/check-css-vars.cjs   (also runs as web's pretest)
+ * Shared, not copied. It lived in the web package until the widget - which
+ * had no such check - shipped exactly this bug: a panel written with the
+ * web palette's variable names, on a package that names them differently,
+ * so the empty cells of a bar rendered transparent and 3% looked like
+ * nothing at all. The names differing is a separate question; a second copy
+ * of the checker would have been a worse answer to it.
+ *
+ * Run: node ../../scripts/check-css-vars.cjs <package-dir>
+ * (the pretest of both packages that have stylesheets)
  */
 const fs = require('node:fs')
 const path = require('node:path')
 
-const ROOT = path.join(__dirname, '..')
+/**
+ * The package to check, from the command line.
+ *
+ * Required rather than defaulted: a checker that silently examines the
+ * wrong directory reports success, and success is the answer nobody
+ * questions.
+ */
+const target = process.argv[2]
+if (!target) {
+  console.error('css vars: needs a package directory, e.g. node scripts/check-css-vars.cjs packages/web')
+  process.exit(2)
+}
+
+const ROOT = path.resolve(target)
 const SEARCH = [path.join(ROOT, 'src')]
+if (!fs.existsSync(SEARCH[0])) {
+  console.error(`css vars: no src directory under ${ROOT}`)
+  process.exit(2)
+}
 const EXTENSIONS = new Set(['.svelte', '.css', '.html'])
 
 /** Properties the browser defines for us. */
@@ -72,7 +97,7 @@ for (const file of files) {
 }
 
 if (problems.length === 0) {
-  console.log(`css vars: ${defined.size} defined, no undefined references`)
+  console.log(`css vars: ${path.basename(ROOT)} — ${defined.size} defined, no undefined references`)
   process.exit(0)
 }
 
