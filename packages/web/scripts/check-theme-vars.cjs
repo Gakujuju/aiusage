@@ -11,8 +11,9 @@
  * The difference is that here the wrong value is a real value from a real
  * palette, so it looks even more deliberate than a missing one would.
  *
- * Inheriting is allowed where it is written down. SHARED and KNOWN_HOLES below
- * are the whole of what is permitted; anything else is a hole.
+ * Inheriting is allowed where it is written down. SHARED and
+ * INHERITED_ON_PURPOSE below are the whole of what is permitted, and each
+ * entry says why; anything else is a hole.
  *
  * Run: node scripts/check-theme-vars.cjs   (also runs as web's pretest)
  */
@@ -25,15 +26,6 @@ const THEME_JS = path.join(ROOT, 'src', 'lib', 'theme.js')
 const I18N = path.join(ROOT, 'src', 'lib', 'i18n.js')
 
 /**
- * Properties every theme may inherit from the base, and why.
- *
- * Geometry and typefaces are not palette. A theme that wants different corners
- * or a different face says so; one that does not is agreeing with the base
- * rather than forgetting it. Keeping these out of the required set is what
- * stops each new theme from having to restate eleven numbers that have nothing
- * to do with colour - a list nobody would keep correct for long.
- */
-/**
  * The theme that is the base rather than a departure from it.
  *
  * :root is the light palette; light has no [data-theme] block because it does
@@ -42,6 +34,15 @@ const I18N = path.join(ROOT, 'src', 'lib', 'i18n.js')
  */
 const BASE_THEME = 'light'
 
+/**
+ * Properties every theme may inherit from the base, and why.
+ *
+ * Geometry and typefaces are not palette. A theme that wants different corners
+ * or a different face says so; one that does not is agreeing with the base
+ * rather than forgetting it. Keeping these out of the required set is what
+ * stops each new theme from having to restate eleven numbers that have nothing
+ * to do with colour - a list nobody would keep correct for long.
+ */
 const SHARED = new Set([
   '--font-sans',
   '--mono',
@@ -57,44 +58,46 @@ const SHARED = new Set([
 ])
 
 /**
- * What each existing theme was already inheriting when this check was written.
+ * Where a theme may inherit a colour from the base, and why it is allowed.
  *
- * Not a list of decisions - a list of what was found, written down so it stops
- * growing while someone looks at it. Most of these are defensible: alpha tints
- * sit on whatever is behind them, and solid badge fills carry their own
- * foreground. Four are not, and they are the reason this check exists:
+ * This began as a list of what the check found and was, for one commit, a
+ * place to keep things while somebody looked at them. Somebody looked. Eight
+ * of the seventeen turned out to be defects and were fixed in the theme; the
+ * nine below stayed, each for a reason that is now written next to it.
  *
- *   --danger-fg       oklch(0.48 0.2 25)
- *   --danger-soft-fg  oklch(0.42 0.15 25)
- *   --info-fg         oklch(0.45 0.14 250)
- *   --success-fg      oklch(0.5 0.17 155)
+ * "Most of these are fine" is where the next one hides, so none of them is
+ * covered by a summary. Every number here was measured in a browser against
+ * this theme's own surface, not judged by eye. For scale: this theme's
+ * --text is 16.03 against that surface and its --text-muted is 5.52.
  *
- * Those lightnesses were chosen against a white page. On the dark surface they
- * are dark text on dark ground - nobody has looked at them, and until this ran
- * there was nothing to look at them with.
- *
- * A theme added from now on gets no entries here.
+ * A theme added from now on gets no entries here. Adding one means saying,
+ * on the line, why the base value is right on a ground the base never saw.
  */
-const KNOWN_HOLES = {
-  dark: [
-    '--on-accent',
-    '--warn-solid',
-    '--danger-fg',
-    '--danger-bg',
-    '--danger-solid',
-    '--danger-border',
-    '--danger-soft-bg',
-    '--danger-soft-fg',
-    '--danger-plain',
-    '--info-bg',
-    '--info-fg',
-    '--info-solid',
-    '--success-fg',
-    '--amber',
-    '--shadow-dropdown',
-    '--shadow-modal',
-    '--overlay-strong',
-  ],
+const INHERITED_ON_PURPOSE = {
+  dark: {
+    // Tints, not colours: 12%, 8% and 12% alpha composite over whatever is
+    // behind them, so one value is correct on paper and on a 0.13 ground.
+    // Against this surface they measure 1.09, 1.05 and 1.11 - which is the
+    // job. What has to be legible is the text on them, and that is this
+    // theme's own now: 7.17 and 9.31 and 7.75.
+    '--danger-bg': 'alpha tint, composites over this theme\'s surface (1.09)',
+    '--danger-soft-bg': 'alpha tint, composites over this theme\'s surface (1.05)',
+    '--info-bg': 'alpha tint, composites over this theme\'s surface (1.11)',
+
+    // Fills and a border, not text. Their lightness is carried by the shape
+    // rather than read through it, and all three clear 3:1 against the
+    // surface, which is what a non-text element needs.
+    '--warn-solid': 'progress-bar fill, nothing is drawn on it (6.67)',
+    '--danger-solid': 'fill with its own white text (3.89 as a shape, 4.75 for the text)',
+    '--danger-border': '3px border, read as a shape (6.55)',
+    '--info-solid': 'left border on a card, read as a shape (3.79)',
+
+    // Two light-palette values whose lightness happens to suit a dark ground
+    // better than a white one. Both are already up where this theme puts its
+    // own hued text.
+    '--danger-plain': 'sRGB #f87171 is light enough to read here (6.68)',
+    '--amber': 'sRGB #f59e0b is light enough to read here (8.60)',
+  },
 }
 
 /**
@@ -176,11 +179,11 @@ const ordered = orderBlock
 const problems = []
 
 for (const [theme, names] of themeBlocks) {
-  const allowed = new Set([...SHARED, ...(KNOWN_HOLES[theme] || [])])
+  const allowed = new Set([...SHARED, ...Object.keys(INHERITED_ON_PURPOSE[theme] || {})])
   const missing = [...base].filter((n) => !names.has(n) && !allowed.has(n))
   if (missing.length) problems.push({ kind: 'missing', theme, names: missing })
 
-  const stale = (KNOWN_HOLES[theme] || []).filter((n) => names.has(n) || !base.has(n))
+  const stale = Object.keys(INHERITED_ON_PURPOSE[theme] || {}).filter((n) => names.has(n) || !base.has(n))
   if (stale.length) problems.push({ kind: 'stale', theme, names: stale })
 }
 
@@ -218,7 +221,7 @@ if (!registered.has(BASE_THEME)) problems.push({ kind: 'no-base', theme: BASE_TH
 if (themeBlocks.has(BASE_THEME)) problems.push({ kind: 'base-has-block', theme: BASE_THEME })
 
 if (problems.length === 0) {
-  const holes = Object.values(KNOWN_HOLES).reduce((n, list) => n + list.length, 0)
+  const holes = Object.values(INHERITED_ON_PURPOSE).reduce((n, m) => n + Object.keys(m).length, 0)
   console.log(
     `theme vars: ${base.size} in the base, ${themeBlocks.size + 1} theme(s) complete`
     + (holes ? `, ${holes} inherited by permission` : ''),
@@ -234,7 +237,7 @@ for (const p of problems) {
     console.error('')
   }
   if (p.kind === 'stale') {
-    console.error(`  [data-theme="${p.theme}"] defines these now; drop them from KNOWN_HOLES: ${p.names.join(' ')}\n`)
+    console.error(`  [data-theme="${p.theme}"] defines these now; drop them from INHERITED_ON_PURPOSE: ${p.names.join(' ')}\n`)
   }
   if (p.kind === 'no-css') console.error(`  ${p.theme} is in THEMES with no [data-theme="${p.theme}"] palette\n`)
   if (p.kind === 'no-base') console.error(`  ${p.theme} is this file's BASE_THEME but is not in THEMES\n`)

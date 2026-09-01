@@ -700,6 +700,58 @@
     --notice-bg:        oklch(0.2 0.04 55);
     --notice-border:    oklch(0.35 0.1 55);
     --notice-fg:        oklch(0.78 0.14 60);
+    /*
+     * ── The eight this theme was taking from the light palette ───────────
+     *
+     * They were inherited, not chosen: nothing in CSS says a theme has to be
+     * complete, so eight values from a palette built for white paper were
+     * being drawn on a 0.13 ground. scripts/check-theme-vars.cjs is what
+     * found them, and it now requires these eight to be here.
+     *
+     * The five foregrounds were measured rather than eyeballed. Their
+     * contrast against what they actually sit on, before:
+     *
+     *   --danger-fg on --danger-bg            2.37
+     *   --danger-soft-fg on --danger-soft-bg  1.92
+     *   --info-fg on --info-bg                2.24
+     *   --success-fg on --surface             3.50
+     *   --on-accent on --accent               2.28
+     *
+     * against this theme's own --text-muted at 5.52 on the same ground.
+     *
+     * The values below follow this theme rather than terminal's, which had
+     * already solved the same problem with its own numbers. Dark puts its
+     * hued colours at 0.72-0.74 and its softer text at 0.75-0.78, so the
+     * status foregrounds belong just above that: they are text, and they sit
+     * on a tint rather than on the surface itself.
+     */
+    --danger-fg:        oklch(0.76 0.16 25);
+    /* Sits on the fainter tint, so it goes lighter still - the same relation
+       the light palette has, pointing the other way. */
+    --danger-soft-fg:   oklch(0.82 0.12 25);
+    --info-fg:          oklch(0.76 0.11 250);
+    --success-fg:       oklch(0.78 0.14 155);
+    /*
+     * Ink, not paper. The light palette can put near-white on its accent
+     * because its accent is dark (0.55); this theme's accent is light (0.72),
+     * so the text on it has to flip. It is also the knob of the toggle
+     * switch, which becomes a dark knob on a light track - visible for the
+     * same reason the text is.
+     */
+    --on-accent:        oklch(0.17 0.015 175);
+
+    /*
+     * The remaining three were not a contrast problem but a contradiction:
+     * this theme had already decided that its shadows are four to eight times
+     * heavier than the light one's, and that its overlay is 0.55 rather than
+     * 0.25 - and then inherited the light values for the two shadows and the
+     * overlay that were named separately. --overlay-strong was the plain
+     * inversion: at 0.35 it was weaker than the --overlay it is meant to be
+     * the strong version of.
+     */
+    --shadow-dropdown:  0 1px 3px oklch(0 0 0 / 0.4), 0 4px 12px oklch(0 0 0 / 0.2);
+    --shadow-modal:     0 4px 8px oklch(0 0 0 / 0.4), 0 12px 32px oklch(0 0 0 / 0.25);
+    --overlay-strong:   oklch(0 0 0 / 0.72);
   }
 
   /*
