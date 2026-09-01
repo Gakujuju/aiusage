@@ -164,6 +164,19 @@ export interface UnpricedSummary {
    * not fixable at all.
    */
   breakdownMissingRecords: number
+  /**
+   * Records of models whose rate nobody publishes, acknowledged as such.
+   *
+   * Counted apart from unpricedRecords for the same reason
+   * breakdownMissingRecords is: the reader can do something about a missing
+   * price and nothing at all about a rate that does not exist. Telling them
+   * to go and fix a price table they cannot fix is how a warning turns into
+   * background noise, and the next model that genuinely needs one arrives
+   * into the same red text.
+   */
+  acknowledgedUnpricedRecords: number
+  /** The acknowledged models actually present in this scope. */
+  acknowledgedUnpricedModels: string[]
 }
 
 /**
@@ -186,6 +199,15 @@ export interface UnpricedScope {
   /** Which tables to read. 'union' is local plus every other device. */
   source?: 'records' | 'synced' | 'union'
   params?: Record<string, unknown>
+  /**
+   * Models the reader has accepted as having no published rate.
+   *
+   * Their rows are still uncosted — they are — but they are reported
+   * separately so the actionable warning stays actionable. A model absent
+   * from this list is unaffected, which is the point: something new and
+   * unknown is still worth a warning.
+   */
+  acknowledgedModels?: string[]
 }
 
 /** The columns both tables share that the counts need. */
@@ -243,13 +265,18 @@ export function countUnpricedRecords(
     GROUP BY model, breakdown_missing
   `).all(scope.params ?? {}) as Array<{ model: string; bm: number; n: number }>
 
-  const priced = rows.filter((r) => r.bm === 0).sort((a, b) => b.n - a.n)
+  const acknowledged = new Set(scope.acknowledgedModels ?? [])
+  const uncosted = rows.filter((r) => r.bm === 0).sort((a, b) => b.n - a.n)
+  const needsPrice = uncosted.filter((r) => !acknowledged.has(r.model))
+  const noPublishedRate = uncosted.filter((r) => acknowledged.has(r.model))
 
   return {
-    unpricedRecords: priced.reduce((acc, r) => acc + r.n, 0),
-    unpricedModels: priced.map((r) => r.model),
+    unpricedRecords: needsPrice.reduce((acc, r) => acc + r.n, 0),
+    unpricedModels: needsPrice.map((r) => r.model),
     breakdownMissingRecords: rows
       .filter((r) => r.bm === 1)
       .reduce((acc, r) => acc + r.n, 0),
+    acknowledgedUnpricedRecords: noPublishedRate.reduce((acc, r) => acc + r.n, 0),
+    acknowledgedUnpricedModels: noPublishedRate.map((r) => r.model),
   }
 }

@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { t } from '$lib/i18n.js'
-  import { fetchPricing, updatePricing, deletePricing, syncPricing, bindPricingAlias, unbindPricingAlias, recalcPricing, fetchPricingRecalcStatus } from '$lib/api.js'
+  import { fetchPricing, updatePricing, deletePricing, syncPricing, bindPricingAlias, unbindPricingAlias, recalcPricing, fetchPricingRecalcStatus , setPriceAcknowledged } from '$lib/api.js'
   import { recalcStatus, displayCurrency, exchangeRate } from '$lib/stores.js'
 
   let models = []
@@ -57,6 +57,7 @@
       registry = data.registry || null
       targets = data.targets || []
       localBindings = data.localBindings || []
+      acknowledged = new Set(data.acknowledgedUnpriced || [])
       const nextSelections = {}
       const nextQueries = {}
       for (const binding of localBindings) {
@@ -250,6 +251,35 @@
       applyNeedsRecalcResult(result)
     } catch (e) {
       recalcStatus.set('idle')
+      alert(e.message)
+    }
+  }
+
+  /** Models accepted as having no published rate. Read from the config. */
+  let acknowledged = new Set()
+
+  /*
+   * Not a price, and it writes none.
+   *
+   * codex-auto-review has no published rate anywhere — not from OpenAI,
+   * not in LiteLLM, not in the local model cache — so the warning about it
+   * could never be cleared by editing a price, and it grew by a few rows a
+   * day. A warning nobody can act on teaches people to skip warnings, and
+   * the next model that really does need a price would land in the same
+   * red text.
+   *
+   * Acknowledging says "nobody publishes this", not "it is free". The cost
+   * stays 0 and the source stays unknown; only the sentence changes. It may
+   * genuinely be included in the subscription, in which case 0 is right —
+   * but that is not known here, and this leaves the question open instead
+   * of answering it with a guess.
+   */
+  async function toggleAcknowledged(name) {
+    const next = !acknowledged.has(name)
+    try {
+      await setPriceAcknowledged(name, next)
+      await loadData({ showLoading: false })
+    } catch (e) {
       alert(e.message)
     }
   }
@@ -773,6 +803,20 @@
               <button class="btn-sm" on:click={() => startEdit(m)}>{$t('pricing.edit')}</button>
               {#if m.isOverride}
                 <button class="btn-sm reset" on:click={() => resetModel(m.model)}>{$t('pricing.reset')}</button>
+              {/if}
+              <!--
+                Only where there is no price to be had. Offering it beside a
+                model that already has one invites the reader to mark a
+                priced model as unpriced, which is a different claim and a
+                false one.
+              -->
+              {#if !m.price}
+                <button
+                  class="btn-sm"
+                  class:acknowledged={acknowledged.has(m.model)}
+                  title={$t('pricing.noPublishedRateHint')}
+                  on:click={() => toggleAcknowledged(m.model)}
+                >{acknowledged.has(m.model) ? $t('pricing.noPublishedRateOn') : $t('pricing.noPublishedRateOff')}</button>
               {/if}
             </div>
           </div>

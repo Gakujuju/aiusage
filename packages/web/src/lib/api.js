@@ -314,6 +314,22 @@ export async function fetchCloudSyncStatus(siteUrl) {
  * This is the state rather than the events, which is why it can be asked at
  * any moment instead of inferred from an absence.
  */
+/**
+ * Say that a model has no published rate, or take that back.
+ *
+ * Writes no price. The rows keep their cost of 0 and their 'unknown'
+ * source; only the sentence describing them on screen changes.
+ */
+export async function setPriceAcknowledged(model, acknowledged) {
+  const response = await fetch('/api/pricing/acknowledge', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, acknowledged }),
+  })
+  if (!response.ok) throw new Error('Failed to update')
+  return response.json()
+}
+
 export async function fetchHealth() {
   return apiFetch('/api/health')
 }

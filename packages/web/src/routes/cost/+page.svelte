@@ -104,6 +104,8 @@
   unpricedRecords={summary?.unpricedRecords ?? 0}
   unpricedModels={summary?.unpricedModels ?? []}
   breakdownMissingRecords={summary?.breakdownMissingRecords ?? 0}
+  acknowledgedUnpricedRecords={summary?.acknowledgedUnpricedRecords ?? 0}
+  acknowledgedUnpricedModels={summary?.acknowledgedUnpricedModels ?? []}
 />
 
 {#if loading}

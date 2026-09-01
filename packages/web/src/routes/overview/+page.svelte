@@ -60,6 +60,8 @@
   unpricedRecords={data?.unpricedRecords ?? 0}
   unpricedModels={data?.unpricedModels ?? []}
   breakdownMissingRecords={data?.breakdownMissingRecords ?? 0}
+  acknowledgedUnpricedRecords={data?.acknowledgedUnpricedRecords ?? 0}
+  acknowledgedUnpricedModels={data?.acknowledgedUnpricedModels ?? []}
 />
 
 {#if loading}

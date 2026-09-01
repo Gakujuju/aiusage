@@ -491,6 +491,9 @@ function unpricedScopeFor(
       ? `AND device_instance_id != @currentDeviceId ${NOT_ALREADY_MERGED} ${dr.where} ${tf.where}`
       : `${df.where} ${dr.where} ${tf.where}`,
     params: { ...dr.params, ...df.params, ...tf.params },
+    // Read fresh each time, so acknowledging a model takes effect on the
+    // next page load rather than the next restart.
+    acknowledgedModels: loadConfig()?.acknowledgedUnpricedModels ?? [],
   }
 }
 
@@ -1957,7 +1960,16 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       if (url.pathname === '/api/pricing') {
         // GET: list all prices from the local pricing registry plus models from DB.
         if (req.method === 'GET') {
-          json(res, { models: listPricingModels(db), registry: getPricingRegistrySummary(db), targets: listPricingAliasTargets(db), aliasBindings: getUserAliasBindings(db), localBindings: listLocalModelBindings(db) })
+          json(res, {
+            models: listPricingModels(db),
+            registry: getPricingRegistrySummary(db),
+            targets: listPricingAliasTargets(db),
+            aliasBindings: getUserAliasBindings(db),
+            localBindings: listLocalModelBindings(db),
+            // Which models the reader has accepted as having no published
+            // rate. Config, not registry — it is not a price.
+            acknowledgedUnpriced: loadConfig()?.acknowledgedUnpricedModels ?? [],
+          })
           return
         }
         // PUT: set price override
@@ -2030,6 +2042,47 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
           }
           return
         }
+      }
+
+      // ── /api/pricing/acknowledge ───────────────────────────────────
+      /*
+       * Mark a model as having no published rate, or take that back.
+       *
+       * Not a price, and it writes none: the rows keep cost 0 and
+       * cost_source 'unknown'. All it changes is which sentence describes
+       * them on screen — a warning you can act on, or a fact you cannot.
+       *
+       * Kept in config.json rather than the price registry so that
+       * pressing Reset next to it cannot take it away, and so that it can
+       * never be mistaken for a rate.
+       */
+      if (url.pathname === '/api/pricing/acknowledge' && req.method === 'PUT') {
+        let body = ''
+        for await (const chunk of req) body += chunk
+        let data: { model?: unknown; acknowledged?: unknown }
+        try {
+          data = JSON.parse(body)
+        } catch {
+          json(res, { error: { code: 'INVALID_JSON', message: 'Invalid JSON body' } }, 400)
+          return
+        }
+        if (typeof data.model !== 'string' || !data.model.trim()) {
+          json(res, { error: { code: 'INVALID_PARAM', message: 'model is required' } }, 400)
+          return
+        }
+        const model = data.model.trim()
+        const on = data.acknowledged !== false
+
+        await runDbWrite(() => {
+          const cfg = loadConfig() ?? {}
+          const current = new Set(cfg.acknowledgedUnpricedModels ?? [])
+          if (on) current.add(model)
+          else current.delete(model)
+          saveConfig({ ...cfg, acknowledgedUnpricedModels: [...current].sort() })
+        })
+
+        json(res, { ok: true, acknowledged: on, model })
+        return
       }
 
       if (url.pathname === '/api/pricing/alias' && req.method === 'POST') {

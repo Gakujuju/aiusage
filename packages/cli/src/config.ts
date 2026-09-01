@@ -121,6 +121,33 @@ export interface Config {
    */
   projectRoots?: string[]
   /** Display names for projects, keyed by the extracted project name. */
+  /**
+   * Models whose price nobody publishes, acknowledged as such.
+   *
+   * Not a price, and deliberately not stored with the prices.
+   * Acknowledging a model changes how its rows are described on screen and
+   * nothing else: the cost stays 0 and cost_source stays 'unknown',
+   * because this says "no one has published a rate", not "the rate is
+   * zero". Those are different claims and only one of them is known to be
+   * true.
+   *
+   * codex-auto-review is the case it was built for. OpenAI publishes no
+   * rate for it, LiteLLM carries none, and models_cache.json has only the
+   * slug. It may well be included in the subscription and never billed
+   * separately, which would make 0 the right answer — but nobody here
+   * knows that, and acknowledging it is how the question stays open
+   * without a red warning demanding an answer every day.
+   *
+   * A warning that cannot be cleared teaches people to ignore warnings,
+   * and the next model that genuinely needs a price would arrive into the
+   * same red text. Only models named here are treated this way; anything
+   * new is still red.
+   *
+   * Kept here rather than in the price registry for a practical reason as
+   * well: resetting a price deletes that row, and the reset button sits
+   * next to where this is set.
+   */
+  acknowledgedUnpricedModels?: string[]
   projectAliases?: Record<string, string>
   ui?: UiConfig
   /** Web Push application-server identity. The private half is a credential. */

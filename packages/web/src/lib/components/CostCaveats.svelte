@@ -26,6 +26,9 @@
   /** @type {string[]} */
   export let unpricedModels = []
   export let breakdownMissingRecords = 0
+  export let acknowledgedUnpricedRecords = 0
+  /** @type {string[]} */
+  export let acknowledgedUnpricedModels = []
 
   const MAX_NAMED = 3
 
@@ -39,6 +42,15 @@
     .replace('{models}', modelList)
   $: breakdownMessage = $t('cost.breakdownMissingNote')
     .replace('{n}', String(breakdownMissingRecords))
+
+  $: ackNames = (acknowledgedUnpricedModels ?? []).filter(Boolean)
+  $: ackShown = ackNames.slice(0, MAX_NAMED).join(', ')
+  $: ackList = ackNames.length > MAX_NAMED
+    ? `${ackShown}, ${$t('cost.unpricedAndMore')}`
+    : ackShown
+  $: acknowledgedMessage = $t('cost.noPublishedRateNote')
+    .replace('{n}', String(acknowledgedUnpricedRecords))
+    .replace('{models}', ackList)
 </script>
 
 {#if unpricedRecords > 0}
@@ -48,6 +60,21 @@
       <div class="caveat-text">{unpricedMessage}</div>
       <a class="caveat-link" href="/pricing">{$t('cost.unpricedLink')}</a>
     </div>
+  </div>
+{/if}
+
+<!--
+  A third line rather than folding into the second.
+
+  "no split to price" and "no published rate" are different facts about
+  different rows, and a reader who wants to know why a figure is low is owed
+  the actual reason. Both are quiet, because neither can be acted on — which
+  is exactly what separates them from the warning above.
+-->
+{#if acknowledgedUnpricedRecords > 0}
+  <div class="caveat caveat-quiet" role="status">
+    <span class="caveat-icon" aria-hidden="true">ⓘ</span>
+    <div class="caveat-text">{acknowledgedMessage}</div>
   </div>
 {/if}
 
