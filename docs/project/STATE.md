@@ -969,3 +969,47 @@ flex 行で固有幅を持たないため、max-content だと 240px まで潰�
 web には `--mono` があり widget には無い。フォールバック付きなので
 **画面上は何も起きず**、気づく手段は無かった。検査を共有した当日に
 同じ型が2度目に出たことになる。
+
+## `aiusage widget` がワークスペースのビルドを起動するようになった
+
+`resolveElectronBin()` は `where aiusage-widget` だけを見ており、
+PATH に無ければ「インストールしてください」と案内していた。
+**その案内に従うと公開版が入り、今日の変更が1つも無い窓が出る。**
+開発している本人が自分のビルドを起動できない状態だった。
+
+    PATH にある            → それを起動（従来どおり）
+    無く、この repo にある  → packages/widget を electron で起動
+    repo にあるが未ビルド   → ビルドを案内する（公開版は案内しない）
+    どちらも無い            → 従来のインストール案内
+
+**どちらを起動したかを必ず1行出す。**
+
+    aiusage widget started from this checkout: ...\packages\widget
+    aiusage widget started from the installed package: ...\aiusage-widget.cmd
+
+グローバル版とこの checkout の版は**別のプログラム**で、
+黙って選ぶと今日と同じ混乱になる。
+
+### 実装で気をつけたこと
+
+**repo は `..` の数を数えずに探す。** このファイルは tsx では
+`src/commands`、ビルド後は `dist` から動き、深さが違う。
+自分の位置から上へ辿って `packages/widget/package.json` を探す。
+
+**electron の場所は推測しない。** `createRequire(widget/package.json)('electron')`
+で、そのパッケージ自身が解決するのと同じ経路で聞く。
+pnpm の配置は pnpm の問題のままにできる。
+
+### 実測（3分岐すべて）
+
+    ビルドあり    → 起動し、checkout のパスを表示。窓が1つ出た
+    ビルド無し    → "Widget not built at ..." ＋ pnpm build の案内、exit 1
+    repo 外       → 従来のインストール案内、exit 1
+
+### 判断が要る点（実装は指示どおり）
+
+**PATH を先に見る**順序のままにしてある。
+ただしこの順序だと、**公開版を入れた瞬間に元の問題が戻る**
+（repo の中に居ても古いほうが起動する）。
+今回は1行出るので黙って起きることはないが、
+「repo の中では repo のものを優先する」に変える余地はある。
