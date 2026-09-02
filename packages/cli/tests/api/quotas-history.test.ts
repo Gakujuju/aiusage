@@ -129,21 +129,44 @@ describe('quota history API', () => {
 
   // ── /api/quotas ────────────────────────────────────────────────────────
 
-  it('returns live quotas with stale=false', async () => {
-    mockQuotaResults = [liveSuccess('codex', [{ name: 'five_hour', utilization: 66, resetsAt: '2026-08-29T12:00:00.000Z' }])]
+  /*
+   * These describe a promise, not just a behaviour: GET /api/quotas answers
+   * from quota_current and never calls upstream. It used to run a full round
+   * of live queries per request, which was fine while a person looking at a
+   * dashboard was the only caller and became a rate limit the moment two
+   * widgets started polling it. See quotasFromStore.
+   */
+  it('answers from storage without calling upstream', async () => {
+    insertCurrent(db, {
+      tool: 'codex',
+      tier: 'five_hour',
+      utilization: 66,
+      resetsAt: Date.parse('2026-08-29T12:00:00.000Z'),
+      lastSuccessAt: 1_700_000_500_000,
+    })
+    // Would answer with something else entirely if it were consulted.
+    mockQuotaResults = [liveSuccess('codex', [{ name: 'five_hour', utilization: 1, resetsAt: null }])]
 
-    const response = await fetch(`${baseUrl}/api/quotas`)
-    expect(response.ok).toBe(true)
-    const data = await response.json()
-    expect(data.quotas).toHaveLength(1)
-    expect(data.quotas[0].stale).toBe(false)
-    expect(data.quotas[0].lastSuccessAt).toBe(1_700_000_500_000)
-    expect(data.quotas[0].consecutiveErrors).toBe(0)
-    // Existing fields survive untouched.
-    expect(data.quotas[0].tiers[0]).toEqual({ name: 'five_hour', utilization: 66, resetsAt: '2026-08-29T12:00:00.000Z' })
+    const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
+    expect(vi.mocked(queryAllQuotas)).not.toHaveBeenCalled()
+
+    const codex = data.quotas.find((q: any) => q.tool === 'codex')
+    expect(codex.tiers).toEqual([
+      { name: 'five_hour', utilization: 66, resetsAt: '2026-08-29T12:00:00.000Z' },
+    ])
+    expect(codex.stale).toBe(false)
+    expect(codex.lastSuccessAt).toBe(1_700_000_500_000)
+    expect(codex.consecutiveErrors).toBe(0)
   })
 
-  it('falls back to the stored value when the live query fails', async () => {
+  it('names every known tool, so a missing one is not just absent', async () => {
+    const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
+    expect(data.quotas.map((q: any) => q.tool)).toEqual(['claude-code', 'codex', 'copilot'])
+    // The dashboard tells "not signed in" from "signed in and quiet" by this.
+    expect(data.quotas.every((q: any) => q.credentialStatus === 'not_found')).toBe(true)
+  })
+
+  it('marks a tool stale when its last collection failed', async () => {
     insertCurrent(db, {
       tool: 'codex',
       tier: 'five_hour',
@@ -151,59 +174,54 @@ describe('quota history API', () => {
       resetsAt: Date.parse('2026-08-29T12:00:00.000Z'),
       lastSuccessAt: 1_700_000_000_000,
       consecutiveErrors: 3,
-      credStatus: 'expired',
+      lastErrorKind: 'auth',
     })
-    mockQuotaResults = [liveFailure('codex', 'expired', 'HTTP 401')]
 
     const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
-    expect(data.quotas[0].stale).toBe(true)
-    expect(data.quotas[0].tiers).toEqual([
+    const codex = data.quotas.find((q: any) => q.tool === 'codex')
+    expect(codex.stale).toBe(true)
+    expect(codex.tiers).toEqual([
       { name: 'five_hour', utilization: 42, resetsAt: '2026-08-29T12:00:00.000Z' },
     ])
-    expect(data.quotas[0].lastSuccessAt).toBe(1_700_000_000_000)
-    expect(data.quotas[0].consecutiveErrors).toBe(3)
-    expect(data.quotas[0].lastErrorKind).toBe('auth')
+    expect(codex.lastSuccessAt).toBe(1_700_000_000_000)
+    expect(codex.consecutiveErrors).toBe(3)
+    expect(codex.lastErrorKind).toBe('auth')
   })
 
-  it('reports lastErrorKind=network for a failed fetch', () => {
-    // The reader calls this credentialStatus 'valid', so only the error text
-    // separates "offline" from "re-login".
-    mockQuotaResults = [{
+  it('carries the stored credential status and error kind', async () => {
+    insertCurrent(db, {
       tool: 'codex',
-      credentialStatus: 'valid',
-      credentialMessage: null,
-      success: false,
-      tiers: [],
-      error: 'Network error: TypeError: fetch failed',
-      queriedAt: 1_700_000_500_000,
-    }]
-
-    return fetch(`${baseUrl}/api/quotas`)
-      .then((r) => r.json())
-      .then((data) => {
-        expect(data.quotas[0].credentialStatus).toBe('valid')
-        expect(data.quotas[0].lastErrorKind).toBe('network')
-      })
-  })
-
-  it('reports an empty lastErrorKind on success', async () => {
-    mockQuotaResults = [liveSuccess('codex', [{ name: 'five_hour', utilization: 10, resetsAt: null }])]
-    const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
-    expect(data.quotas[0].lastErrorKind).toBe('')
-  })
-
-  it('reports stale=false for a failed tool with nothing stored', async () => {
-    mockQuotaResults = [liveFailure('claude-code', 'not_found', null)]
+      tier: 'five_hour',
+      utilization: 10,
+      credStatus: 'valid',
+      consecutiveErrors: 2,
+      lastErrorKind: 'network',
+    })
 
     const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
-    expect(data.quotas[0].stale).toBe(false)
-    expect(data.quotas[0].tiers).toEqual([])
-    expect(data.quotas[0].lastSuccessAt).toBeNull()
+    const codex = data.quotas.find((q: any) => q.tool === 'codex')
+    // 'valid' plus a network error kind is what "offline" looks like here;
+    // 'expired' is what "re-login" looks like. Both come from the row.
+    expect(codex.credentialStatus).toBe('valid')
+    expect(codex.lastErrorKind).toBe('network')
+  })
+
+  it('reports an empty lastErrorKind when the last collection worked', async () => {
+    insertCurrent(db, { tool: 'codex', tier: 'five_hour', utilization: 10 })
+    const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
+    expect(data.quotas.find((q: any) => q.tool === 'codex').lastErrorKind).toBe('')
+  })
+
+  it('reports stale=false for a tool with nothing stored', async () => {
+    const data = await (await fetch(`${baseUrl}/api/quotas`)).json()
+    const claude = data.quotas.find((q: any) => q.tool === 'claude-code')
+    expect(claude.stale).toBe(false)
+    expect(claude.tiers).toEqual([])
+    expect(claude.lastSuccessAt).toBeNull()
   })
 
   it('stays public and carries no credential material', async () => {
-    insertCurrent(db, { tool: 'codex', tier: 'five_hour', utilization: 42 })
-    mockQuotaResults = [liveFailure('codex', 'expired', 'HTTP 401')]
+    insertCurrent(db, { tool: 'codex', tier: 'five_hour', utilization: 42, credStatus: 'expired' })
 
     const response = await fetch(`${baseUrl}/api/quotas`)
     expect(response.status).toBe(200)

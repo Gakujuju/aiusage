@@ -678,6 +678,97 @@ function withStaleQuotaFallback(
   })
 }
 
+/**
+ * Every tool this program knows how to ask about.
+ *
+ * Needed because the answer is now built from stored rows, and a tool with
+ * no rows has to appear as one - the dashboard tells "not signed in" from
+ * "signed in and quiet" by credentialStatus, and a tool that is simply
+ * absent from the array reads as neither.
+ */
+const KNOWN_QUOTA_TOOLS = ['claude-code', 'codex', 'copilot'] as const
+
+/**
+ * The quota answer, built from what collection already stored.
+ *
+ * This endpoint used to call queryAllQuotas() on every request, which is one
+ * round of live calls to the undocumented upstream APIs per caller per hit.
+ * That was survivable while the dashboard was the only caller and someone
+ * had to be looking at it. Then the widget started reading over HTTP, on
+ * every machine, with the tray and the panel each fetching on their own
+ * minute timer - two calls a minute per machine, upstream, forever, whether
+ * or not anyone was looking.
+ *
+ * 2026-09-02: claude-code returned HTTP 429 for over an hour. The hub's own
+ * collection runs every five minutes and had failed 14 times in a row; the
+ * widget traffic is not counted anywhere, and at two machines it was another
+ * 240 calls an hour. The limit was being held open by the thing that wanted
+ * to read it.
+ *
+ * So the numbers now come from quota_current, which the five-minute
+ * collection writes, and the only paths that touch upstream are that
+ * collection and an explicit POST to /api/quotas/refresh. Reading is free.
+ *
+ * "stale" changes meaning slightly and deliberately: it used to mean "the
+ * live call failed, so here is what we stored", and now means "the last
+ * collection failed, so this is older than it should be". Both answer the
+ * question the display is actually asking, which is whether to trust the
+ * number in front of you.
+ */
+function quotasFromStore(
+  db: Database.Database,
+  deviceInstanceId: string,
+): Array<Record<string, unknown>> {
+  const rows = readQuotaCurrent(db, deviceInstanceId || null)
+  return KNOWN_QUOTA_TOOLS.map((tool) => {
+    const forTool = rows.filter((row) => row.tool === tool)
+    if (forTool.length === 0) {
+      /*
+       * Nothing stored at all. Reported the way a missing credential is
+       * reported, because that is overwhelmingly what it means: collection
+       * has run, and this tool had nothing to sign in with.
+       */
+      return {
+        tool,
+        credentialStatus: 'not_found',
+        credentialMessage: null,
+        success: false,
+        tiers: [],
+        error: null,
+        queriedAt: null,
+        stale: false,
+        lastSuccessAt: null,
+        consecutiveErrors: 0,
+        lastErrorKind: '',
+      }
+    }
+
+    const consecutiveErrors = forTool.reduce((acc, row) => Math.max(acc, row.consecutive_errors), 0)
+    const lastSuccessAt = forTool.reduce<number | null>(
+      (acc, row) => (row.last_success_at == null ? acc : Math.max(acc ?? 0, row.last_success_at)),
+      null,
+    )
+    const withError = forTool.find((row) => row.last_error != null)
+    return {
+      tool,
+      credentialStatus: forTool[0].cred_status || 'valid',
+      credentialMessage: null,
+      success: consecutiveErrors === 0,
+      tiers: forTool.map((row) => ({
+        name: row.tier,
+        utilization: row.utilization,
+        resetsAt: row.resets_at == null ? null : new Date(row.resets_at).toISOString(),
+      })),
+      error: withError?.last_error ?? null,
+      queriedAt: forTool.reduce((acc, row) => Math.max(acc, row.ts), 0),
+      stale: consecutiveErrors > 0,
+      lastSuccessAt,
+      consecutiveErrors,
+      lastErrorKind: forTool.find((row) => row.last_error_kind)?.last_error_kind ?? '',
+    }
+  })
+}
+
 export function createApiServer(db: Database.Database, options?: ApiServerOptions): http.Server {
   const cfg = loadConfig()
   let weekStart: 0 | 1 = (cfg?.weekStart ?? 1) as 0 | 1
@@ -2404,14 +2495,8 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       // ── /api/quotas ───────────────────────────────────────────────
       // Public (see shouldProtectApiPath) — never put credentials in here.
       if (url.pathname === '/api/quotas' && req.method === 'GET') {
-        const results = await queryAllQuotas()
-        json(res, {
-          quotas: withStaleQuotaFallback(
-            db,
-            results as unknown as Array<Record<string, unknown>>,
-            options?.currentDeviceInstanceId ?? '',
-          ),
-        })
+        // Reads storage only. See quotasFromStore for why.
+        json(res, { quotas: quotasFromStore(db, options?.currentDeviceInstanceId ?? '') })
         return
       }
 

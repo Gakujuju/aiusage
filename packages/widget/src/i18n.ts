@@ -30,6 +30,8 @@ export interface Translations {
   hubPasswordSet: string
   /** Shown in the settings panel that opens by itself after a 401. */
   hubPasswordNeeded: string
+  /** config.json is there and unreadable; the address below it is a guess. */
+  configUnreadable: (detail: string) => string
   hubSave: string
   /* The widget itself is broken, which is not the same as the hub being down. */
   widgetNoBridge: string
@@ -113,6 +115,8 @@ const en: Translations = {
   hubPasswordLabel: 'Dashboard password',
   hubPasswordSet: 'saved',
   hubPasswordNeeded: 'The hub needs its dashboard password before this can show anything.',
+  configUnreadable: (detail: string) =>
+    `config.json could not be read, so this may be showing the wrong machine. ${detail}`,
   hubSave: 'Save',
   widgetNoBridge: 'The widget failed to load. Quit it from the tray and start it again.',
   widgetStartFailed: (reason: string) => `The widget failed to start: ${reason}`,
@@ -193,6 +197,8 @@ const ja: Translations = {
   hubPasswordLabel: 'ダッシュボードのパスワード',
   hubPasswordSet: '保存済み',
   hubPasswordNeeded: '数字を出すには、ハブのダッシュボードのパスワードが要ります。',
+  configUnreadable: (detail: string) =>
+    `config.json が読めません。別の端末の数字を出している可能性があります。${detail}`,
   hubSave: '保存',
   widgetNoBridge: 'ウィジェットの読み込みに失敗しました。トレイから終了して起動し直してください。',
   widgetStartFailed: (reason: string) => `ウィジェットの起動に失敗しました：${reason}`,
@@ -273,6 +279,8 @@ const zh: Translations = {
   hubPasswordLabel: '仪表盘密码',
   hubPasswordSet: '已保存',
   hubPasswordNeeded: '需要输入枢纽的仪表盘密码后才能显示数据。',
+  configUnreadable: (detail: string) =>
+    `无法读取 config.json，显示的可能是另一台机器的数据。${detail}`,
   hubSave: '保存',
   widgetNoBridge: '挂件加载失败。请从托盘退出后重新启动。',
   widgetStartFailed: (reason: string) => `挂件启动失败：${reason}`,

@@ -28,6 +28,14 @@ export interface WidgetUpdate extends WidgetData {
   hubProblem: HubFailure | null
   /** Which hub this is about, for a message that names it. */
   hubUrl: string
+  /**
+   * Set when config.json is present and will not parse; null otherwise.
+   *
+   * Separate from hubProblem because it is not about the hub at all - the
+   * address being used is a guess, and every number under it may be about
+   * the wrong machine. That is the failure nobody could see on 2026-09-02.
+   */
+  configProblem: string | null
 }
 
 /**

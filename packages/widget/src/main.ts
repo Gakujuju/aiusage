@@ -9,7 +9,7 @@ import { buildTooltip, quotaView, rowsFromApi, severity, shownRows } from './quo
 import type { QuotaRow, Severity } from './quota'
 import { Hub, HubError } from './hub'
 import type { HubFailure } from './hub'
-import { resolveHubUrl } from './hub-url'
+import { DEFAULT_PORT, resolveHubUrl } from './hub-url'
 import { HUB_PASSWORD_CREDENTIAL, resolveHubPassword, saveCredential } from './credentials'
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
 import { eventsFromApi, nextBatch, notificationsPath } from './notifications'
@@ -87,6 +87,8 @@ let hub: Hub | null = null
 
 /** Why the last attempt failed, or null while things are working. */
 let hubProblem: HubFailure | null = null
+/** @see WidgetUpdate.configProblem */
+let configProblem: string | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let positionRetryTimers: Array<ReturnType<typeof setTimeout>> = []
 /*
@@ -109,7 +111,6 @@ let exchangeRatePromise: Promise<ExchangeRateState> | null = null
  */
 const TRAY_REFRESH_MS = 5 * 60_000
 
-let trayTimer: ReturnType<typeof setInterval> | null = null
 let baseTrayBitmap: { bitmap: Buffer; width: number; height: number; scaleFactor: number } | null = null
 let trayLevel: Severity | null = null
 
@@ -149,6 +150,33 @@ if (process.platform === 'win32') {
   app.setAppUserModelId(AUMID)
 }
 
+/*
+ * One widget per machine, enforced by the OS rather than by a file.
+ *
+ * There was a guard already, in the CLI: ~/.aiusage/widget.pid, written by
+ * `aiusage widget` and checked before launching. It has two holes. It only
+ * covers that one launch path - a shortcut, a startup entry, or electron run
+ * directly walks straight past it - and if the file goes missing, which is
+ * the ordinary outcome of a crash or a cleanup, nothing is being checked at
+ * all. Two widgets then poll the hub forever and neither knows about the
+ * other; on 2026-09-02 that had to be diagnosed by grouping Get-Process
+ * output by StartTime, because Electron is several processes per app and the
+ * count alone says nothing.
+ *
+ * This lock is held by the running process itself. It cannot go stale, and
+ * it applies however the second copy was started.
+ */
+const isFirstInstance = app.requestSingleInstanceLock()
+if (!isFirstInstance) {
+  app.quit()
+} else {
+  // Someone tried to start a second one, which usually means they went
+  // looking for the window. Show it rather than doing nothing visible.
+  app.on('second-instance', () => {
+    if (win) showWindow()
+  })
+}
+
 // Prevent dock icon on macOS
 if (process.platform === 'darwin' && app.dock) {
   app.dock.hide()
@@ -157,8 +185,31 @@ if (process.platform === 'darwin' && app.dock) {
 app.whenReady().then(async () => {
   settings = loadSettings(app.getLocale())
 
-  const url = resolveHubUrl(settings.hubUrl)
-  hub = new Hub({ url, password: resolveHubPassword(url) })
+  /*
+   * An unreadable config.json stops this here rather than quietly becoming a
+   * different, working widget.
+   *
+   * resolveHubUrl used to swallow the parse failure and fall back to this
+   * machine's own port. On 2026-09-02 a BOM on config.json did exactly that:
+   * the spoke read itself as the hub, showed one tool instead of three, and
+   * logged nothing, because nothing involved thought anything had gone wrong.
+   * That took longer to find than the two failures that produced an empty
+   * window, which is the argument for stopping loudly here.
+   *
+   * The window still opens. Someone can type a hub address into it, which is
+   * the way out that does not involve editing the broken file.
+   */
+  let configFault: string | null = null
+  let url: string
+  try {
+    url = resolveHubUrl(settings.hubUrl)
+  } catch (error) {
+    configFault = error instanceof Error ? error.message : String(error)
+    configProblem = configFault
+    say(configFault)
+    url = `http://127.0.0.1:${DEFAULT_PORT}`
+  }
+  hub = new Hub({ url, password: configFault ? null : resolveHubPassword(url) })
 
   /*
    * The gate is now "can this reach a hub", not "does this machine collect
@@ -203,13 +254,12 @@ app.whenReady().then(async () => {
   createTray()
   createWindow()
   startAutoRefresh()
-  startTrayRefresh()
   startNotificationWatch()
   void refreshExchangeRate()
 
   // Shown regardless of the usual rule when a password is what is missing:
   // a tray icon alone gives nowhere to type it.
-  if (needsPassword || shouldShowWindowOnLaunch(app.isPackaged)) {
+  if (needsPassword || configFault || shouldShowWindowOnLaunch(app.isPackaged)) {
     showWindowWhenTrayReady()
   }
 })
@@ -294,7 +344,7 @@ function createTray(): void {
     scaleFactor: scaleFactor ?? 1,
   }
   tray = new Tray(icon)
-  updateTray()
+  void refreshAll()
 
   tray.on('click', () => toggleWindow())
   tray.on('right-click', () => {
@@ -433,12 +483,12 @@ function sendUpdate(update: WidgetUpdate): void {
  * Same shape as the last two of these: a second path that reports failure
  * its own way. One function now, and both callers take what it returns.
  */
-async function currentUpdate(): Promise<WidgetUpdate | null> {
+async function currentUpdate(rows?: QuotaRow[] | null): Promise<WidgetUpdate | null> {
   if (!hub) return null
   try {
-    const data = await buildPayload()
+    const data = await buildPayload(rows === undefined ? await fetchQuotaRows() : rows)
     hubProblem = null
-    return { ...data, hubProblem: null, hubUrl: hub.url }
+    return { ...data, hubProblem: null, hubUrl: hub.url, configProblem }
   } catch (error) {
     /*
      * Said, not swallowed.
@@ -469,14 +519,55 @@ async function currentUpdate(): Promise<WidgetUpdate | null> {
       quota: null,
       hubProblem,
       hubUrl: hub.url,
+      configProblem,
     }
   }
 }
 
-async function pushDataUpdate(): Promise<void> {
+/**
+ * The one place that asks the hub what the quotas are.
+ *
+ * Separate so that a single answer can serve both displays. See refreshAll.
+ */
+async function fetchQuotaRows(): Promise<QuotaRow[]> {
+  return rowsFromApi(await hub!.get('/api/quotas'))
+}
+
+async function pushDataUpdate(rows?: QuotaRow[] | null): Promise<void> {
   if (!win) return
-  const update = await currentUpdate()
+  const update = await currentUpdate(rows)
   if (update) sendUpdate(update)
+}
+
+/**
+ * One read of the quotas, shown in both places.
+ *
+ * The tray and the panel used to fetch on their own timers, so the same
+ * numbers were pulled twice - and until today each pull ran a fresh round of
+ * live upstream calls on the hub. That is what held claude-code at HTTP 429
+ * on 2026-09-02: the hub's own collection runs twelve times an hour, and two
+ * widgets reading on their own added far more than that, uncounted.
+ *
+ * The server side no longer calls upstream at all, so this is now about not
+ * asking the same question twice rather than about rate limits. One timer,
+ * one answer, both displays.
+ *
+ * The interval is the shorter of the two former ones. When the panel is set
+ * to something longer than the tray's five minutes it now repaints more
+ * often than asked, which costs one local HTTP call: the setting is there so
+ * a panel can feel as fresh as its owner wants, not to ration reads.
+ */
+async function refreshAll(): Promise<void> {
+  if (!hub) return
+  let rows: QuotaRow[] | null = null
+  try {
+    rows = await fetchQuotaRows()
+    hubProblem = null
+  } catch (error) {
+    hubProblem = error instanceof HubError ? error.kind : 'unexpected'
+  }
+  applyTray(rows)
+  await pushDataUpdate(rows)
 }
 
 /**
@@ -486,13 +577,16 @@ async function pushDataUpdate(): Promise<void> {
  * disagree - an icon that has gone red beside a tooltip that has not caught
  * up would be worse than either alone.
  */
-async function updateTray(): Promise<void> {
+/**
+ * Paints the tray from rows somebody else already read.
+ *
+ * Takes null for "the hub did not answer" rather than fetching and finding
+ * out itself, so that the panel and the icon can never disagree about
+ * whether the hub is up - they are now looking at the same answer.
+ */
+function applyTray(rows: QuotaRow[] | null): void {
   if (!tray || !hub) return
-  let rows: QuotaRow[]
-  try {
-    rows = rowsFromApi(await hub.get('/api/quotas'))
-    hubProblem = null
-  } catch (error) {
+  if (!rows) {
     /*
      * The hub did not answer, which is not the same as having nothing to
      * show. Saying so is the point of a resident display: the one thing it
@@ -502,7 +596,6 @@ async function updateTray(): Promise<void> {
      * The icon is left alone. Its colour means how much allowance is left,
      * and a second meaning would make the reason for a red icon ambiguous.
      */
-    hubProblem = error instanceof HubError ? error.kind : 'unexpected'
     tray.setToolTip(hubProblem === 'unauthorized'
       ? `AIUsage — the hub rejected the password (${hub.url})`
       : `AIUsage — cannot reach the hub (${hub.url})`)
@@ -595,14 +688,10 @@ function startNotificationWatch(): void {
   notifyTimer = setInterval(() => checkNotifications(), NOTIFY_POLL_MS)
 }
 
-function startTrayRefresh(): void {
-  if (trayTimer) clearInterval(trayTimer)
-  trayTimer = setInterval(() => updateTray(), TRAY_REFRESH_MS)
-}
-
 function startAutoRefresh(): void {
   if (refreshTimer) clearInterval(refreshTimer)
-  refreshTimer = setInterval(() => pushDataUpdate(), settings.refreshIntervalSec * 1000)
+  const every = Math.min(TRAY_REFRESH_MS, settings.refreshIntervalSec * 1000)
+  refreshTimer = setInterval(() => refreshAll(), every)
 }
 
 async function openDashboardAction(): Promise<void> {
@@ -812,8 +901,10 @@ async function autoSetup(): Promise<void> {
  * The quota rides along rather than taking its own channel, so the panel
  * cannot show a fresh quota above stale tokens or the other way round.
  */
-async function buildPayload() {
-  const quota = quotaView(rowsFromApi(await hub!.get('/api/quotas')), Date.now())
+async function buildPayload(rows: QuotaRow[] | null) {
+  // null means the read failed; the caller turns that into the failure shape.
+  if (!rows) throw new HubError(hubProblem ?? 'unexpected', 'the hub did not answer')
+  const quota = quotaView(rows, Date.now())
 
   /*
    * The usage figures are only fetched when something is going to draw them.
@@ -838,8 +929,7 @@ ipcMain.handle('widget:save-hub-password', async (_event, password: unknown) => 
   if (typeof password !== 'string' || password.length === 0) return false
   saveCredential(HUB_PASSWORD_CREDENTIAL, password)
   hub = new Hub({ url: resolveHubUrl(settings.hubUrl), password })
-  await pushDataUpdate()
-  void updateTray()
+  await refreshAll()
   return true
 })
 

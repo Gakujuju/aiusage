@@ -343,11 +343,46 @@ export const VAPID_PRIVATE_KEY_CREDENTIAL = 'vapidPrivateKey'
  */
 export const DEFAULT_VAPID_SUBJECT = 'https://github.com/Gakujuju/aiusage'
 
+/**
+ * The config, or null when there is not one.
+ *
+ * "There is not one" and "there is one and it is broken" used to be the same
+ * null, silently. On 2026-09-02 a UTF-8 BOM written by PowerShell's
+ * `Set-Content -Encoding UTF8` made config.json unparseable, and every reader
+ * carried on with defaults: the hub address fell back to this machine, so a
+ * spoke reported itself as the hub and showed one tool instead of three. No
+ * error appeared anywhere, because no code involved thought anything had
+ * failed.
+ *
+ * Still null, because dozens of call sites treat a missing config as ordinary
+ * and throwing here would take down commands that genuinely do not need it.
+ * But it says so now, once, loudly, naming the BOM - which is invisible in an
+ * editor and was the actual cause.
+ */
+let configParseWarned = false
+
 export function loadConfig(): Config | null {
   if (!existsSync(CONFIG_PATH)) return null
+  let text: string
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
-  } catch {
+    text = readFileSync(CONFIG_PATH, 'utf-8')
+  } catch (error) {
+    if (!configParseWarned) {
+      configParseWarned = true
+      console.warn(`[config] ${CONFIG_PATH} exists but could not be read: ${error instanceof Error ? error.message : String(error)}. Continuing with defaults, which may not be what you configured.`)
+    }
+    return null
+  }
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    if (!configParseWarned) {
+      configParseWarned = true
+      const bom = text.charCodeAt(0) === 0xfeff
+        ? ' The file starts with a UTF-8 BOM - write it with [System.IO.File]::WriteAllText, not Set-Content -Encoding UTF8.'
+        : ''
+      console.warn(`[config] ${CONFIG_PATH} exists but is not valid JSON: ${error instanceof Error ? error.message : String(error)}.${bom} Continuing with defaults, which may not be what you configured.`)
+    }
     return null
   }
 }

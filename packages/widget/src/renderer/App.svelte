@@ -266,6 +266,17 @@
         the hub being unreachable, and saying so with the same words would
         make the two impossible to tell apart from the outside.
       -->
+      <!--
+        First, and above the numbers, because it is the one failure that does
+        not look like one: the panel underneath may be entirely correct about
+        a machine nobody asked about.
+      -->
+      {#if data?.configProblem}
+        <div class="section">
+          <div class="widget-fault">{i18n.configUnreadable(data.configProblem)}</div>
+        </div>
+      {/if}
+
       {#if fault}
         <div class="section">
           <div class="widget-fault">

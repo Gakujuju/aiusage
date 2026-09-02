@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { readConfigFile } from './hub-url'
 import { join } from 'node:path'
 
 /**
@@ -37,19 +38,20 @@ export const HUB_PASSWORD_CREDENTIAL = 'hubDashboardPassword'
  */
 const OWN_DASHBOARD_PASSWORD = 'dashboardPassword'
 
+/**
+ * @throws ConfigUnreadableError when config.json is present and will not parse.
+ *
+ * It used to return {} for that, with a comment saying overwriting the file
+ * would lose someone's webhook - which is exactly what happened next, because
+ * saveCredential writes back whatever this returns. An empty object plus one
+ * credential replaced the real file.
+ *
+ * The other half of the same bug is quieter: loadCredential answered "no
+ * password saved" for a file that had one, so the widget asked for a password
+ * it already held.
+ */
 function readConfig(): Record<string, unknown> {
-  try {
-    if (!existsSync(CONFIG_PATH)) return {}
-    const parsed = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as unknown
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-  } catch {
-    /*
-     * A config file that will not parse is the CLI's business, not this
-     * widget's. Treating it as empty means the widget asks for a password it
-     * may already have; overwriting it would lose someone's webhook.
-     */
-    return {}
-  }
+  return readConfigFile(CONFIG_PATH) ?? {}
 }
 
 export function loadCredential(key: string): string | null {
