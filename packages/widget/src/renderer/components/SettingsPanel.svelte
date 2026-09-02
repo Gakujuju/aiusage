@@ -5,21 +5,11 @@
   import { currencies } from '../../currency'
   import type { CurrencyCode, ExchangeRateState } from '../../currency'
 
-  interface WidgetSettings {
-    theme: 'system' | 'light' | 'dark'
-    refreshIntervalSec: number
-    rangeDays: number
-    notifications: boolean
-    zoomFactor: number
-    quotaDetail: 'meter' | 'percent' | 'full'
-    hiddenTools: string[]
-    showUsage: boolean
-    showCost: boolean
-    showHeatmap: boolean
-    showTokenBreakdown: boolean
-    locale: Locale
-    currency: CurrencyCode
-  }
+  /*
+   * The real settings type, not a copy of it. The copy that used to be here
+   * was missing two fields, one of which this file already reads below.
+   */
+  import type { WidgetSettings } from '../../settings'
 
   export let settings: WidgetSettings
   export let exchangeRate: ExchangeRateState | null = null
@@ -35,7 +25,7 @@
 
   async function saveHubPassword(): Promise<void> {
     if (!hubPassword) return
-    hubSaved = await (window as any).widget.saveHubPassword(hubPassword)
+    hubSaved = (await window.widget?.saveHubPassword(hubPassword)) ?? false
     /* Not kept in the field: it is stored, and leaving it on screen only
        gives it somewhere else to be read from. */
     hubPassword = ''

@@ -166,22 +166,13 @@ importers:
 
   packages/widget:
     dependencies:
-      better-sqlite3:
-        specifier: ^12.0.0
-        version: 12.10.0
       electron:
         specifier: ^33.0.0
         version: 33.4.11
     devDependencies:
-      '@electron/rebuild':
-        specifier: ^3.6.1
-        version: 3.6.1
       '@sveltejs/vite-plugin-svelte':
         specifier: ^3.0.0
         version: 3.1.2(svelte@4.2.20)(vite@5.4.21(@types/node@25.7.0))
-      '@types/better-sqlite3':
-        specifier: '*'
-        version: 7.6.13
       '@types/node':
         specifier: '*'
         version: 25.7.0
@@ -194,6 +185,9 @@ importers:
       svelte:
         specifier: ^4.0.0
         version: 4.2.20
+      svelte-check:
+        specifier: ^4.7.6
+        version: 4.7.6(picomatch@4.0.4)(svelte@4.2.20)(typescript@5.7.3)
       typescript:
         specifier: ^5.0.0
         version: 5.7.3
@@ -1558,6 +1552,10 @@ packages:
       '@sveltejs/vite-plugin-svelte': ^3.0.0 || ^4.0.0-next.1 || ^5.0.0
       svelte: ^4.0.0 || ^5.0.0-next.0
       vite: ^5.0.3 || ^6.0.0
+
+  '@sveltejs/load-config@0.2.3':
+    resolution: {integrity: sha512-VT3qmUb8pRV2QrZjd8iAmtg8lf4W0TIjZbvXtz5MKei/q96teWZgGJyyidJzOjzZzvdq616eSRVeMYIQChUTAQ==}
+    engines: {node: '>= 18.0.0'}
 
   '@sveltejs/vite-plugin-svelte-inspector@2.1.0':
     resolution: {integrity: sha512-9QX28IymvBlSCqsCll5t0kQVxipsfhFFL+L2t3nTWfXnddYwxBuAEtTtlaVQpRz9c37BhJjltSeY4AJSC03SSg==}
@@ -3336,6 +3334,14 @@ packages:
   supports-preserve-symlinks-flag@1.0.0:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
+
+  svelte-check@4.7.6:
+    resolution: {integrity: sha512-t2scM//ZuVbSY/T2w6FSBw1v9s2NEmh/g+sy1lqtosW5ylBV5AF4wFb1Ts9Kf3MbfPDUDJDZ9L436YT0SPTdvw==}
+    engines: {node: '>= 18.0.0'}
+    hasBin: true
+    peerDependencies:
+      svelte: ^4.0.0 || ^5.0.0-next.0
+      typescript: ^5.0.0 || ^6.0.0
 
   svelte-hmr@0.16.0:
     resolution: {integrity: sha512-Gyc7cOS3VJzLlfj7wKS0ZnzDVdv3Pn2IuVeJPk9m2skfhcu5bq3wtIZyQGggr7/Iim5rH5cncyQft/kRLupcnA==}
@@ -5264,6 +5270,8 @@ snapshots:
       svelte: 4.2.20
       tiny-glob: 0.2.9
       vite: 5.4.21(@types/node@25.7.0)
+
+  '@sveltejs/load-config@0.2.3': {}
 
   '@sveltejs/vite-plugin-svelte-inspector@2.1.0(@sveltejs/vite-plugin-svelte@3.1.2(svelte@4.2.20)(vite@5.4.21(@types/node@20.19.41)))(svelte@4.2.20)(vite@5.4.21(@types/node@20.19.41))':
     dependencies:
@@ -7362,6 +7370,19 @@ snapshots:
       has-flag: 4.0.0
 
   supports-preserve-symlinks-flag@1.0.0: {}
+
+  svelte-check@4.7.6(picomatch@4.0.4)(svelte@4.2.20)(typescript@5.7.3):
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      '@sveltejs/load-config': 0.2.3
+      chokidar: 4.0.3
+      fdir: 6.5.0(picomatch@4.0.4)
+      picocolors: 1.1.1
+      sade: 1.8.1
+      svelte: 4.2.20
+      typescript: 5.7.3
+    transitivePeerDependencies:
+      - picomatch
 
   svelte-hmr@0.16.0(svelte@4.2.20):
     dependencies:

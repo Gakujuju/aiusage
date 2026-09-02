@@ -1,0 +1,25 @@
+{
+  /*
+   * The renderer, type-checked.
+   *
+   * tsconfig.json excludes src/renderer because those files compile through
+   * vite, which strips types without reading them. That left the panel - the
+   * one part of the widget a person actually looks at - as the only code here
+   * nothing checked, which is why every call into the bridge could be written
+   * `(window as any).widget` and stay that way.
+   *
+   * Run by svelte-check in pretest. Separate from tsconfig.json because that
+   * one drives `tsc` for the main process and must not emit .svelte output.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["svelte", "vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte"],
+  "exclude": ["node_modules", "dist"]
+}

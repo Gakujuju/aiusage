@@ -1199,3 +1199,50 @@ preload が読み込み時に投げると `contextBridge` も実行されず、
 
 型だけの import は消えるので契約は保ったまま、
 **チャンネル名の文字列だけ preload に書き戻した**（理由をコメントに明記）。
+
+### 窓が黙って壊れられないようにした
+
+同じ「ヘッダだけの窓」が3回出て、原因は3つとも違った。
+**故障が設計に見えるのが問題だった。** 起動して覗くまで誰も気づかない。
+
+`onMount` は素で並んでいたので、最初に投げたものが残り全部を道連れにした
+── ResizeObserver も含めて。窓の高さを決めているのはそれである。
+
+    bridge が無い    → 「ウィジェットの読み込みに失敗しました。トレイから…」
+    onMount が投げた → 「ウィジェットの起動に失敗しました：<理由>」
+    10秒来ない       → 「まだ値を受け取っていません。」
+
+**ハブの文言とは別にした。** 「ハブに繋がりません」と同じ言葉にすると、
+外から見て区別できない ── 次にやることが全く違うのに。
+
+わざと壊して実測（型では捕まらない種類なので）:
+
+    preload を投げさせる  → 赤字「読み込みに失敗しました」・窓は既定サイズのまま
+                            （bridge が無い＝resizeWindow も無い。これは正しい）
+    onMount で投げさせる  → 赤字「起動に失敗しました：deliberate onMount failure」
+                            窓は 360x120 に縮んだ（ResizeObserver は try の外）
+
+### ★ レンダラは型検査されていなかった（17件のエラーが隠れていた）
+
+`declare global` を書いてから気づいた ── **それを検査するものが無い。**
+
+`tsconfig.json` は `"exclude": ["src/renderer"]`。
+レンダラは vite が通すだけで、**型は剥がされるだけで読まれていなかった。**
+だから `(window as any).widget` が10箇所そのままだった。
+
+`tsconfig.renderer.json` を足して svelte-check を pretest に入れたら、
+**既存のエラーが17件出た。** 主なもの:
+
+    App.svelte と SettingsPanel.svelte が WidgetSettings を手書きで再定義していた
+      → 2フィールド足りず、SettingsPanel は既に settings.hubUrl を読んでいた
+    App.svelte が quota を再定義し hiddenTiers を string[] としていた
+      → 実際は { tier, reason } の配列（今日変えた側が古い写しに届いていない）
+    ActivityChart の locale が 'en' | 'zh'
+      → **ja が抜けていて、日本語でも日付が英語書式で出ていた**
+    window.widget?.x() の undefined を | null へ代入（4箇所）
+
+**IPC に型を付けたのと同じ病気である。** 受け取る側が契約を手で書き写す。
+今回は写しの方が古かった。全部消して本物を import した。
+
+`svelte.config.js` を足したのは svelte-check がプリプロセッサを見つけられないため
+（vite.config.ts が `root: 'src/renderer'` なので、パッケージ直下からは見えない）。

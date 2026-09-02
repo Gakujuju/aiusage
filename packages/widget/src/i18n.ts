@@ -29,6 +29,10 @@ export interface Translations {
   hubPasswordLabel: string
   hubPasswordSet: string
   hubSave: string
+  /* The widget itself is broken, which is not the same as the hub being down. */
+  widgetNoBridge: string
+  widgetStartFailed: (reason: string) => string
+  widgetNoData: string
   hubUnreachable: (url: string) => string
   hubUnauthorized: (url: string) => string
   zoomIn: string
@@ -107,6 +111,9 @@ const en: Translations = {
   hubPasswordLabel: 'Dashboard password',
   hubPasswordSet: 'saved',
   hubSave: 'Save',
+  widgetNoBridge: 'The widget failed to load. Quit it from the tray and start it again.',
+  widgetStartFailed: (reason: string) => `The widget failed to start: ${reason}`,
+  widgetNoData: 'No reading yet.',
   hubUnreachable: (url: string) => `Cannot reach the hub at ${url}.`,
   hubUnauthorized: (url: string) => `The hub at ${url} rejected the password.`,
   zoomIn: 'Larger',
@@ -183,6 +190,9 @@ const ja: Translations = {
   hubPasswordLabel: 'ダッシュボードのパスワード',
   hubPasswordSet: '保存済み',
   hubSave: '保存',
+  widgetNoBridge: 'ウィジェットの読み込みに失敗しました。トレイから終了して起動し直してください。',
+  widgetStartFailed: (reason: string) => `ウィジェットの起動に失敗しました：${reason}`,
+  widgetNoData: 'まだ値を受け取っていません。',
   hubUnreachable: (url: string) => `ハブに繋がりません（${url}）。`,
   hubUnauthorized: (url: string) => `ハブがパスワードを受け付けません（${url}）。`,
   zoomIn: '大きく',
@@ -259,6 +269,9 @@ const zh: Translations = {
   hubPasswordLabel: '仪表盘密码',
   hubPasswordSet: '已保存',
   hubSave: '保存',
+  widgetNoBridge: '挂件加载失败。请从托盘退出后重新启动。',
+  widgetStartFailed: (reason: string) => `挂件启动失败：${reason}`,
+  widgetNoData: '尚未收到数据。',
   hubUnreachable: (url: string) => `无法连接到中枢（${url}）。`,
   hubUnauthorized: (url: string) => `中枢拒绝了密码（${url}）。`,
   zoomIn: '放大',

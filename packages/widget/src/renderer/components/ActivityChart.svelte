@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { convertUsdCost, formatCurrency, formatUsdCost } from '../../currency'
   import type { CurrencyCode, ExchangeRateState } from '../../currency'
+  import type { Locale } from '../i18n'
 
   interface DailyEntry {
     date: string
@@ -11,7 +12,9 @@
 
   export let data: DailyEntry[] = []
   export let showCost: boolean = false
-  export let locale: 'en' | 'zh' = 'en'
+  // Every locale the widget has, not the two this file happened to name:
+  // with 'ja' excluded it fell through to English date formatting.
+  export let locale: Locale = 'en'
   export let currency: CurrencyCode = 'USD'
   export let exchangeRate: ExchangeRateState | null = null
 
@@ -352,7 +355,6 @@
           class="tooltip"
           class:pointer-left={tooltipPointerSide(hoveredIndex) === 'left'}
           class:pointer-right={tooltipPointerSide(hoveredIndex) === 'right'}
-          xmlns="http://www.w3.org/1999/xhtml"
         >
           <span class="tooltip-date">{formatDate(entry.date)}</span>
           <span class="tooltip-metric token-dot">{formatTokens(entry.tokens)}</span>

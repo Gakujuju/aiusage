@@ -10,48 +10,19 @@
   import type { Locale } from './i18n'
   import { formatUsdCost } from '../currency'
   import type { CurrencyCode, ExchangeRateState } from '../currency'
+  import type { WidgetUpdate } from '../update'
+  import type { WidgetSettings } from '../settings'
 
-  interface TodayTokens {
-    total: number; input: number; output: number
-    cacheRead: number; cacheWrite: number; thinking: number
-  }
-  interface DailyEntry { date: string; tokens: number; cost: number }
-  interface WidgetData {
-    todayTokens: TodayTokens
-    todayCost: number
-    rangeTokens: { total: number }
-    rangeCost: number
-    rangeDays: number
-    topModel: { name: string; share: number } | null
-    topTool: { name: string; share: number } | null
-    dailyHistory: DailyEntry[]
-    sessionCountToday: number
-    lastUpdated: number
-    /** Set when the hub could not be read; the panel says so instead. */
-    hubProblem?: 'unreachable' | 'unauthorized' | 'unexpected' | null
-    hubUrl?: string
-    quota?: null | {
-      tools: Array<{ tool: string; label: string; lines: Array<{ tier: string; kind: 'five_hour' | 'week'; utilization: number; resetsInMs: number | null }> }>
-      credInvalid: string[]
-      staleForMs: number | null
-      hiddenTiers: string[]
-    }
-  }
-  interface WidgetSettings {
-    theme: 'system' | 'light' | 'dark'
-    refreshIntervalSec: number
-    rangeDays: number
-    notifications: boolean
-    zoomFactor: number
-    quotaDetail: 'meter' | 'percent' | 'full'
-    hiddenTools: string[]
-    showUsage: boolean
-    showCost: boolean
-    showHeatmap: boolean
-    showTokenBreakdown: boolean
-    locale: Locale
-    currency: CurrencyCode
-  }
+  /*
+   * Both imported, not restated.
+   *
+   * These two shapes used to be written out again here, by hand, because
+   * nothing type-checked this directory and a copy was easier than an import.
+   * Both copies had drifted: settings was missing two fields the settings
+   * panel already reads, and the quota block described hiddenTiers as strings
+   * after it had become objects. Neither showed up anywhere, because the
+   * renderer was not being compiled - only stripped.
+   */
 
   function detectInitialLocale(): Locale {
     // Only until the main process sends the saved setting, which is what
@@ -62,7 +33,7 @@
     return 'en'
   }
 
-  let data: WidgetData | null = null
+  let data: WidgetUpdate | null = null
   let settings: WidgetSettings | null = null
   let exchangeRate: ExchangeRateState | null = null
   let initialLocale: Locale = detectInitialLocale()
@@ -71,6 +42,25 @@
   let panelEl: HTMLDivElement
   let lastReportedHeight = 0
   let lastReportedWidth = 0
+  /**
+   * What went wrong inside the widget, as opposed to out at the hub.
+   *
+   * Kept apart from hubProblem deliberately. "Cannot reach the hub" and "the
+   * widget did not load" call for completely different next steps, and a
+   * window that says the same thing for both makes the difference
+   * impossible to see from the outside.
+   */
+  let fault: { kind: 'no-bridge' } | { kind: 'start-failed'; reason: string } | null = null
+
+  /**
+   * Set when nothing has arrived for a while and nothing has gone wrong.
+   *
+   * A panel that is merely waiting looks exactly like one that has quietly
+   * died - three times today it was the second - so after ten seconds it
+   * says which it is rather than staying blank.
+   */
+  let noDataYet = false
+
   let installPhase: string | null = null
   let installError: string | null = null
   let isSetup = false
@@ -98,24 +88,24 @@
 
   async function refresh() {
     loading = true
-    data = await (window as any).widget.getData()
+    data = (await window.widget?.getData()) ?? null
     loading = false
   }
 
   function close() {
-    ;(window as any).widget.hideWindow()
+    ;window.widget?.hideWindow()
   }
 
   async function doLoadSettings() {
-    settings = await (window as any).widget.getSettings()
+    settings = (await window.widget?.getSettings()) ?? null
   }
 
   async function loadExchangeRate() {
-    exchangeRate = await (window as any).widget.getExchangeRate()
+    exchangeRate = (await window.widget?.getExchangeRate()) ?? null
   }
 
   async function saveSettings(e: CustomEvent<WidgetSettings>) {
-    settings = await (window as any).widget.saveSettings(e.detail)
+    settings = (await window.widget?.saveSettings(e.detail)) ?? null
     // Re-fetch data since rangeDays may have changed
     refresh()
   }
@@ -131,25 +121,42 @@
 
     lastReportedHeight = height
     lastReportedWidth = width
-    ;(window as any).widget.resizeWindow({ width, height })
+    ;window.widget?.resizeWindow({ width, height })
   }
 
   onMount(() => {
-    refresh()
-    doLoadSettings()
-    loadExchangeRate()
-    ;(window as any).widget.onDataUpdate((d: WidgetData) => {
-      data = d
+    /*
+     * Everything below used to run bare and in order, so the first thing to
+     * throw took the rest with it - including the ResizeObserver, which is
+     * what tells the window how big to be. The result was a header-sized
+     * window with nothing in it, three times today, for three different
+     * reasons, and every time it looked like a design rather than a fault.
+     */
+    const bridge = window.widget
+    if (!bridge) {
+      fault = { kind: 'no-bridge' }
       loading = false
-    })
-    ;(window as any).widget.onInstallStatus((status: { phase: string; error?: string }) => {
+      void tick().then(reportWindowHeight)
+      return
+    }
+
+    let resizeObserver: ResizeObserver | undefined
+    try {
+      refresh()
+      doLoadSettings()
+      loadExchangeRate()
+      bridge.onDataUpdate((d: WidgetUpdate) => {
+        data = d
+        loading = false
+      })
+      bridge.onInstallStatus((status: { phase: string; error?: string }) => {
       installPhase = status.phase
       installError = status.error ?? null
       if (status.phase === 'done' || status.phase === 'failed') {
         setTimeout(() => { installPhase = null; installError = null }, 3000)
       }
     })
-    ;(window as any).widget.onSetupStatus((status: { phase: string; error?: string }) => {
+      bridge.onSetupStatus((status: { phase: string; error?: string }) => {
       isSetup = true
       installPhase = status.phase
       installError = status.error ?? null
@@ -158,11 +165,22 @@
       }
     })
 
-    const resizeObserver = new ResizeObserver(() => reportWindowHeight())
+      setTimeout(() => { noDataYet = data == null && fault == null }, 10_000)
+    } catch (error) {
+      /*
+       * Drawn, not swallowed. Whatever failed, the window has to say that
+       * something did - a person looking at it is the only detector this
+       * has, and only if there is something to see.
+       */
+      fault = { kind: 'start-failed', reason: error instanceof Error ? error.message : String(error) }
+      loading = false
+    }
+
+    resizeObserver = new ResizeObserver(() => reportWindowHeight())
     resizeObserver.observe(panelEl)
     void tick().then(reportWindowHeight)
 
-    return () => resizeObserver.disconnect()
+    return () => resizeObserver?.disconnect()
   })
 
   afterUpdate(() => {
@@ -228,6 +246,23 @@
         window is open. What used to be here is still below it, behind the
         toggles it always had.
       -->
+      <!--
+        The widget's own failures come first and on their own. They are not
+        the hub being unreachable, and saying so with the same words would
+        make the two impossible to tell apart from the outside.
+      -->
+      {#if fault}
+        <div class="section">
+          <div class="widget-fault">
+            {fault.kind === 'no-bridge' ? i18n.widgetNoBridge : i18n.widgetStartFailed(fault.reason)}
+          </div>
+        </div>
+      {:else if noDataYet}
+        <div class="section">
+          <div class="widget-fault">{i18n.widgetNoData}</div>
+        </div>
+      {/if}
+
       <!--
         Said, not left blank. A resident panel that goes empty reads as
         broken; one that names the situation has told you what to do.
@@ -373,6 +408,17 @@
       --shadow: none;
     }
   }
+  /*
+   * Deliberately louder than the hub message. That one is a fact about
+   * another machine; this one means the thing you are looking at is broken.
+   */
+  .widget-fault {
+    font-size: 0.6875rem;
+    color: var(--danger);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
   .hub-problem {
     font-size: 0.6875rem;
     color: var(--danger);
