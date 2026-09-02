@@ -43,7 +43,7 @@ export async function launchWidget(): Promise<void> {
    */
   const child = target.kind === 'workspace'
     ? spawn(target.electron, [target.appDir], { detached: true, stdio: 'ignore', shell: false })
-    : spawn(target.command, [], { detached: true, stdio: 'ignore', shell: false })
+    : spawnInstalled(target.command)
   child.unref()
 
   console.log(target.kind === 'workspace'
@@ -80,21 +80,63 @@ type WidgetTarget =
 /**
  * The widget to start, and where it came from.
  *
- * PATH first, then this repository. Someone who installed the package meant
- * to use it; someone standing in a checkout with no global install almost
- * certainly means the one they have been editing.
+ * This tree first, then PATH. Not a guess about intent - the CLI and the
+ * widget are two halves of one build, and running the CLI from a checkout
+ * while the widget comes from a global install mixes two versions of the
+ * same program.
+ *
+ * The rule keeps itself honest because findWorkspaceWidget walks up from
+ * this file: it can only ever find the tree the running CLI came out of. A
+ * globally installed CLI finds nothing there and falls through to PATH,
+ * which is the right answer for it.
  */
 function resolveWidget(): WidgetTarget {
+  const appDir = findWorkspaceWidget()
+  if (appDir) {
+    if (!existsSync(join(appDir, 'dist', 'main.js'))) return { kind: 'unbuilt', appDir }
+    const electron = resolveElectron(appDir)
+    if (electron) return { kind: 'workspace', appDir, electron }
+    return { kind: 'unbuilt', appDir }
+  }
+
   const installed = commandOnPath('aiusage-widget')
   if (installed) return { kind: 'installed', command: installed }
 
-  const appDir = findWorkspaceWidget()
-  if (!appDir) return { kind: 'nothing' }
-  if (!existsSync(join(appDir, 'dist', 'main.js'))) return { kind: 'unbuilt', appDir }
+  return { kind: 'nothing' }
+}
 
-  const electron = resolveElectron(appDir)
-  if (!electron) return { kind: 'unbuilt', appDir }
-  return { kind: 'workspace', appDir, electron }
+/**
+ * Starts a command that npm put on PATH, which on Windows is a batch file.
+ *
+ * `aiusage-widget` resolves to `aiusage-widget.cmd`, and spawning a .cmd
+ * without a shell fails with EINVAL - Node closed that door deliberately.
+ * This branch has therefore never worked on Windows; it only came to light
+ * once there was a second branch to compare it against.
+ *
+ * cmd.exe is invoked directly rather than via `shell: true` so the path is
+ * an argument rather than something the shell parses. It comes from `where`
+ * and so contains whatever the user's directories are called.
+ */
+function spawnInstalled(command: string) {
+  const options = { detached: true, stdio: 'ignore' as const, shell: false }
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(command)) {
+    /*
+     * Quoted here and passed through verbatim, because the path usually has
+     * a space in it - `where` returns the long form, and a home directory of
+     * two words is ordinary. Letting Node quote it for cmd.exe produces
+     * something cmd splits on the space and cannot find.
+     *
+     * Without /s, deliberately. /s tells cmd to strip the outer quotes and
+     * take the rest literally, which is the opposite of what is wanted when
+     * the quotes are the only thing holding the path together: measured, a
+     * spaced path runs with /d /c and silently does not with /d /s /c.
+     */
+    return spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/c', `"${command}"`], {
+      ...options,
+      windowsVerbatimArguments: true,
+    })
+  }
+  return spawn(command, [], options)
 }
 
 function commandOnPath(name: string): string | null {

@@ -18,10 +18,20 @@ describe('launchWidget', () => {
   })
 
   it('detects stale PID file when process does not exist', async () => {
-    mockExistsSync.mockReturnValue(true)
+    /*
+     * Only the PID file exists.
+     *
+     * Returning true for every path made the walk that looks for the widget
+     * in this repository succeed on its first guess - a directory under
+     * src/commands that is not there - and the launcher then reported it as
+     * unbuilt. The mock has to say what is and is not on disk, or it decides
+     * which branch runs.
+     */
+    mockExistsSync.mockImplementation((path) => String(path).endsWith('widget.pid'))
     mockReadFileSync.mockReturnValue('99999999' as any)
 
     // Mock process.kill to throw ESRCH (process not found)
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
       const err = Object.assign(new Error('ESRCH'), { code: 'ESRCH' })
       throw err
@@ -34,7 +44,10 @@ describe('launchWidget', () => {
 
     await launchWidget()
 
+    // With no widget in this tree, the one on PATH is what starts.
     expect(spawnMock).toHaveBeenCalled()
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('installed package'))
     killSpy.mockRestore()
+    logSpy.mockRestore()
   })
 })
