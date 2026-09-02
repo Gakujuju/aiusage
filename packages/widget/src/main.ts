@@ -410,7 +410,22 @@ async function pushDataUpdate(): Promise<void> {
      * hub is unreachable has told you what to do about it.
      */
     hubProblem = error instanceof HubError ? error.kind : 'unexpected'
-    win.webContents.send('widget:data-update', { hubProblem, hubUrl: hub.url })
+    /*
+     * A complete shape, with the quota deliberately absent.
+     *
+     * Sending only the problem left every other field undefined, and the
+     * panel builds its strings from those the moment an update arrives -
+     * before any {#if} decides whether to draw them. The reactive statement
+     * threw, the panel never repainted, and the numbers from the last good
+     * read stayed on screen with a stale timestamp beside them. Which is
+     * precisely the thing this message exists to prevent.
+     */
+    win.webContents.send('widget:data-update', {
+      ...emptyWidgetData(settings.rangeDays),
+      quota: null,
+      hubProblem,
+      hubUrl: hub.url,
+    })
     if (hubProblem !== 'unreachable') {
       say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
     }

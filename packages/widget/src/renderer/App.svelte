@@ -30,7 +30,7 @@
     /** Set when the hub could not be read; the panel says so instead. */
     hubProblem?: 'unreachable' | 'unauthorized' | 'unexpected' | null
     hubUrl?: string
-    quota?: {
+    quota?: null | {
       tools: Array<{ tool: string; label: string; lines: Array<{ tier: string; kind: 'five_hour' | 'week'; utilization: number; resetsInMs: number | null }> }>
       credInvalid: string[]
       staleForMs: number | null
