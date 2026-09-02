@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, dialog, screen, nativeTheme } from 'electron'
+import { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, dialog, screen, nativeTheme, Notification } from 'electron'
 import { join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -9,6 +9,7 @@ import { queryWidgetData } from './data'
 import { buildTooltip, queryQuota, quotaView, severity, shownRows } from './quota'
 import type { Severity } from './quota'
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
+import { nextBatch, notificationsSince } from './notifications'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
 import type { WidgetSettings } from './settings'
@@ -63,6 +64,19 @@ let trayTimer: ReturnType<typeof setInterval> | null = null
 let baseTrayBitmap: { bitmap: Buffer; width: number; height: number; scaleFactor: number } | null = null
 let trayLevel: Severity | null = null
 
+/*
+ * Notifications are checked more often than the tray is redrawn.
+ *
+ * The tray shows quota, which is refetched every five minutes, so reading it
+ * faster would re-read the same row. A notification is about something that
+ * just happened - a session finishing, a limit reached - and five minutes
+ * late is late enough to have moved on. Thirty seconds of one indexed query
+ * against a database this process already has open costs nothing.
+ */
+const NOTIFY_POLL_MS = 30_000
+
+let notifyTimer: ReturnType<typeof setInterval> | null = null
+
 app.setName('AIUsage Widget')
 
 /*
@@ -80,8 +94,10 @@ app.setName('AIUsage Widget')
  * The same string as electron-builder's appId, so a packaged build and this
  * one are one identity rather than two.
  */
+const AUMID = 'com.juliantanx.aiusage-widget'
+
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.juliantanx.aiusage-widget')
+  app.setAppUserModelId(AUMID)
 }
 
 // Prevent dock icon on macOS
@@ -120,6 +136,7 @@ app.whenReady().then(async () => {
   createWindow()
   startAutoRefresh()
   startTrayRefresh()
+  startNotificationWatch()
   void refreshExchangeRate()
 
   if (!dbExists) {
@@ -343,6 +360,62 @@ function updateTray(): void {
   const { bitmap, width, height, scaleFactor } = baseTrayBitmap
   const pixels = level === 'ok' ? bitmap : tintBitmap(bitmap, SEVERITY_COLOURS[level])
   tray.setImage(nativeImage.createFromBitmap(pixels, { width, height, scaleFactor }))
+}
+
+/**
+ * Shows what the hub sent since this machine last looked.
+ *
+ * On a first run it shows nothing and simply marks the present moment. The
+ * table holds hundreds of past events and every one of them has already been
+ * delivered somewhere else; replaying them on startup would be a wall of
+ * notifications about things the reader dealt with days ago.
+ */
+function checkNotifications(): void {
+  if (!db || !settings.notifications) return
+
+  const now = Date.now()
+  if (settings.notificationsSeenAt == null) {
+    settings = { ...settings, notificationsSeenAt: now }
+    saveSettings(settings)
+    say('first run: notifications start from now, nothing replayed')
+    return
+  }
+
+  let batch
+  try {
+    batch = nextBatch(notificationsSince(db, settings.notificationsSeenAt), settings.notificationsSeenAt)
+  } catch (error) {
+    say(`could not read notifications: ${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
+
+  if (batch.show.length === 0) return
+
+  /*
+   * The marker moves first, and is written before anything is shown.
+   *
+   * If the process dies between the two, the cost is a notification nobody
+   * saw. The other order costs the same event shown again on every restart,
+   * for ever, which is the failure people notice.
+   */
+  settings = { ...settings, notificationsSeenAt: batch.seenAt }
+  saveSettings(settings)
+
+  if (batch.skipped > 0) {
+    say(`${batch.skipped} notification(s) not shown: more arrived at once than fit on screen`)
+  }
+
+  for (const row of batch.show) {
+    /* The hub's words, unchanged. The same event says the same thing here as
+       it does on the phone, or they stop looking like one event. */
+    new Notification({ title: row.title, body: row.body }).show()
+  }
+}
+
+function startNotificationWatch(): void {
+  if (notifyTimer) clearInterval(notifyTimer)
+  checkNotifications()
+  notifyTimer = setInterval(() => checkNotifications(), NOTIFY_POLL_MS)
 }
 
 function startTrayRefresh(): void {

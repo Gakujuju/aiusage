@@ -7,6 +7,22 @@ export interface WidgetSettings {
   theme: 'system' | 'light' | 'dark'
   refreshIntervalSec: number
   rangeDays: number
+  /**
+   * Show desktop notifications for what the hub already sent elsewhere.
+   *
+   * On by default and switchable, because the same event also reaches the
+   * phone: two things going off for one event is worth being able to stop,
+   * and which one to stop is not this program's call.
+   */
+  notifications: boolean
+  /**
+   * The newest event already shown on THIS machine, or null on a first run.
+   *
+   * Here rather than in the database because that is opened readonly, and
+   * not shared between machines because "have I seen it" is a fact about a
+   * screen, not about the event.
+   */
+  notificationsSeenAt: number | null
   /** The token/cost sections this widget used to be made of. */
   showUsage: boolean
   showCost: boolean
@@ -22,15 +38,17 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   theme: 'system',
   refreshIntervalSec: 60,
   rangeDays: 30,
+  notifications: true,
+  notificationsSeenAt: null,
   /*
    * Off, because the window's subject changed.
    *
-   * These three are tokens, cost and a trend chart - the whole of what this
-   * widget used to be, and what its owner said they do not look at. They are
-   * kept rather than deleted: not looked at is not the same as not wanted,
-   * and a toggle already existed for each. Turning the defaults off achieves
-   * the point, which was that the quota should not have to be found among
-   * them.
+   * These are tokens, cost and a trend chart - the whole of what this widget
+   * used to be, and what its owner said they do not look at. They are kept
+   * rather than deleted: not looked at is not the same as not wanted, and a
+   * toggle already existed for most of them. Turning the defaults off
+   * achieves the point, which was that the quota should not have to be found
+   * among them.
    */
   showUsage: false,
   showCost: false,

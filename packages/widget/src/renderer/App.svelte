@@ -38,6 +38,7 @@
     theme: 'system' | 'light' | 'dark'
     refreshIntervalSec: number
     rangeDays: number
+    notifications: boolean
     showUsage: boolean
     showCost: boolean
     showHeatmap: boolean

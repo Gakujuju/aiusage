@@ -9,6 +9,7 @@
     theme: 'system' | 'light' | 'dark'
     refreshIntervalSec: number
     rangeDays: number
+    notifications: boolean
     showUsage: boolean
     showCost: boolean
     showHeatmap: boolean
@@ -178,6 +179,12 @@
   <div class="section">
     <div class="section-label">{i18n.display}</div>
     <div class="toggles">
+      <label class="toggle-row">
+        <span>{i18n.notificationsToggle}</span>
+        <button class="toggle" class:on={local.notifications} on:click={() => toggle('notifications')}>
+          <span class="toggle-thumb"></span>
+        </button>
+      </label>
       <label class="toggle-row">
         <span>{i18n.showUsage}</span>
         <button class="toggle" class:on={local.showUsage} on:click={() => toggle('showUsage')}>

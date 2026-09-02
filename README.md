@@ -157,7 +157,18 @@ Until then it lives behind the `^` at the end of the taskbar.
 **In that list it is called `Electron`, not `AIUsage Widget`.** Windows takes
 the name from the executable, and an unpackaged build runs Electron's own.
 Look for the green bar-chart icon. (Setting the AppUserModelID does not
-change this — only a packaged build with its own .exe would.)
+change this — only a packaged build with its own .exe would.) Notifications
+from it are filed under `com.juliantanx.aiusage-widget` for the same reason.
+
+It also raises a desktop notification for anything the hub sends elsewhere —
+the same words that reach your phone, once per event rather than once per
+channel. It never replays: on first run it starts from that moment, and what
+it has already shown is remembered per machine. Turn it off with "Desktop
+notifications" in the widget's settings.
+
+**If nothing appears on screen, check Do Not Disturb first.** With it on,
+Windows delivers the notification to the notification centre but shows no
+banner — the panel says so at the top when you open it.
 
 ## Development
 

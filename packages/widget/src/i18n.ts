@@ -23,6 +23,7 @@ export interface Translations {
   credInvalid: (tools: string) => string
   quotaStale: (age: string) => string
   tierHidden: (tiers: string) => string
+  notificationsToggle: string
   showUsage: string
   /* ── What used to be the whole window ───────────────────────────── */
   today: string
@@ -80,6 +81,7 @@ const en: Translations = {
   credInvalid: (tools: string) => `${tools}: credentials not valid`,
   quotaStale: (age: string) => `Last read ${age} ago — not updating`,
   tierHidden: (tiers: string) => `${tiers} is not shown: it reports no reset time`,
+  notificationsToggle: 'Desktop notifications',
   showUsage: 'Tokens and cost',
   today: 'Today',
   lastNDays: (n) => `Last ${n} days`,
@@ -136,6 +138,7 @@ const ja: Translations = {
   credInvalid: (tools: string) => `${tools}：資格情報が無効です`,
   quotaStale: (age: string) => `${age}前の値 — 更新が止まっています`,
   tierHidden: (tiers: string) => `${tiers} は表示していません（リセット時刻を返さないため）`,
+  notificationsToggle: 'デスクトップ通知',
   showUsage: 'トークンと費用',
   today: '今日',
   lastNDays: (n) => `過去${n}日`,
@@ -192,6 +195,7 @@ const zh: Translations = {
   credInvalid: (tools: string) => `${tools}：凭据无效`,
   quotaStale: (age: string) => `${age} 前读取 — 已停止更新`,
   tierHidden: (tiers: string) => `${tiers} 未显示：它不返回重置时间`,
+  notificationsToggle: '桌面通知',
   showUsage: '令牌与费用',
   today: '今日',
   lastNDays: (n) => `近 ${n} 天`,
