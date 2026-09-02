@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   getTrayIconNativeImage,
-  getWidgetNativeBindingPath,
   getWindowPosition,
   shouldHideWindowOnBlur,
   shouldHideWindowOnClose,
@@ -52,9 +51,6 @@ describe('widget UI helpers', () => {
     })).toEqual({ x: 0, y: 0 })
   })
 
-  it('resolves the widget-specific native sqlite binding path', () => {
-    expect(getWidgetNativeBindingPath('/app/dist')).toBe('/app/dist/native/better_sqlite3.node')
-  })
 
   it('provides a visible tray icon asset', () => {
     const { buffer } = getTrayIconNativeImage()

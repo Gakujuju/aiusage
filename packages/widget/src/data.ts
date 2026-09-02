@@ -1,4 +1,15 @@
-import type Database from 'better-sqlite3'
+/**
+ * The usage figures, from the hub rather than from the file next door.
+ *
+ * These are the sections this widget used to be made of - today's tokens,
+ * the range total, the breakdown, the trend, the top model and tool. They
+ * are off by default now and reachable from settings, and they were kept
+ * rather than deleted because "not looked at" is not "not wanted".
+ *
+ * Keeping them meant they had to move too: with better-sqlite3 gone there is
+ * no local database to read. Everything here maps two endpoints the hub
+ * already serves onto the shape the panel was written against.
+ */
 
 export interface TodayTokens {
   total: number
@@ -9,170 +20,128 @@ export interface TodayTokens {
   thinking: number
 }
 
-export interface RangeTokens {
-  total: number
-}
-
-export interface TopModel {
-  name: string
-  share: number
-}
-
-export interface TopTool {
-  name: string
-  share: number
-}
-
 export interface DailyEntry {
-  date: string // YYYY-MM-DD
+  date: string
   tokens: number
   cost: number
-}
-
-export interface HourlyEntry {
-  dayOfWeek: number // 0=Sun … 6=Sat
-  hour: number // 0–23
-  tokens: number
 }
 
 export interface WidgetData {
   todayTokens: TodayTokens
   todayCost: number
-  rangeTokens: RangeTokens
+  rangeTokens: { total: number }
   rangeCost: number
   rangeDays: number
-  topModel: TopModel | null
-  topTool: TopTool | null
+  topModel: { name: string; share: number } | null
+  topTool: { name: string; share: number } | null
   dailyHistory: DailyEntry[]
   sessionCountToday: number
   lastUpdated: number
 }
 
-export function queryWidgetData(db: Database.Database, rangeDays: number = 30): WidgetData {
-  const todayStart = getTodayStartMs()
-  const tomorrow = todayStart + 86_400_000
-  const rangeStart = todayStart - (rangeDays - 1) * 86_400_000
+interface SummaryResponse {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  thinkingTokens?: number
+  totalTokens?: number
+  totalCost?: number
+  totalSessions?: number
+  byTool?: Record<string, number>
+}
 
-  const todayRow = db.prepare(`
-    SELECT
-      COALESCE(SUM(input_tokens), 0) AS input,
-      COALESCE(SUM(output_tokens), 0) AS output,
-      COALESCE(SUM(cache_read_tokens), 0) AS cacheRead,
-      COALESCE(SUM(cache_write_tokens), 0) AS cacheWrite,
-      COALESCE(SUM(thinking_tokens), 0) AS thinking,
-      COALESCE(SUM(cost), 0) AS cost
-    FROM records
-    WHERE ts >= ? AND ts < ?
-  `).get(todayStart, tomorrow) as {
-    input: number; output: number; cacheRead: number
-    cacheWrite: number; thinking: number; cost: number
-  }
+interface CostResponse {
+  data?: Array<{ date?: unknown; tokens?: unknown; cost?: unknown }>
+  byModel?: Record<string, number>
+}
 
-  const rangeRow = db.prepare(`
-    SELECT
-      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens), 0) AS total,
-      COALESCE(SUM(cost), 0) AS cost
-    FROM records
-    WHERE ts >= ? AND ts < ?
-  `).get(rangeStart, tomorrow) as { total: number; cost: number }
+const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
 
-  const modelRows = db.prepare(`
-    SELECT
-      model,
-      SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS tokens
-    FROM records
-    WHERE ts >= ? AND ts < ?
-    GROUP BY model
-    ORDER BY tokens DESC
-  `).all(todayStart, tomorrow) as Array<{ model: string; tokens: number }>
+/** The biggest share of a name-to-number map, as a fraction of the whole. */
+function largestShare(map: Record<string, number> | undefined): { name: string; share: number } | null {
+  if (!map) return null
+  const entries = Object.entries(map).filter(([, value]) => typeof value === 'number')
+  if (entries.length === 0) return null
 
-  let topModel: TopModel | null = null
-  if (modelRows.length > 0) {
-    const totalTokens = modelRows.reduce((acc, r) => acc + r.tokens, 0)
-    const top = modelRows[0]
-    topModel = {
-      name: top.model,
-      share: totalTokens > 0 ? Math.round((top.tokens / totalTokens) * 100) : 0,
-    }
-  }
+  const total = entries.reduce((sum, [, value]) => sum + value, 0)
+  const [name, value] = entries.reduce((best, entry) => (entry[1] > best[1] ? entry : best))
+  return { name, share: total > 0 ? value / total : 0 }
+}
 
-  const toolRows = db.prepare(`
-    SELECT
-      tool,
-      SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS tokens
-    FROM records
-    WHERE ts >= ? AND ts < ?
-    GROUP BY tool
-    ORDER BY tokens DESC
-  `).all(todayStart, tomorrow) as Array<{ tool: string; tokens: number }>
+/**
+ * Which range name to ask for, given the number of days the user chose.
+ *
+ * The endpoint takes names rather than a day count, so this picks the
+ * smallest one that covers the choice. Anything past a month is `all`, which
+ * over-covers - the alternative is from/to arithmetic here, and a widget
+ * whose totals disagree with the dashboard's by a day would be worse than
+ * one that shows a slightly wider window and says which.
+ */
+export function rangeNameFor(days: number): string {
+  if (days <= 1) return 'day'
+  if (days <= 7) return 'week'
+  if (days <= 31) return 'month'
+  return 'all'
+}
 
-  let topTool: TopTool | null = null
-  if (toolRows.length > 0) {
-    const totalTokens = toolRows.reduce((acc, r) => acc + r.tokens, 0)
-    const top = toolRows[0]
-    topTool = {
-      name: top.tool,
-      share: totalTokens > 0 ? Math.round((top.tokens / totalTokens) * 100) : 0,
-    }
-  }
+export interface DataSource {
+  get<T>(path: string): Promise<T>
+}
 
-  // Daily history for the configured range
-  const dailyRows = db.prepare(`
-    SELECT
-      CAST((ts - ?) / 86400000 AS INTEGER) AS dayIndex,
-      SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + thinking_tokens) AS tokens,
-      SUM(cost) AS cost
-    FROM records
-    WHERE ts >= ? AND ts < ?
-    GROUP BY dayIndex
-    ORDER BY dayIndex
-  `).all(rangeStart, rangeStart, tomorrow) as Array<{ dayIndex: number; tokens: number; cost: number }>
-
-  const dailyHistory: DailyEntry[] = []
-  const dailyMap = new Map(dailyRows.map(r => [r.dayIndex, r]))
-  for (let i = 0; i < rangeDays; i++) {
-    const dayMs = rangeStart + i * 86_400_000
-    const d = new Date(dayMs)
-    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const row = dailyMap.get(i)
-    dailyHistory.push({
-      date,
-      tokens: row?.tokens ?? 0,
-      cost: row?.cost ?? 0,
-    })
-  }
-
-  // Session count today
-  const sessionRow = db.prepare(`
-    SELECT COUNT(DISTINCT session_id) AS cnt
-    FROM records
-    WHERE ts >= ? AND ts < ? AND session_id IS NOT NULL AND session_id != ''
-  `).get(todayStart, tomorrow) as { cnt: number }
+export async function fetchWidgetData(hub: DataSource, rangeDays: number): Promise<WidgetData> {
+  const rangeName = rangeNameFor(rangeDays)
+  const [today, range, cost] = await Promise.all([
+    hub.get<SummaryResponse>('/api/summary?range=day'),
+    hub.get<SummaryResponse>(`/api/summary?range=${rangeName}`),
+    hub.get<CostResponse>(`/api/cost?range=${rangeName}`),
+  ])
 
   return {
     todayTokens: {
-      total: todayRow.input + todayRow.output + todayRow.cacheRead + todayRow.cacheWrite + todayRow.thinking,
-      input: todayRow.input,
-      output: todayRow.output,
-      cacheRead: todayRow.cacheRead,
-      cacheWrite: todayRow.cacheWrite,
-      thinking: todayRow.thinking,
+      total: num(today.totalTokens),
+      input: num(today.inputTokens),
+      output: num(today.outputTokens),
+      cacheRead: num(today.cacheReadTokens),
+      cacheWrite: num(today.cacheWriteTokens),
+      thinking: num(today.thinkingTokens),
     },
-    todayCost: todayRow.cost,
-    rangeTokens: {
-      total: rangeRow.total,
-    },
-    rangeCost: rangeRow.cost,
+    todayCost: num(today.totalCost),
+    rangeTokens: { total: num(range.totalTokens) },
+    rangeCost: num(range.totalCost),
     rangeDays,
-    topModel,
-    topTool,
-    dailyHistory,
-    sessionCountToday: sessionRow.cnt,
+    topModel: largestShare(cost.byModel),
+    topTool: largestShare(range.byTool),
+    dailyHistory: (cost.data ?? []).map((entry) => ({
+      date: typeof entry.date === 'string' ? entry.date : '',
+      tokens: num(entry.tokens),
+      cost: num(entry.cost),
+    })),
+    sessionCountToday: num(today.totalSessions),
     lastUpdated: Date.now(),
   }
 }
 
-function getTodayStartMs(): number {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+/**
+ * The same shape with nothing in it.
+ *
+ * The panel computes its strings from these fields the moment data arrives,
+ * before any `{#if}` decides whether to draw them. Handing it an object
+ * without them throws inside a reactive statement and the whole panel stops
+ * rendering - which looked exactly like a window that had lost its contents,
+ * because it had.
+ */
+export function emptyWidgetData(rangeDays: number): WidgetData {
+  return {
+    todayTokens: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, thinking: 0 },
+    todayCost: 0,
+    rangeTokens: { total: 0 },
+    rangeCost: 0,
+    rangeDays,
+    topModel: null,
+    topTool: null,
+    dailyHistory: [],
+    sessionCountToday: 0,
+    lastUpdated: Date.now(),
+  }
 }

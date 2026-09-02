@@ -24,6 +24,14 @@ export interface WidgetSettings {
    */
   notificationsSeenAt: number | null
   /**
+   * The hub to read from, when the obvious answer is wrong.
+   *
+   * Empty means: whatever hubForward.url says on a spoke, and this machine's
+   * own serve port on the hub. Someone who types an address here means it,
+   * so it wins over both.
+   */
+  hubUrl: string
+  /**
    * How big everything is drawn, as a webContents zoom factor.
    *
    * Zoom rather than a resizable window, because the window already follows
@@ -59,6 +67,7 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   rangeDays: 30,
   notifications: true,
   notificationsSeenAt: null,
+  hubUrl: '',
   zoomFactor: 1,
   quotaDetail: 'full',
   hiddenTools: [],

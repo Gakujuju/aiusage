@@ -1,4 +1,3 @@
-import type Database from 'better-sqlite3'
 
 /**
  * What the tray says, and what it refuses to say.
@@ -76,12 +75,55 @@ export const TOOL_LABELS: Record<string, string> = {
  */
 export const STALE_AFTER_MS = 15 * 60_000
 
-export function queryQuota(db: Database.Database): QuotaRow[] {
-  return db.prepare(`
-    SELECT tool, tier, utilization, resets_at AS resetsAt, cred_status AS credStatus, ts
-    FROM quota_current
-    ORDER BY tool, tier
-  `).all() as QuotaRow[]
+/** One tool as /api/quotas describes it. */
+interface ApiQuota {
+  tool?: unknown
+  credentialStatus?: unknown
+  queriedAt?: unknown
+  lastSuccessAt?: unknown
+  tiers?: unknown
+}
+
+/**
+ * The hub's answer, flattened into the rows the rest of this file expects.
+ *
+ * Everything downstream was written against one row per tool-and-tier, and
+ * that is still the right shape to think in; only where it comes from has
+ * changed. Defensive about types because this arrives over a network from a
+ * machine that may be running a different version - a field that is not what
+ * it should be costs one row rather than the whole panel.
+ *
+ * `ts` prefers lastSuccessAt to queriedAt: the question the panel asks is how
+ * old the numbers are, and a poll that failed a second ago does not make a
+ * week-old number fresh.
+ */
+export function rowsFromApi(payload: unknown): QuotaRow[] {
+  const quotas = (payload as { quotas?: unknown })?.quotas
+  if (!Array.isArray(quotas)) return []
+
+  const rows: QuotaRow[] = []
+  for (const entry of quotas as ApiQuota[]) {
+    const tool = typeof entry?.tool === 'string' ? entry.tool : null
+    if (!tool || !Array.isArray(entry.tiers)) continue
+
+    const ts = typeof entry.lastSuccessAt === 'number'
+      ? entry.lastSuccessAt
+      : typeof entry.queriedAt === 'number' ? entry.queriedAt : 0
+
+    for (const tier of entry.tiers as Array<Record<string, unknown>>) {
+      if (typeof tier?.name !== 'string' || typeof tier?.utilization !== 'number') continue
+      const resets = typeof tier.resetsAt === 'string' ? Date.parse(tier.resetsAt) : NaN
+      rows.push({
+        tool,
+        tier: tier.name,
+        utilization: tier.utilization,
+        resetsAt: Number.isFinite(resets) ? resets : null,
+        credStatus: typeof entry.credentialStatus === 'string' ? entry.credentialStatus : 'valid',
+        ts,
+      })
+    }
+  }
+  return rows
 }
 
 /** Only the tiers this display shows, in window-length order, per tool. */

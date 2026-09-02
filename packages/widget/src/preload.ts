@@ -18,6 +18,7 @@ export interface WidgetAPI {
   onSetupStatus: (callback: (status: InstallStatus) => void) => void
   getSettings: () => Promise<WidgetSettings>
   saveSettings: (settings: WidgetSettings) => Promise<WidgetSettings>
+  saveHubPassword: (password: string) => Promise<boolean>
   getExchangeRate: () => Promise<ExchangeRateState>
 }
 
@@ -40,5 +41,6 @@ contextBridge.exposeInMainWorld('widget', {
   },
   getSettings: () => ipcRenderer.invoke('widget:get-settings'),
   saveSettings: (settings: WidgetSettings) => ipcRenderer.invoke('widget:save-settings', settings),
+  saveHubPassword: (password: string) => ipcRenderer.invoke('widget:save-hub-password', password),
   getExchangeRate: () => ipcRenderer.invoke('widget:get-exchange-rate'),
 } satisfies WidgetAPI)

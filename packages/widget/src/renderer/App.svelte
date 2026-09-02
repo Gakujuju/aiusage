@@ -27,6 +27,9 @@
     dailyHistory: DailyEntry[]
     sessionCountToday: number
     lastUpdated: number
+    /** Set when the hub could not be read; the panel says so instead. */
+    hubProblem?: 'unreachable' | 'unauthorized' | 'unexpected' | null
+    hubUrl?: string
     quota?: {
       tools: Array<{ tool: string; label: string; lines: Array<{ tier: string; kind: 'five_hour' | 'week'; utilization: number; resetsInMs: number | null }> }>
       credInvalid: string[]
@@ -225,6 +228,20 @@
         window is open. What used to be here is still below it, behind the
         toggles it always had.
       -->
+      <!--
+        Said, not left blank. A resident panel that goes empty reads as
+        broken; one that names the situation has told you what to do.
+      -->
+      {#if data?.hubProblem}
+        <div class="section">
+          <div class="hub-problem">
+            {data.hubProblem === 'unauthorized'
+              ? i18n.hubUnauthorized(data.hubUrl ?? '')
+              : i18n.hubUnreachable(data.hubUrl ?? '')}
+          </div>
+        </div>
+      {/if}
+
       {#if data?.quota}
         <div class="section">
           <div class="section-title">{i18n.quotaTitle}</div>
@@ -356,6 +373,12 @@
       --shadow: none;
     }
   }
+  .hub-problem {
+    font-size: 0.6875rem;
+    color: var(--danger);
+    line-height: 1.5;
+  }
+
   .panel {
     position: relative;
     background: var(--bg);

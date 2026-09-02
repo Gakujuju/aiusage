@@ -1,61 +1,94 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import Database from 'better-sqlite3'
-import { isWorthShowing, MAX_PER_TICK, nextBatch, notificationsSince } from '../src/notifications'
+import { eventsFromApi, isWorthShowing, MAX_PER_TICK, nextBatch, notificationsPath } from '../src/notifications'
+import type { NotificationRow } from '../src/notifications'
 
 /**
  * The two ways a notifier is worse than none: saying the same thing twice,
  * and saying everything at once on startup. Both are tested here.
+ *
+ * The rows arrive from the hub over HTTP now rather than from a local
+ * database, so these build the hub's answer and let the parser fold it.
  */
 
 const T = 1_700_000_000_000
-let db: Database.Database
-
-function createTestDb(): Database.Database {
-  const database = new Database(':memory:')
-  database.exec(`
-    CREATE TABLE notifications (
-      id TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      channel TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      subject_kind TEXT NOT NULL,
-      subject_id TEXT NOT NULL,
-      dedupe_key TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      state TEXT NOT NULL
-    )
-  `)
-  return database
-}
-
-let seq = 0
-/** One event, as serve writes it: a row per channel, keys differing by prefix. */
 const FINISHED = JSON.stringify({ status: 'waiting_for_user', lastEventKind: 'stop' })
 
+/** The two rows one event produces, as /api/notifications returns them. */
+let answer: { notifications: Array<Record<string, unknown>> }
+
+function reset(): void {
+  answer = { notifications: [] }
+}
+
 function event(overrides: Partial<{ at: number; subject: string; title: string; state: string; payload: string }> = {}): void {
-  const { at = T, subject = 's1', title = 'done', state = 'sent', payload = FINISHED } = overrides
-  const key = `session:${subject}:stop:${at}`
+  const { at = T, subject = 's1', title = 'done', payload = FINISHED } = overrides
   for (const channel of ['discord', 'webpush']) {
-    db.prepare(`
-      INSERT INTO notifications (id, created_at, channel, event_type, subject_kind, subject_id, dedupe_key, title, body, payload, state)
-      VALUES (@id, @at, @channel, 'session_status', 'agent_session', @subject, @key, @title, 'body', @payload, @state)
-    `).run({
-      id: `n${seq++}`,
-      at,
+    answer.notifications.push({
+      createdAt: at,
       channel,
-      subject,
-      key: channel === 'webpush' ? `webpush:${key}` : key,
+      eventType: 'session_status',
+      subjectKind: 'agent_session',
+      subjectId: subject,
       title,
+      body: 'body',
       payload,
-      state,
     })
   }
 }
 
+/** Stands in for the old notificationsSince(since). */
+function notificationsSince(since: number): NotificationRow[] {
+  return eventsFromApi({
+    notifications: answer.notifications.filter((row) => Number(row.createdAt) > since),
+  })
+}
+
+describe('asking the hub', () => {
+  beforeEach(reset)
+
+  it('asks only for what it has not seen, and only for what was sent', () => {
+    /*
+     * state=sent is where "a dropped row stays dropped" now lives. The hub
+     * decided not to deliver it; asking for it here would undo that
+     * decision on one machine, so this never asks.
+     */
+    const path = notificationsPath(T)
+
+    expect(path).toContain('since=1700000000000')
+    expect(path).toContain('state=sent')
+  })
+
+  it('folds the two channel rows back into one event', () => {
+    // dedupe_key cannot do this: the webpush key is the discord one with a
+    // prefix, so every row has a distinct key.
+    event()
+
+    expect(eventsFromApi(answer)).toHaveLength(1)
+  })
+
+  it('returns them oldest first, whatever order they arrived in', () => {
+    // The endpoint answers newest-first; the screen wants the other order.
+    event({ at: T + 100, subject: 'b', title: 'second' })
+    event({ at: T, subject: 'a', title: 'first' })
+
+    expect(eventsFromApi(answer).map((r) => r.title)).toEqual(['first', 'second'])
+  })
+
+  it('ignores anything it cannot read a time from', () => {
+    answer.notifications.push({ title: 'no timestamp', payload: FINISHED })
+
+    expect(eventsFromApi(answer)).toEqual([])
+  })
+
+  it('says nothing at all when the answer is not the shape it expects', () => {
+    for (const payload of [null, undefined, {}, { notifications: 'later' }]) {
+      expect(eventsFromApi(payload)).toEqual([])
+    }
+  })
+})
+
 describe('one event, one notification', () => {
-  beforeEach(() => { db = createTestDb(); seq = 0 })
+  beforeEach(reset)
 
   it('folds the channels back into the thing that happened', () => {
     // discord and webpush each get a row. dedupe_key does not fold them -
@@ -63,52 +96,45 @@ describe('one event, one notification', () => {
     // what the event was about and when.
     event()
 
-    expect(notificationsSince(db, T - 1)).toHaveLength(1)
+    expect(notificationsSince(T - 1)).toHaveLength(1)
   })
 
   it('keeps two events that happened at different moments', () => {
     event({ at: T })
     event({ at: T + 1000 })
 
-    expect(notificationsSince(db, T - 1)).toHaveLength(2)
+    expect(notificationsSince(T - 1)).toHaveLength(2)
   })
 
   it('keeps two sessions that finished in the same millisecond', () => {
     event({ at: T, subject: 's1' })
     event({ at: T, subject: 's2' })
 
-    expect(notificationsSince(db, T - 1)).toHaveLength(2)
-  })
-
-  it('leaves out what the hub decided not to send', () => {
-    // Showing a dropped row here would undo that decision on one machine.
-    event({ state: 'dropped' })
-
-    expect(notificationsSince(db, T - 1)).toEqual([])
+    expect(notificationsSince(T - 1)).toHaveLength(2)
   })
 
   it('carries the hub words through unchanged', () => {
     event({ title: '[aiusage] 🟢 作業完了' })
 
-    expect(notificationsSince(db, T - 1)[0].title).toBe('[aiusage] 🟢 作業完了')
+    expect(notificationsSince(T - 1)[0].title).toBe('[aiusage] 🟢 作業完了')
   })
 })
 
 describe('nothing already seen', () => {
-  beforeEach(() => { db = createTestDb(); seq = 0 })
+  beforeEach(reset)
 
   it('ignores everything up to and including the marker', () => {
     event({ at: T })
     event({ at: T + 5 })
 
-    expect(notificationsSince(db, T)).toHaveLength(1)
+    expect(notificationsSince(T)).toHaveLength(1)
   })
 
   it('moves the marker to the newest thing it found', () => {
     event({ at: T })
     event({ at: T + 5 })
 
-    expect(nextBatch(notificationsSince(db, T - 1), 0).seenAt).toBe(T + 5)
+    expect(nextBatch(notificationsSince(T - 1), 0).seenAt).toBe(T + 5)
   })
 
   it('leaves the marker alone when nothing is new', () => {
@@ -119,7 +145,7 @@ describe('nothing already seen', () => {
 })
 
 describe('three endings are worth interrupting for, and five are not', () => {
-  beforeEach(() => { db = createTestDb(); seq = 0 })
+  beforeEach(reset)
 
   /* The seven shapes that appear in the real table, plus the one that does not. */
   const REAL = {
@@ -184,7 +210,7 @@ describe('three endings are worth interrupting for, and five are not', () => {
     event({ at: T + 4, subject: 'd', payload: JSON.stringify(REAL.stopFailed), title: 'error' })
     event({ at: T + 5, subject: 'e', payload: JSON.stringify(REAL.down), title: 'down' })
 
-    const batch = nextBatch(notificationsSince(db, T), 0)
+    const batch = nextBatch(notificationsSince(T), 0)
 
     expect(batch.show.map((r) => r.title)).toEqual(['finished', 'error', 'down'])
   })
@@ -195,7 +221,7 @@ describe('three endings are worth interrupting for, and five are not', () => {
     event({ at: T + 1, subject: 'a', payload: JSON.stringify(REAL.permission) })
     event({ at: T + 2, subject: 'b', payload: JSON.stringify(REAL.sessionEnded) })
 
-    const batch = nextBatch(notificationsSince(db, T), 0)
+    const batch = nextBatch(notificationsSince(T), 0)
 
     expect(batch.show).toEqual([])
     expect(batch.seenAt).toBe(T + 2)
@@ -203,12 +229,12 @@ describe('three endings are worth interrupting for, and five are not', () => {
 })
 
 describe('a burst', () => {
-  beforeEach(() => { db = createTestDb(); seq = 0 })
+  beforeEach(reset)
 
   it('shows the newest few and counts the rest', () => {
     for (let i = 0; i < MAX_PER_TICK + 3; i++) event({ at: T + i, subject: `s${i}` })
 
-    const batch = nextBatch(notificationsSince(db, T - 1), 0)
+    const batch = nextBatch(notificationsSince(T - 1), 0)
 
     expect(batch.show).toHaveLength(MAX_PER_TICK)
     expect(batch.skipped).toBe(3)
@@ -220,8 +246,8 @@ describe('a burst', () => {
     // it stopped being news.
     for (let i = 0; i < MAX_PER_TICK + 3; i++) event({ at: T + i, subject: `s${i}` })
 
-    const batch = nextBatch(notificationsSince(db, T - 1), 0)
+    const batch = nextBatch(notificationsSince(T - 1), 0)
 
-    expect(notificationsSince(db, batch.seenAt)).toEqual([])
+    expect(notificationsSince(batch.seenAt)).toEqual([])
   })
 })

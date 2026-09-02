@@ -30,6 +30,17 @@
    * that starts using a third tool gets a third checkbox without an edit
    * here. Only three exist that can report a quota at all - see quota.ts.
    */
+  let hubPassword = ''
+  let hubSaved = false
+
+  async function saveHubPassword(): Promise<void> {
+    if (!hubPassword) return
+    hubSaved = await (window as any).widget.saveHubPassword(hubPassword)
+    /* Not kept in the field: it is stored, and leaving it on screen only
+       gives it somewhere else to be read from. */
+    hubPassword = ''
+  }
+
   export let knownTools: Array<{ id: string; label: string }> = []
   /**
    * Tiers in the data that the panel does not draw, and why.
@@ -208,6 +219,27 @@
         </button>
       {/each}
     </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">{i18n.hubSection}</div>
+    <label class="field">
+      <span class="field-label">{i18n.hubUrlLabel}</span>
+      <input
+        class="field-input"
+        type="text"
+        placeholder="http://127.0.0.1:3847"
+        bind:value={local.hubUrl}
+        on:change={save}
+      />
+    </label>
+    <label class="field">
+      <span class="field-label">{i18n.hubPasswordLabel}{hubSaved ? ` — ${i18n.hubPasswordSet}` : ''}</span>
+      <span class="field-row">
+        <input class="field-input" type="password" bind:value={hubPassword} />
+        <button class="option-btn" on:click={saveHubPassword}>{i18n.hubSave}</button>
+      </span>
+    </label>
   </div>
 
   <div class="section">
@@ -417,6 +449,34 @@
   .hidden-why {
     color: var(--text-muted);
     text-align: right;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .field-label {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+  }
+
+  .field-row {
+    display: flex;
+    gap: 0.375rem;
+  }
+
+  .field-input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.75rem;
   }
 
   .toggles {

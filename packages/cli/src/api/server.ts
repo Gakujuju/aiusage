@@ -1835,10 +1835,12 @@ export function createApiServer(db: Database.Database, options?: ApiServerOption
       if (url.pathname.startsWith('/api/notifications')) {
         try {
           if (url.pathname === '/api/notifications' && req.method === 'GET') {
+            const since = Number(url.searchParams.get('since'))
             json(res, listNotifications(db, {
               state: url.searchParams.get('state'),
               subjectKind: url.searchParams.get('subjectKind'),
               limit: Number(url.searchParams.get('limit')) || undefined,
+              since: Number.isFinite(since) && since > 0 ? since : undefined,
             }))
             return
           }

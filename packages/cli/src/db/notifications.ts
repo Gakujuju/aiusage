@@ -250,6 +250,15 @@ export interface ListNotificationsQuery {
   state?: string | null
   subjectKind?: string | null
   limit?: number
+  /**
+   * Only events written after this, in epoch milliseconds.
+   *
+   * For readers that poll and remember where they got to. Without it, asking
+   * for new rows means taking the newest N and filtering - which loses
+   * anything past N the moment more than N arrive between two polls. Rare,
+   * and silent, which is the combination worth removing.
+   */
+  since?: number | null
 }
 
 export function listNotifications(db: Database.Database, query: ListNotificationsQuery) {
@@ -257,6 +266,10 @@ export function listNotifications(db: Database.Database, query: ListNotification
   const params: Record<string, unknown> = {}
   if (query.state) { where.push('state = @state'); params.state = query.state }
   if (query.subjectKind) { where.push('subject_kind = @subjectKind'); params.subjectKind = query.subjectKind }
+  if (typeof query.since === 'number' && Number.isFinite(query.since)) {
+    where.push('created_at > @since')
+    params.since = query.since
+  }
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
   const limit = Math.min(Math.max(1, query.limit ?? 50), 500)
 
@@ -277,6 +290,17 @@ export function listNotifications(db: Database.Database, query: ListNotification
       eventType: row.event_type,
       subjectKind: row.subject_kind,
       subjectId: row.subject_id,
+      /*
+       * What the event was, as structured data.
+       *
+       * A reader deciding which notifications to act on has to read this
+       * rather than the title: titles are written in the user's language,
+       * and any decision made from one would break the first time somebody
+       * translated it. This carries the session status and event kind, or a
+       * threshold, or a timestamp - the webhook and the tokens are nowhere
+       * near it.
+       */
+      payload: row.payload,
       title: row.title,
       body: row.body,
       state: row.state,

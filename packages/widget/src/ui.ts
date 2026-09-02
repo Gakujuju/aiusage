@@ -106,10 +106,6 @@ function normalizeTrayBounds({
   }
 }
 
-export function getWidgetNativeBindingPath(baseDir: string): string {
-  return join(baseDir, 'native', 'better_sqlite3.node')
-}
-
 export function getTrayIconNativeImage(): { buffer: Buffer; scaleFactor?: number } {
   if (process.platform === 'darwin') {
     // 32x32 PNG at scaleFactor 2 = renders as 16x16 logical, sharp on Retina

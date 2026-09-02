@@ -2,20 +2,22 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, dialog, sc
 import { join } from 'node:path'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { createRequire } from 'node:module'
 import { EXCHANGE_RATE_SOURCE } from './currency'
 import type { ExchangeRateState } from './currency'
-import { queryWidgetData } from './data'
-import { buildTooltip, queryQuota, quotaView, severity, shownRows } from './quota'
-import type { Severity } from './quota'
+import { emptyWidgetData, fetchWidgetData } from './data'
+import { buildTooltip, quotaView, rowsFromApi, severity, shownRows } from './quota'
+import type { QuotaRow, Severity } from './quota'
+import { Hub, HubError } from './hub'
+import type { HubFailure } from './hub'
+import { resolveHubUrl } from './hub-url'
+import { HUB_PASSWORD_CREDENTIAL, resolveHubPassword, saveCredential } from './credentials'
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
-import { nextBatch, notificationsSince } from './notifications'
+import { eventsFromApi, nextBatch, notificationsPath } from './notifications'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
 import type { WidgetSettings } from './settings'
 import {
   getTrayIconNativeImage,
-  getWidgetNativeBindingPath,
   getWindowPosition,
   hasUsableTrayBounds,
   shouldHideWindowOnBlur,
@@ -23,10 +25,6 @@ import {
   shouldShowWindowOnLaunch,
 } from './ui'
 
-const nodeRequire = createRequire(__filename)
-const Database = nodeRequire('better-sqlite3') as typeof import('better-sqlite3')
-
-const DB_PATH = join(homedir(), '.aiusage', 'cache.db')
 const PORT_FILE = join(homedir(), '.aiusage', '.serve-port')
 const FX_CACHE_FILE = join(homedir(), '.aiusage', 'widget-exchange-rate.json')
 const DASHBOARD_PORT = 3847
@@ -75,7 +73,18 @@ const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 let tray: Tray | null = null
 let win: BrowserWindow | null = null
-let db: InstanceType<typeof Database> | null = null
+/**
+ * The one connection everything goes through, including on the hub itself.
+ *
+ * Reading the database directly is what used to require a native binding
+ * built for Electron's ABI, and rebuilding that took the CLI down on a
+ * machine that was collecting data. There is no binding now, and no second
+ * path for the hub to disagree with.
+ */
+let hub: Hub | null = null
+
+/** Why the last attempt failed, or null while things are working. */
+let hubProblem: HubFailure | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let positionRetryTimers: Array<ReturnType<typeof setTimeout>> = []
 /*
@@ -145,26 +154,28 @@ if (process.platform === 'darwin' && app.dock) {
 
 app.whenReady().then(async () => {
   settings = loadSettings(app.getLocale())
-  const dbExists = existsSync(DB_PATH)
 
-  if (dbExists) {
-    db = new Database(DB_PATH, {
-      readonly: true,
-      nativeBinding: getWidgetNativeBindingPath(__dirname),
-    })
-  }
+  const url = resolveHubUrl(settings.hubUrl)
+  hub = new Hub({ url, password: resolveHubPassword(url) })
 
   /*
-   * This is a quota display, and a spoke has no quota to display.
+   * The gate is now "can this reach a hub", not "does this machine collect
+   * quotas".
    *
-   * Only the hub runs the snapshot (a spoke has quotaSnapshotInterval: 0),
-   * so on any other machine quota_current is empty and always will be. An
-   * icon that sits in the tray showing nothing is worse than no icon: it
-   * occupies the place where a real reading would be, and the way you find
-   * out is by hovering over it and seeing blanks.
+   * It used to look for rows in the local database, which only the hub ever
+   * had - so the widget was a hub-only thing. Reading over HTTP makes it
+   * useful on every machine, and the only question left is whether the hub
+   * answers. One that does not is worth saying out loud rather than sitting
+   * in the tray with nothing behind it.
    */
-  if (!dbExists || quotaRowCount() === 0) {
-    say('no quota data in this database. This build shows quota windows, and only the hub collects them. Not starting.')
+  try {
+    await hub.get('/api/quotas')
+  } catch (error) {
+    const kind = error instanceof HubError ? error.kind : 'unexpected'
+    say(`cannot reach the hub at ${url} (${kind}). Not starting.`)
+    if (kind === 'unauthorized') {
+      say('open the widget settings and enter the hub dashboard password.')
+    }
     app.exit(0)
     return
   }
@@ -177,9 +188,7 @@ app.whenReady().then(async () => {
   startNotificationWatch()
   void refreshExchangeRate()
 
-  if (!dbExists) {
-    await autoSetup()
-  } else if (shouldShowWindowOnLaunch(app.isPackaged)) {
+  if (shouldShowWindowOnLaunch(app.isPackaged)) {
     showWindowWhenTrayReady()
   }
 })
@@ -189,7 +198,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  db?.close()
+  // Nothing to close: the only handle this holds is a cookie in memory.
 })
 
 /**
@@ -209,15 +218,6 @@ function say(message: string): void {
     appendFileSync(join(homedir(), '.aiusage', 'widget.log'), line)
   } catch {
     // If even that is not writable there is nowhere left to complain to.
-  }
-}
-
-/** Zero on any machine that does not collect quotas, including a broken read. */
-function quotaRowCount(): number {
-  try {
-    return shownRows(queryQuota(db!)).length
-  } catch {
-    return 0
   }
 }
 
@@ -387,11 +387,12 @@ function toggleWindow(): void {
   }
 }
 
-function pushDataUpdate(): void {
-  if (!win || !db) return
+async function pushDataUpdate(): Promise<void> {
+  if (!win || !hub) return
   try {
-    const data = buildPayload()
-    win.webContents.send('widget:data-update', data)
+    const data = await buildPayload()
+    hubProblem = null
+    win.webContents.send('widget:data-update', { ...data, hubProblem: null, hubUrl: hub.url })
   } catch (error) {
     /*
      * Said, not swallowed.
@@ -403,7 +404,16 @@ function pushDataUpdate(): void {
      * console. An empty panel is not a state this program has; it is a
      * failure wearing one.
      */
-    say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
+    /*
+     * The panel is told which situation this is rather than left blank.
+     * A resident display that goes empty looks broken; one that says the
+     * hub is unreachable has told you what to do about it.
+     */
+    hubProblem = error instanceof HubError ? error.kind : 'unexpected'
+    win.webContents.send('widget:data-update', { hubProblem, hubUrl: hub.url })
+    if (hubProblem !== 'unreachable') {
+      say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 }
 
@@ -414,19 +424,26 @@ function pushDataUpdate(): void {
  * disagree - an icon that has gone red beside a tooltip that has not caught
  * up would be worse than either alone.
  */
-function updateTray(): void {
-  if (!tray || !db) return
-  let rows
+async function updateTray(): Promise<void> {
+  if (!tray || !hub) return
+  let rows: QuotaRow[]
   try {
-    rows = queryQuota(db)
-  } catch {
+    rows = rowsFromApi(await hub.get('/api/quotas'))
+    hubProblem = null
+  } catch (error) {
     /*
-     * The database is there and the query failed, which is not the same as
-     * having nothing to show. Saying so is the point of a resident display:
-     * the one thing it must never do is keep presenting the last good
-     * numbers as though they were current.
+     * The hub did not answer, which is not the same as having nothing to
+     * show. Saying so is the point of a resident display: the one thing it
+     * must never do is keep the last good numbers on screen as though they
+     * were current.
+     *
+     * The icon is left alone. Its colour means how much allowance is left,
+     * and a second meaning would make the reason for a red icon ambiguous.
      */
-    tray.setToolTip('AIUsage — cannot read the database')
+    hubProblem = error instanceof HubError ? error.kind : 'unexpected'
+    tray.setToolTip(hubProblem === 'unauthorized'
+      ? `AIUsage — the hub rejected the password (${hub.url})`
+      : `AIUsage — cannot reach the hub (${hub.url})`)
     return
   }
 
@@ -448,8 +465,8 @@ function updateTray(): void {
  * delivered somewhere else; replaying them on startup would be a wall of
  * notifications about things the reader dealt with days ago.
  */
-function checkNotifications(): void {
-  if (!db || !settings.notifications) return
+async function checkNotifications(): Promise<void> {
+  if (!hub || !settings.notifications) return
 
   const now = Date.now()
   if (settings.notificationsSeenAt == null) {
@@ -461,8 +478,15 @@ function checkNotifications(): void {
 
   let batch
   try {
-    batch = nextBatch(notificationsSince(db, settings.notificationsSeenAt), settings.notificationsSeenAt)
+    const answer = await hub.get(notificationsPath(settings.notificationsSeenAt))
+    batch = nextBatch(eventsFromApi(answer), settings.notificationsSeenAt)
   } catch (error) {
+    /*
+     * Quiet on an unreachable hub, because the tray is already saying so and
+     * a line in the log every thirty seconds would bury everything else. A
+     * refusal is different: that needs a person, and it is worth a line.
+     */
+    if (error instanceof HubError && error.kind === 'unreachable') return
     say(`could not read notifications: ${error instanceof Error ? error.message : String(error)}`)
     return
   }
@@ -637,7 +661,7 @@ async function refreshExchangeRate(force = false): Promise<ExchangeRateState> {
 }
 
 async function installAiusageCli(): Promise<{ success: boolean; error?: string }> {
-  const { execFile } = nodeRequire('child_process') as typeof import('child_process')
+  const { execFile } = require('child_process') as typeof import('child_process')
 
   // Try npm first, fall back to pnpm, then yarn
   const managers = ['npm', 'pnpm', 'yarn']
@@ -665,7 +689,7 @@ async function installAiusageCli(): Promise<{ success: boolean; error?: string }
 }
 
 function checkCliInstalled(): Promise<boolean> {
-  const { execFile } = nodeRequire('child_process') as typeof import('child_process')
+  const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
     execFile('aiusage', ['--version'], { timeout: 10_000, shell: true }, (err) => {
       resolve(!err)
@@ -674,7 +698,7 @@ function checkCliInstalled(): Promise<boolean> {
 }
 
 function runFirstParse(): Promise<{ success: boolean; error?: string }> {
-  const { execFile } = nodeRequire('child_process') as typeof import('child_process')
+  const { execFile } = require('child_process') as typeof import('child_process')
   return new Promise((resolve) => {
     execFile('aiusage', ['parse'], { timeout: 120_000, shell: true }, (err, _stdout, stderr) => {
       if (err) {
@@ -709,14 +733,6 @@ async function autoSetup(): Promise<void> {
   await runFirstParse()
   // Parse failure is not fatal — user may have no logs yet
 
-  // Open database if it now exists
-  if (existsSync(DB_PATH)) {
-    db = new Database(DB_PATH, {
-      readonly: true,
-      nativeBinding: getWidgetNativeBindingPath(__dirname),
-    })
-  }
-
   notifyRenderer('setup:status', { phase: 'done' })
   pushDataUpdate()
 }
@@ -734,13 +750,49 @@ async function autoSetup(): Promise<void> {
  * The quota rides along rather than taking its own channel, so the panel
  * cannot show a fresh quota above stale tokens or the other way round.
  */
-function buildPayload(): ReturnType<typeof queryWidgetData> & { quota: ReturnType<typeof quotaView> } {
-  return { ...queryWidgetData(db!, settings.rangeDays), quota: quotaView(queryQuota(db!), Date.now()) }
+async function buildPayload() {
+  const quota = quotaView(rowsFromApi(await hub!.get('/api/quotas')), Date.now())
+
+  /*
+   * The usage figures are only fetched when something is going to draw them.
+   * They are three more requests, they are off by default, and the panel
+   * they feed is the part its owner said they do not look at.
+   */
+  const usage = settings.showUsage
+    ? await fetchWidgetData(hub!, settings.rangeDays)
+    : emptyWidgetData(settings.rangeDays)
+  return { ...usage, quota }
 }
 
-ipcMain.handle('widget:get-data', () => {
-  if (!db) return null
-  return buildPayload()
+/**
+ * Stores the hub's dashboard password and reconnects with it.
+ *
+ * Typed here rather than into a config file by hand: someone setting up a
+ * second machine should not have to be told which JSON key to add. It goes
+ * to the same place the CLI keeps its secrets - see credentials.ts, which
+ * also records what this widens.
+ */
+ipcMain.handle('widget:save-hub-password', async (_event, password: unknown) => {
+  if (typeof password !== 'string' || password.length === 0) return false
+  saveCredential(HUB_PASSWORD_CREDENTIAL, password)
+  hub = new Hub({ url: resolveHubUrl(settings.hubUrl), password })
+  await pushDataUpdate()
+  void updateTray()
+  return true
+})
+
+ipcMain.handle('widget:get-data', async () => {
+  if (!hub) return null
+  try {
+    return await buildPayload()
+  } catch (error) {
+    /*
+     * null rather than a throw: the renderer treats it as "nothing yet",
+     * which is what this is. The tray carries the explanation.
+     */
+    say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  }
 })
 
 ipcMain.handle('widget:open-dashboard', async () => {
@@ -842,7 +894,7 @@ function getDashboardPort(): number {
 
 async function isDashboardReachable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const http = nodeRequire('http') as typeof import('http')
+    const http = require('http') as typeof import('http')
     const req = http.get(`http://localhost:${port}`, (res) => {
       res.destroy()
       resolve(res.statusCode !== undefined && res.statusCode < 500)
@@ -853,7 +905,7 @@ async function isDashboardReachable(port: number): Promise<boolean> {
 }
 
 async function launchDashboard(): Promise<{ success: boolean; error?: string }> {
-  const { spawn } = nodeRequire('child_process') as typeof import('child_process')
+  const { spawn } = require('child_process') as typeof import('child_process')
 
   return new Promise((resolve) => {
     const child = spawn('aiusage', ['serve'], {

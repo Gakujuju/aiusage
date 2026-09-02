@@ -24,6 +24,13 @@ export interface Translations {
   quotaStale: (age: string) => string
   tierHidden: (tiers: string) => string
   notificationsToggle: string
+  hubSection: string
+  hubUrlLabel: string
+  hubPasswordLabel: string
+  hubPasswordSet: string
+  hubSave: string
+  hubUnreachable: (url: string) => string
+  hubUnauthorized: (url: string) => string
   zoomIn: string
   zoomOut: string
   zoomReset: string
@@ -95,6 +102,13 @@ const en: Translations = {
   quotaStale: (age: string) => `Last read ${age} ago — not updating`,
   tierHidden: (tiers: string) => `${tiers} is not shown: it reports no reset time`,
   notificationsToggle: 'Desktop notifications',
+  hubSection: 'Hub',
+  hubUrlLabel: 'Address',
+  hubPasswordLabel: 'Dashboard password',
+  hubPasswordSet: 'saved',
+  hubSave: 'Save',
+  hubUnreachable: (url: string) => `Cannot reach the hub at ${url}.`,
+  hubUnauthorized: (url: string) => `The hub at ${url} rejected the password.`,
   zoomIn: 'Larger',
   zoomOut: 'Smaller',
   zoomReset: 'Default size',
@@ -164,6 +178,13 @@ const ja: Translations = {
   quotaStale: (age: string) => `${age}前の値 — 更新が止まっています`,
   tierHidden: (tiers: string) => `${tiers} は表示していません（リセット時刻を返さないため）`,
   notificationsToggle: 'デスクトップ通知',
+  hubSection: 'ハブ',
+  hubUrlLabel: 'アドレス',
+  hubPasswordLabel: 'ダッシュボードのパスワード',
+  hubPasswordSet: '保存済み',
+  hubSave: '保存',
+  hubUnreachable: (url: string) => `ハブに繋がりません（${url}）。`,
+  hubUnauthorized: (url: string) => `ハブがパスワードを受け付けません（${url}）。`,
   zoomIn: '大きく',
   zoomOut: '小さく',
   zoomReset: '既定の大きさ',
@@ -233,6 +254,13 @@ const zh: Translations = {
   quotaStale: (age: string) => `${age} 前读取 — 已停止更新`,
   tierHidden: (tiers: string) => `${tiers} 未显示：它不返回重置时间`,
   notificationsToggle: '桌面通知',
+  hubSection: '中枢',
+  hubUrlLabel: '地址',
+  hubPasswordLabel: '仪表盘密码',
+  hubPasswordSet: '已保存',
+  hubSave: '保存',
+  hubUnreachable: (url: string) => `无法连接到中枢（${url}）。`,
+  hubUnauthorized: (url: string) => `中枢拒绝了密码（${url}）。`,
   zoomIn: '放大',
   zoomOut: '缩小',
   zoomReset: '默认大小',

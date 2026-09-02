@@ -1,40 +1,31 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import Database from 'better-sqlite3'
 import {
   buildTooltip,
   quotaView,
   formatRemaining,
-  queryQuota,
+  rowsFromApi,
   severity,
   shownRows,
   STALE_AFTER_MS,
   TOOLTIP_MAX,
 } from '../src/quota'
+import type { QuotaRow } from '../src/quota'
 import { SEVERITY_COLOURS, tintBitmap } from '../src/tray-icon'
 
 /**
  * A display nobody clicks on has one obligation: to be either right or
  * visibly not right. Every test here is about the second half of that.
+ *
+ * The rows used to come from a local database. They come from the hub over
+ * HTTP now - no native binding, no ABI to match - so these build them
+ * directly and the shape of the hub's answer is tested where it is parsed.
  */
 
 const NOW = 1_700_000_000_000
-let db: Database.Database
+let rows: QuotaRow[] = []
 
-function createTestDb(): Database.Database {
-  const database = new Database(':memory:')
-  database.exec(`
-    CREATE TABLE quota_current (
-      tool TEXT NOT NULL,
-      tier TEXT NOT NULL,
-      device_instance_id TEXT NOT NULL,
-      utilization REAL NOT NULL DEFAULT 0,
-      resets_at INTEGER,
-      ts INTEGER NOT NULL,
-      cred_status TEXT NOT NULL DEFAULT 'valid',
-      PRIMARY KEY (tool, tier, device_instance_id)
-    )
-  `)
-  return database
+function reset(): void {
+  rows = []
 }
 
 function insert(overrides: Partial<{
@@ -50,14 +41,73 @@ function insert(overrides: Partial<{
     cred_status: 'valid',
     ...overrides,
   }
-  db.prepare(`
-    INSERT INTO quota_current (tool, tier, device_instance_id, utilization, resets_at, ts, cred_status)
-    VALUES (@tool, @tier, 'unknown', @utilization, @resets_at, @ts, @cred_status)
-  `).run(row)
+  rows.push({
+    tool: row.tool,
+    tier: row.tier,
+    utilization: row.utilization,
+    resetsAt: row.resets_at,
+    credStatus: row.cred_status,
+    ts: row.ts,
+  })
 }
 
+/** Stands in for the old queryQuota(). */
+function queryQuota(): QuotaRow[] {
+  return rows
+}
+
+describe('the hub answer, flattened', () => {
+  it('turns one tool with two tiers into two rows', () => {
+    const parsed = rowsFromApi({
+      quotas: [{
+        tool: 'claude-code',
+        credentialStatus: 'valid',
+        lastSuccessAt: NOW,
+        tiers: [
+          { name: 'five_hour', utilization: 40, resetsAt: new Date(NOW + 3600_000).toISOString() },
+          { name: 'seven_day', utilization: 12, resetsAt: null },
+        ],
+      }],
+    })
+
+    expect(parsed).toHaveLength(2)
+    expect(parsed[0]).toEqual({
+      tool: 'claude-code', tier: 'five_hour', utilization: 40,
+      resetsAt: NOW + 3600_000, credStatus: 'valid', ts: NOW,
+    })
+    expect(parsed[1].resetsAt).toBeNull()
+  })
+
+  it('prefers when the numbers were last true to when they were last asked for', () => {
+    // A poll that failed a second ago does not make a week-old number fresh.
+    const [row] = rowsFromApi({
+      quotas: [{ tool: 'codex', lastSuccessAt: NOW - 86_400_000, queriedAt: NOW, tiers: [{ name: 'five_hour', utilization: 1 }] }],
+    })
+
+    expect(row.ts).toBe(NOW - 86_400_000)
+  })
+
+  it('drops a row it cannot read rather than the whole answer', () => {
+    // This arrives over a network from a machine that may be a version ahead.
+    const parsed = rowsFromApi({
+      quotas: [{
+        tool: 'claude-code',
+        tiers: [{ name: 'five_hour', utilization: 'lots' }, { name: 'seven_day', utilization: 3 }],
+      }],
+    })
+
+    expect(parsed.map((r) => r.tier)).toEqual(['seven_day'])
+  })
+
+  it('says nothing at all when the answer is not the shape it expects', () => {
+    for (const answer of [null, undefined, {}, { quotas: 'soon' }, []]) {
+      expect(rowsFromApi(answer)).toEqual([])
+    }
+  })
+})
+
 describe('what the tray reads', () => {
-  beforeEach(() => { db = createTestDb() })
+  beforeEach(reset)
 
   it('shows the tiers both tools actually report', () => {
     // Read off production: the two tools do not agree on what a week is
@@ -67,7 +117,7 @@ describe('what the tray reads', () => {
     insert({ tool: 'codex', tier: 'five_hour' })
     insert({ tool: 'codex', tier: 'weekly_limit' })
 
-    expect(shownRows(queryQuota(db))).toHaveLength(4)
+    expect(shownRows(queryQuota())).toHaveLength(4)
   })
 
   it('leaves out a tier that cannot say when it resets', () => {
@@ -75,12 +125,12 @@ describe('what the tray reads', () => {
     // for cannot be shown for it. Half a row is worse than no row.
     insert({ tier: 'nimbus_quill', resets_at: null })
 
-    expect(shownRows(queryQuota(db))).toEqual([])
+    expect(shownRows(queryQuota())).toEqual([])
   })
 })
 
 describe('what is left out, and why', () => {
-  beforeEach(() => { db = createTestDb() })
+  beforeEach(reset)
 
   it('names the tier rather than assuming which one it is', () => {
     // Derived from the data. Naming nimbus_quill here would mean the next
@@ -88,7 +138,7 @@ describe('what is left out, and why', () => {
     // the thing this exists to prevent.
     insert({ tier: 'nimbus_quill', resets_at: null })
 
-    expect(quotaView(queryQuota(db), NOW).hiddenTiers).toEqual([
+    expect(quotaView(queryQuota(), NOW).hiddenTiers).toEqual([
       { tier: 'nimbus_quill', reason: 'no-reset-time' },
     ])
   })
@@ -97,7 +147,7 @@ describe('what is left out, and why', () => {
     insert({ tier: 'lunar_cycle', resets_at: null })
     insert({ tier: 'fortnight', resets_at: NOW + 1000 })
 
-    const hidden = quotaView(queryQuota(db), NOW).hiddenTiers
+    const hidden = quotaView(queryQuota(), NOW).hiddenTiers
 
     expect(hidden.find((h) => h.tier === 'lunar_cycle')?.reason).toBe('no-reset-time')
     expect(hidden.find((h) => h.tier === 'fortnight')?.reason).toBe('unknown-tier')
@@ -106,25 +156,25 @@ describe('what is left out, and why', () => {
   it('has nothing to say when nothing was left out', () => {
     insert({ tier: 'five_hour' })
 
-    expect(quotaView(queryQuota(db), NOW).hiddenTiers).toEqual([])
+    expect(quotaView(queryQuota(), NOW).hiddenTiers).toEqual([])
   })
 })
 
 describe('the icon', () => {
-  beforeEach(() => { db = createTestDb() })
+  beforeEach(reset)
 
   it('is calm below the first threshold', () => {
     insert({ utilization: 69 })
-    expect(severity(queryQuota(db))).toBe('ok')
+    expect(severity(queryQuota())).toBe('ok')
   })
 
   it('warns at 70 and alarms at 90', () => {
     insert({ utilization: 70 })
-    expect(severity(queryQuota(db))).toBe('warn')
+    expect(severity(queryQuota())).toBe('warn')
 
-    db = createTestDb()
+    reset()
     insert({ utilization: 90 })
-    expect(severity(queryQuota(db))).toBe('danger')
+    expect(severity(queryQuota())).toBe('danger')
   })
 
   it('takes the worst of everything on the display', () => {
@@ -133,12 +183,12 @@ describe('the icon', () => {
     insert({ tool: 'claude-code', tier: 'five_hour', utilization: 2 })
     insert({ tool: 'codex', tier: 'weekly_limit', utilization: 95 })
 
-    expect(severity(queryQuota(db))).toBe('danger')
+    expect(severity(queryQuota())).toBe('danger')
   })
 
   it('ignores a tier it does not show', () => {
     insert({ tier: 'nimbus_quill', utilization: 99, resets_at: null })
-    expect(severity(queryQuota(db))).toBe('ok')
+    expect(severity(queryQuota())).toBe('ok')
   })
 
   it('does not turn red because the reading is old', () => {
@@ -146,7 +196,7 @@ describe('the icon', () => {
     // same as "nearly out" would make the two indistinguishable, and only
     // one of them means stop working.
     insert({ utilization: 10, ts: NOW - 10 * STALE_AFTER_MS })
-    expect(severity(queryQuota(db))).toBe('ok')
+    expect(severity(queryQuota())).toBe('ok')
   })
 
   it('keeps the shape and replaces only the colour', () => {
@@ -168,13 +218,13 @@ describe('the icon', () => {
 })
 
 describe('the tooltip', () => {
-  beforeEach(() => { db = createTestDb() })
+  beforeEach(reset)
 
   it('puts both tiers of a tool on its own line', () => {
     insert({ tool: 'claude-code', tier: 'five_hour', utilization: 25, resets_at: NOW + 2 * 3600_000 + 36 * 60_000 })
     insert({ tool: 'claude-code', tier: 'seven_day', utilization: 49, resets_at: NOW + 3 * 86_400_000 })
 
-    const [line] = buildTooltip(queryQuota(db), NOW).split('\n')
+    const [line] = buildTooltip(queryQuota(), NOW).split('\n')
 
     expect(line).toContain('Claude')
     expect(line).toContain('5h  25% (2h36m)')
@@ -186,19 +236,19 @@ describe('the tooltip', () => {
     // the last good number through it is lying by omission.
     insert({ cred_status: 'expired' })
 
-    expect(buildTooltip(queryQuota(db), NOW)).toContain('credentials not valid')
+    expect(buildTooltip(queryQuota(), NOW)).toContain('credentials not valid')
   })
 
   it('says when the reading has stopped moving', () => {
     insert({ ts: NOW - 40 * 60_000 })
 
-    expect(buildTooltip(queryQuota(db), NOW)).toContain('not updating')
+    expect(buildTooltip(queryQuota(), NOW)).toContain('not updating')
   })
 
   it('says nothing about age while the reading is fresh', () => {
     insert({ ts: NOW - STALE_AFTER_MS + 1000 })
 
-    expect(buildTooltip(queryQuota(db), NOW)).not.toContain('not updating')
+    expect(buildTooltip(queryQuota(), NOW)).not.toContain('not updating')
   })
 
   it('puts the warnings above the numbers', () => {
@@ -207,7 +257,7 @@ describe('the tooltip', () => {
     // has to be the part that survives.
     insert({ cred_status: 'expired', ts: NOW - 40 * 60_000 })
 
-    const lines = buildTooltip(queryQuota(db), NOW).split('\n')
+    const lines = buildTooltip(queryQuota(), NOW).split('\n')
 
     expect(lines[0]).toContain('credentials not valid')
     expect(lines[1]).toContain('not updating')
@@ -220,7 +270,7 @@ describe('the tooltip', () => {
       insert({ tool, tier: tool === 'codex' ? 'weekly_limit' : 'seven_day', utilization: 100, resets_at: NOW + 6 * 86_400_000 })
     }
 
-    expect(buildTooltip(queryQuota(db), NOW).length).toBeLessThanOrEqual(TOOLTIP_MAX)
+    expect(buildTooltip(queryQuota(), NOW).length).toBeLessThanOrEqual(TOOLTIP_MAX)
   })
 
   it('leaves out a countdown it cannot compute', () => {
@@ -228,7 +278,7 @@ describe('the tooltip', () => {
     // guess wearing the clothes of a measurement.
     insert({ tier: 'weekly', resets_at: null })
 
-    const text = buildTooltip(queryQuota(db), NOW)
+    const text = buildTooltip(queryQuota(), NOW)
 
     expect(text).toContain('週')
     expect(text).not.toContain('(')
