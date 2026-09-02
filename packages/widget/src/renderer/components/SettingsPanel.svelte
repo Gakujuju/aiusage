@@ -14,6 +14,13 @@
   export let settings: WidgetSettings
   export let exchangeRate: ExchangeRateState | null = null
   /**
+   * Set when the hub answered 401, which is why this panel is on screen.
+   *
+   * The startup path used to exit here and tell the reader to open these
+   * settings, which are inside the window it had just declined to open.
+   */
+  export let needPassword = false
+  /**
    * The tools present in the data, not a fixed list.
    *
    * Whatever quota_current holds is what can be switched off, so a machine
@@ -225,8 +232,14 @@
     </label>
     <label class="field">
       <span class="field-label">{i18n.hubPasswordLabel}{hubSaved ? ` — ${i18n.hubPasswordSet}` : ''}</span>
+      {#if needPassword && !hubSaved}
+        <!-- Why this panel opened on its own. Without it the panel looks
+             like the user pressed the gear by accident. -->
+        <span class="field-note">{i18n.hubPasswordNeeded}</span>
+      {/if}
       <span class="field-row">
-        <input class="field-input" type="password" bind:value={hubPassword} />
+        <!-- svelte-ignore a11y-autofocus -->
+        <input class="field-input" type="password" autofocus={needPassword} bind:value={hubPassword} />
         <button class="option-btn" on:click={saveHubPassword}>{i18n.hubSave}</button>
       </span>
     </label>
@@ -450,6 +463,12 @@
   .field-label {
     font-size: 0.6875rem;
     color: var(--text-muted);
+  }
+
+  .field-note {
+    font-size: 0.6875rem;
+    color: var(--danger);
+    line-height: 1.5;
   }
 
   .field-row {

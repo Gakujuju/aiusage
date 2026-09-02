@@ -170,16 +170,33 @@ app.whenReady().then(async () => {
    * answers. One that does not is worth saying out loud rather than sitting
    * in the tray with nothing behind it.
    */
+  let needsPassword = false
   try {
     await hub.get('/api/quotas')
   } catch (error) {
     const kind = error instanceof HubError ? error.kind : 'unexpected'
-    say(`cannot reach the hub at ${url} (${kind}). Not starting.`)
     if (kind === 'unauthorized') {
-      say('open the widget settings and enter the hub dashboard password.')
+      /*
+       * Started anyway, on purpose.
+       *
+       * This used to exit with a message saying to open the widget settings
+       * and enter the password - and the widget settings are inside the
+       * window this was about to refuse to open. The message was true and
+       * there was no way to act on it.
+       *
+       * A 401 is the one failure here that is ours and fixable from this
+       * side, so the thing that fixes it has to stay open. Unreachable is
+       * different: nothing typed into this window changes whether another
+       * machine is answering, so that one still declines to start.
+       */
+      needsPassword = true
+      hubProblem = 'unauthorized'
+      say(`the hub at ${url} refused the password - starting so it can be entered.`)
+    } else {
+      say(`cannot reach the hub at ${url} (${kind}). Not starting.`)
+      app.exit(0)
+      return
     }
-    app.exit(0)
-    return
   }
 
   applyTheme(settings.theme)
@@ -190,7 +207,9 @@ app.whenReady().then(async () => {
   startNotificationWatch()
   void refreshExchangeRate()
 
-  if (shouldShowWindowOnLaunch(app.isPackaged)) {
+  // Shown regardless of the usual rule when a password is what is missing:
+  // a tray icon alone gives nowhere to type it.
+  if (needsPassword || shouldShowWindowOnLaunch(app.isPackaged)) {
     showWindowWhenTrayReady()
   }
 })
@@ -400,12 +419,26 @@ function sendUpdate(update: WidgetUpdate): void {
   win?.webContents.send(WIDGET_UPDATE_CHANNEL, update)
 }
 
-async function pushDataUpdate(): Promise<void> {
-  if (!win || !hub) return
+/**
+ * One update, whatever happened, and never a throw.
+ *
+ * There used to be two of these: this shape, built inside pushDataUpdate,
+ * and the get-data handler, which returned null when anything failed. So
+ * a widget that started with a bad password put a complete "the hub
+ * refused us" update on the channel, while the panel's own first call -
+ * the one that runs before any interval has elapsed - got null and drew
+ * "nothing yet". The window said the wrong thing for a whole refresh
+ * interval, and the settings panel that keys off hubProblem never opened.
+ *
+ * Same shape as the last two of these: a second path that reports failure
+ * its own way. One function now, and both callers take what it returns.
+ */
+async function currentUpdate(): Promise<WidgetUpdate | null> {
+  if (!hub) return null
   try {
     const data = await buildPayload()
     hubProblem = null
-    sendUpdate({ ...data, hubProblem: null, hubUrl: hub.url })
+    return { ...data, hubProblem: null, hubUrl: hub.url }
   } catch (error) {
     /*
      * Said, not swallowed.
@@ -417,12 +450,10 @@ async function pushDataUpdate(): Promise<void> {
      * console. An empty panel is not a state this program has; it is a
      * failure wearing one.
      */
-    /*
-     * The panel is told which situation this is rather than left blank.
-     * A resident display that goes empty looks broken; one that says the
-     * hub is unreachable has told you what to do about it.
-     */
     hubProblem = error instanceof HubError ? error.kind : 'unexpected'
+    if (hubProblem !== 'unreachable') {
+      say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
+    }
     /*
      * A complete shape, with the quota deliberately absent.
      *
@@ -433,16 +464,19 @@ async function pushDataUpdate(): Promise<void> {
      * read stayed on screen with a stale timestamp beside them. Which is
      * precisely the thing this message exists to prevent.
      */
-    sendUpdate({
+    return {
       ...emptyWidgetData(settings.rangeDays),
       quota: null,
       hubProblem,
       hubUrl: hub.url,
-    })
-    if (hubProblem !== 'unreachable') {
-      say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
+}
+
+async function pushDataUpdate(): Promise<void> {
+  if (!win) return
+  const update = await currentUpdate()
+  if (update) sendUpdate(update)
 }
 
 /**
@@ -809,19 +843,7 @@ ipcMain.handle('widget:save-hub-password', async (_event, password: unknown) => 
   return true
 })
 
-ipcMain.handle('widget:get-data', async () => {
-  if (!hub) return null
-  try {
-    return await buildPayload()
-  } catch (error) {
-    /*
-     * null rather than a throw: the renderer treats it as "nothing yet",
-     * which is what this is. The tray carries the explanation.
-     */
-    say(`could not build the panel data: ${error instanceof Error ? error.message : String(error)}`)
-    return null
-  }
-})
+ipcMain.handle('widget:get-data', () => currentUpdate())
 
 ipcMain.handle('widget:open-dashboard', async () => {
   await openDashboardAction()

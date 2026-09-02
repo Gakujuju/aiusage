@@ -451,3 +451,93 @@ node packages\cli\dist\index.js clear-hub
 ```
 
 ハブに既に届いたレコードは消えない（D25: 削除は伝播しない）。
+
+## 2026-09-02 職場PC：実際に通った順（ウィジェットまで）
+
+上の 1〜10 は spoke を立てるところまでである。
+以下は**その続きを、職場PCで実際に通った順で**書いたもの。
+**通らなかったものも残す。** 回り道の理由が次の端末でも同じだから。
+
+所要 約半日。うち大半は下の「BOM」である。
+
+### 11-1. 更新スクリプトは PATH に無い
+
+`~/.aiusage/aiusage-update.cmd` に置かれる。
+**PowerShell は現在のフォルダも PATH に入れない**ので、名前だけでは動かない。
+
+```powershell
+& "$HOME\.aiusage\aiusage-update.cmd"
+```
+
+`-WithWeb` を付けるとダッシュボードも作り直す。
+
+### 11-2. `aiusage` コマンドも PATH に無いことがある
+
+pnpm のグローバル bin が PATH に入っていない端末がある。その場合は直接:
+
+```powershell
+node packages/cli/dist/index.js widget
+```
+
+`aiusage widget` が動くなら、`started from this checkout` と出るのが正しい。
+`started from PATH` なら、そのチェックアウトのビルドではないものが動いている。
+
+### 11-3. Electron の有無を root の `node_modules` で判定しないこと
+
+pnpm はそこに置かない。**「入っていない」と誤判定して回り道をした。実際は入っていた。**
+ウィジェットの package.json を起点に訊くこと:
+
+```powershell
+node -e "const {createRequire}=require('module'); console.log(createRequire('./packages/widget/package.json')('electron'))"
+```
+
+パスが出れば入っている。
+
+### 11-4. config.json を PowerShell で書き換えないこと ★
+
+**これが本日の最大の時間損失である。**
+
+`Set-Content -Encoding UTF8` は **BOM を付ける。**
+BOM 付きの config.json は `JSON.parse` が落ち、
+`configuredHubUrl()` がそれを握り潰して既定値に落ちる。
+結果、**エラーは1つも出ないまま、接続先だけが別物になる**（STATE.md の分類 (c)）。
+
+どうしても書き換えるなら:
+
+```powershell
+[System.IO.File]::WriteAllText($p, $t)
+```
+
+これは BOM を付けない。あるいは node で書くこと。
+
+先に確認する方法:
+
+```powershell
+(Get-Content ~/.aiusage/config.json -Encoding Byte -TotalCount 3) -join ','
+```
+
+`239,187,191` が出たら BOM が付いている。
+
+### 11-5. パスワードを入れる
+
+ウィジェットの歯車 → 「ハブ」→「ダッシュボードのパスワード」。
+ハブの `config.credentials.dashboardPassword` と同じもの。
+
+**2026-09-02 以前の版では、ここに入口が無かった**:
+401 のときウィジェットは起動を拒否し、
+「設定を開いてパスワードを入れてください」と言って終了していた。
+**その設定は起動しないと開けない。** 現在は 401 では起動し、
+設定パネルを開いた状態で出る（`unreachable` は従来どおり終了する）。
+
+保存すると**再起動なしで**数字が出る。
+
+### 11-6. 二重起動の見分け方
+
+Electron は1アプリで複数プロセスになる。プロセス数では数えられない。
+
+```powershell
+Get-Process electron | Select-Object Id,StartTime,Path
+```
+
+**StartTime の組**で数えること。組が2つあれば二重起動である。
+（pid ファイルが消えると二重起動を防げない。STATE.md に未修正として記載）

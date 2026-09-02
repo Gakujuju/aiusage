@@ -28,6 +28,8 @@ export interface Translations {
   hubUrlLabel: string
   hubPasswordLabel: string
   hubPasswordSet: string
+  /** Shown in the settings panel that opens by itself after a 401. */
+  hubPasswordNeeded: string
   hubSave: string
   /* The widget itself is broken, which is not the same as the hub being down. */
   widgetNoBridge: string
@@ -110,6 +112,7 @@ const en: Translations = {
   hubUrlLabel: 'Address',
   hubPasswordLabel: 'Dashboard password',
   hubPasswordSet: 'saved',
+  hubPasswordNeeded: 'The hub needs its dashboard password before this can show anything.',
   hubSave: 'Save',
   widgetNoBridge: 'The widget failed to load. Quit it from the tray and start it again.',
   widgetStartFailed: (reason: string) => `The widget failed to start: ${reason}`,
@@ -189,6 +192,7 @@ const ja: Translations = {
   hubUrlLabel: 'アドレス',
   hubPasswordLabel: 'ダッシュボードのパスワード',
   hubPasswordSet: '保存済み',
+  hubPasswordNeeded: '数字を出すには、ハブのダッシュボードのパスワードが要ります。',
   hubSave: '保存',
   widgetNoBridge: 'ウィジェットの読み込みに失敗しました。トレイから終了して起動し直してください。',
   widgetStartFailed: (reason: string) => `ウィジェットの起動に失敗しました：${reason}`,
@@ -268,6 +272,7 @@ const zh: Translations = {
   hubUrlLabel: '地址',
   hubPasswordLabel: '仪表盘密码',
   hubPasswordSet: '已保存',
+  hubPasswordNeeded: '需要输入枢纽的仪表盘密码后才能显示数据。',
   hubSave: '保存',
   widgetNoBridge: '挂件加载失败。请从托盘退出后重新启动。',
   widgetStartFailed: (reason: string) => `挂件启动失败：${reason}`,

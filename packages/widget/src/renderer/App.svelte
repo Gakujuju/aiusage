@@ -61,6 +61,20 @@
    */
   let noDataYet = false
 
+  /**
+   * Opened once, on the first 401, and not again.
+   *
+   * The window is the only place the password can be typed, so a hub that
+   * refuses it has to bring the panel forward - but only the first time.
+   * Reopening it every refresh would take the panel away from someone who
+   * had closed it and gone back to looking at the numbers.
+   */
+  let passwordPromptShown = false
+  $: if (data?.hubProblem === 'unauthorized' && !passwordPromptShown) {
+    passwordPromptShown = true
+    showSettings = true
+  }
+
   let installPhase: string | null = null
   let installError: string | null = null
   let isSetup = false
@@ -234,6 +248,7 @@
     <SettingsPanel
       {settings}
       {exchangeRate}
+      needPassword={data?.hubProblem === 'unauthorized'}
       knownTools={(data?.quota?.tools ?? []).map((t) => ({ id: t.tool, label: t.label }))}
       hiddenTiers={data?.quota?.hiddenTiers ?? []}
       on:save={saveSettings}
