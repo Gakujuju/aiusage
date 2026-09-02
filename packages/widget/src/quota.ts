@@ -46,10 +46,22 @@ export const TIER_LABELS: Record<string, string> = {
 /** The order they appear in a line, shortest window first. */
 const TIER_ORDER = ['five_hour', 'seven_day', 'weekly_limit', 'weekly']
 
-/** How each tool is written when there is room for six characters. */
+/*
+ * Names for the three tools that can report a quota at all.
+ *
+ * Not a list of what to show - the rows come from whatever is in the table,
+ * so a machine that starts using copilot grows a third line by itself. This
+ * only decides what to call them; anything unrecognised prints its own name.
+ *
+ * Three, and not because of this file: claude-code, codex and copilot are
+ * the three the CLI knows how to ask. Gemini and the web ChatGPT publish
+ * nothing to read, so adding them is a collector to write, not a row to
+ * switch on.
+ */
 export const TOOL_LABELS: Record<string, string> = {
   'claude-code': 'Claude',
   codex: 'Codex',
+  copilot: 'Copilot',
 }
 
 /**

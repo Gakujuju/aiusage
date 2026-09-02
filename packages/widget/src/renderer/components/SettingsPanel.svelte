@@ -10,6 +10,9 @@
     refreshIntervalSec: number
     rangeDays: number
     notifications: boolean
+    zoomFactor: number
+    quotaDetail: 'meter' | 'percent' | 'full'
+    hiddenTools: string[]
     showUsage: boolean
     showCost: boolean
     showHeatmap: boolean
@@ -20,6 +23,28 @@
 
   export let settings: WidgetSettings
   export let exchangeRate: ExchangeRateState | null = null
+  /**
+   * The tools present in the data, not a fixed list.
+   *
+   * Whatever quota_current holds is what can be switched off, so a machine
+   * that starts using a third tool gets a third checkbox without an edit
+   * here. Only three exist that can report a quota at all - see quota.ts.
+   */
+  export let knownTools: Array<{ id: string; label: string }> = []
+
+  const DETAILS: Array<{ value: 'meter' | 'percent' | 'full'; key: 'detailMeter' | 'detailPercent' | 'detailFull' }> = [
+    { value: 'meter', key: 'detailMeter' },
+    { value: 'percent', key: 'detailPercent' },
+    { value: 'full', key: 'detailFull' },
+  ]
+
+  function toggleTool(id: string): void {
+    const hidden = local.hiddenTools.includes(id)
+      ? local.hiddenTools.filter((t) => t !== id)
+      : [...local.hiddenTools, id]
+    local = { ...local, hiddenTools: hidden }
+    save()
+  }
 
   const dispatch = createEventDispatcher<{ save: WidgetSettings; close: void }>()
 
@@ -177,6 +202,35 @@
   </div>
 
   <div class="section">
+    <div class="section-label">{i18n.detail}</div>
+    <div class="button-group">
+      {#each DETAILS as option (option.value)}
+        <button
+          class="option-btn"
+          class:active={local.quotaDetail === option.value}
+          on:click={() => { local = { ...local, quotaDetail: option.value }; save() }}
+        >{i18n[option.key]}</button>
+      {/each}
+    </div>
+  </div>
+
+  {#if knownTools.length > 0}
+    <div class="section">
+      <div class="section-label">{i18n.tools}</div>
+      <div class="toggles">
+        {#each knownTools as tool (tool.id)}
+          <label class="toggle-row">
+            <span>{tool.label}</span>
+            <button class="toggle" class:on={!local.hiddenTools.includes(tool.id)} on:click={() => toggleTool(tool.id)}>
+              <span class="toggle-thumb"></span>
+            </button>
+          </label>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <div class="section">
     <div class="section-label">{i18n.display}</div>
     <div class="toggles">
       <label class="toggle-row">
@@ -215,6 +269,13 @@
 
 <style>
   .settings {
+    /*
+     * Its own floor, because the panel around it is now max-content.
+     * The controls in here are flex rows with no intrinsic width, so
+     * without this they collapse to the panel minimum and the segmented
+     * buttons end up two characters wide.
+     */
+    min-width: 340px;
     padding: 0 14px 14px;
   }
   .settings-header {

@@ -12,7 +12,7 @@ export interface WidgetAPI {
   getData: () => Promise<WidgetData>
   openDashboard: () => Promise<void>
   hideWindow: () => void
-  resizeWindow: (height: number) => void
+  resizeWindow: (size: { width: number; height: number }) => void
   onDataUpdate: (callback: (data: WidgetData) => void) => void
   onInstallStatus: (callback: (status: InstallStatus) => void) => void
   onSetupStatus: (callback: (status: InstallStatus) => void) => void
@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('widget', {
   getData: () => ipcRenderer.invoke('widget:get-data'),
   openDashboard: () => ipcRenderer.invoke('widget:open-dashboard'),
   hideWindow: () => ipcRenderer.send('widget:hide-window'),
-  resizeWindow: (height: number) => ipcRenderer.send('widget:resize-window', height),
+  resizeWindow: (size: { width: number; height: number }) => ipcRenderer.send('widget:resize-window', size),
   onDataUpdate: (callback: (data: WidgetData) => void) => {
     ipcRenderer.removeAllListeners('widget:data-update')
     ipcRenderer.on('widget:data-update', (_event, data) => callback(data))

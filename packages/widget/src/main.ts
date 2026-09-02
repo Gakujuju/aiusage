@@ -54,6 +54,23 @@ const DEFAULT_WINDOW_HEIGHT = 320
  * get under, which is most of why there was blank space below the text.
  */
 const MIN_WINDOW_HEIGHT = 120
+
+/*
+ * How far the whole panel can be scaled, and in what steps.
+ *
+ * Zoom rather than a draggable edge. The window already sizes itself to its
+ * contents, so widening it by hand would only add the margin that was just
+ * taken out, and the next content change would undo it. Scaling moves the
+ * text, the bars and the window together and leaves that behaviour intact.
+ *
+ * 0.7 to 1.5 was chosen by looking at both ends: below 0.7 the percentages
+ * stop being readable at arm's length, and above 1.5 the countdown wraps
+ * onto a second line, which is the one thing a glanceable panel cannot do.
+ * 0.1 steps, because 0.05 needs two presses to see any difference.
+ */
+const ZOOM_MIN = 0.7
+const ZOOM_MAX = 1.5
+const ZOOM_STEP = 0.1
 const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 let tray: Tray | null = null
@@ -204,6 +221,36 @@ function quotaRowCount(): number {
   }
 }
 
+/**
+ * Scales the panel, and the window with it.
+ *
+ * The renderer reports its height in CSS pixels, which do not change when
+ * the zoom does, so the multiplication has to happen on this side - see the
+ * resize handler. The width is scaled here because nothing else would.
+ */
+function applyZoom(): void {
+  if (!win) return
+  const zoom = clampZoom(settings.zoomFactor)
+  win.webContents.setZoomFactor(zoom)
+  if (lastPanelSize) resizeToPanel(lastPanelSize)
+}
+
+function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100))
+}
+
+/**
+ * @param delta Steps to move by; 0 means back to 1.
+ */
+function changeZoom(delta: number): void {
+  const next = delta === 0 ? 1 : clampZoom(settings.zoomFactor + delta * ZOOM_STEP)
+  if (next === settings.zoomFactor) return
+  settings = { ...settings, zoomFactor: next }
+  saveSettings(settings)
+  applyZoom()
+}
+
 function applyTheme(theme: WidgetSettings['theme']): void {
   nativeTheme.themeSource = theme
 }
@@ -236,6 +283,10 @@ function createTray(): void {
       { label: i18n.openDashboard, click: () => openDashboardAction() },
       { label: i18n.refresh, click: () => pushDataUpdate() },
       { type: 'separator' },
+      { label: i18n.zoomIn, accelerator: 'CommandOrControl+Plus', click: () => changeZoom(1) },
+      { label: i18n.zoomOut, accelerator: 'CommandOrControl+-', click: () => changeZoom(-1) },
+      { label: i18n.zoomReset, accelerator: 'CommandOrControl+0', click: () => changeZoom(0) },
+      { type: 'separator' },
       { label: i18n.quit, click: () => { app.exit(0) } },
     ])
     tray!.popUpContextMenu(menu)
@@ -261,6 +312,12 @@ function createWindow(): void {
 
   const rendererPath = join(__dirname, 'renderer', 'index.html')
   win.loadFile(rendererPath)
+
+  /*
+   * After the load, not before: a zoom factor set on an empty webContents is
+   * discarded when the document arrives.
+   */
+  win.webContents.on('did-finish-load', () => applyZoom())
 
   if (shouldHideWindowOnBlur(app.isPackaged)) {
     win.on('blur', () => win?.hide())
@@ -710,35 +767,68 @@ ipcMain.on('widget:hide-window', () => {
   win?.hide()
 })
 
-ipcMain.on('widget:resize-window', (_event, height: number) => {
-  if (!win || !Number.isFinite(height)) return
+/**
+ * The last height the panel reported, in CSS pixels.
+ *
+ * Kept so that a zoom change can be re-applied to the same measurement
+ * without waiting for the renderer to notice and measure again - otherwise
+ * the window keeps its old size until something else in the panel moves.
+ */
+let lastPanelSize: { width: number; height: number } | null = null
 
+ipcMain.on('widget:resize-window', (_event, size: { width: number; height: number }) => {
+  if (!win || !size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) return
+  lastPanelSize = size
+  resizeToPanel(size)
+})
+
+/**
+ * Fits the window to the panel, keeping the bottom-right corner still.
+ *
+ * The panel measures itself in CSS pixels, which do not change when the zoom
+ * does; the window is in device pixels, which do. So both dimensions are
+ * multiplied here, and this is the only place that knows about it.
+ *
+ * The corner matters because this window lives against the bottom-right of
+ * the screen. Growing it from a fixed top-left would push it off the edge,
+ * and re-centring it on the tray - which is right when it first appears -
+ * makes it jump sideways every time the contents change.
+ */
+function resizeToPanel(css: { width: number; height: number }): void {
+  if (!win) return
+
+  const zoom = clampZoom(settings.zoomFactor)
   const bounds = win.getBounds()
   const displayBounds = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea
+
+  const nextWidth = Math.round(css.width * zoom)
   const nextHeight = Math.min(
-    Math.max(Math.ceil(height), MIN_WINDOW_HEIGHT),
-    displayBounds.height
+    Math.max(Math.ceil(css.height * zoom), Math.round(MIN_WINDOW_HEIGHT * zoom)),
+    displayBounds.height,
   )
 
-  if (Math.abs(bounds.height - nextHeight) < 2) return
+  if (Math.abs(bounds.height - nextHeight) < 2 && Math.abs(bounds.width - nextWidth) < 2) return
+
+  const right = bounds.x + bounds.width
+  const bottom = bounds.y + bounds.height
+  const x = Math.max(displayBounds.x, Math.min(right - nextWidth, displayBounds.x + displayBounds.width - nextWidth))
+  const y = Math.max(displayBounds.y, Math.min(bottom - nextHeight, displayBounds.y + displayBounds.height - nextHeight))
 
   /*
    * Made resizable for the length of one call, because it is not.
    *
    * On Windows a window created with resizable: false refuses setSize as
-   * well as the drag handles, silently. That is why this whole path has
-   * never done anything: the renderer measured, the message arrived, the
+   * well as the drag handles, silently. That is why this whole path did
+   * nothing for so long: the renderer measured, the message arrived, the
    * height was computed, and the window ignored it.
    *
    * The flag goes straight back, so the user still cannot drag an edge.
    */
   win.setResizable(true)
-  win.setSize(WINDOW_WIDTH, nextHeight, false)
+  win.setBounds({ x, y, width: nextWidth, height: nextHeight }, false)
   win.setResizable(false)
-  if (win.isVisible()) {
-    positionWindowNearTray()
-  }
-})
+}
+
 
 function getDashboardPort(): number {
   try {

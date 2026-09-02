@@ -146,7 +146,16 @@ collects quotas — elsewhere it writes one line to `~/.aiusage/widget.log`
 saying so and exits, rather than sitting in the tray showing nothing.
 
 Clicking the icon opens a panel with the same numbers, plus a bar for each
-window. It follows the system language (English, 日本語, 中文). Tokens, cost
+window. Right-click the tray icon (or Ctrl +/-/0) to scale it between 0.7
+and 1.5; the panel sizes itself to its contents, so the settings choose what
+is in it rather than how big it is. Under Detail you can drop to percentages
+only or to bars alone, and each tool can be switched off.
+
+**The three tools that can report a quota are Claude Code, Codex and
+Copilot.** Rows appear for whichever of them this machine has data for -
+start using a third and a third row appears by itself. Gemini and the web
+ChatGPT publish nothing to read, so they are not a setting to switch on;
+they would be a collector to write. It follows the system language (English, 日本語, 中文). Tokens, cost
 and the trend chart are still there behind the "Tokens and cost" toggle in
 settings, off by default.
 

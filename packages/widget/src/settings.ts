@@ -23,6 +23,25 @@ export interface WidgetSettings {
    * screen, not about the event.
    */
   notificationsSeenAt: number | null
+  /**
+   * How big everything is drawn, as a webContents zoom factor.
+   *
+   * Zoom rather than a resizable window, because the window already follows
+   * its contents: dragging an edge would only add margin, and the next
+   * update would take it back. This scales the text, the bars and the window
+   * together, and the existing follow-the-contents behaviour keeps working.
+   */
+  zoomFactor: number
+  /**
+   * How much of each quota line to draw.
+   *
+   * One choice of three rather than a switch per element. Per-element
+   * switches would be 2^n combinations of which three are worth having, and
+   * a setting nobody uses is one nobody can safely remove later.
+   */
+  quotaDetail: 'meter' | 'percent' | 'full'
+  /** Tools the user has switched off, by their id in quota_current. */
+  hiddenTools: string[]
   /** The token/cost sections this widget used to be made of. */
   showUsage: boolean
   showCost: boolean
@@ -40,6 +59,9 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   rangeDays: 30,
   notifications: true,
   notificationsSeenAt: null,
+  zoomFactor: 1,
+  quotaDetail: 'full',
+  hiddenTools: [],
   /*
    * Off, because the window's subject changed.
    *

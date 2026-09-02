@@ -39,6 +39,9 @@
     refreshIntervalSec: number
     rangeDays: number
     notifications: boolean
+    zoomFactor: number
+    quotaDetail: 'meter' | 'percent' | 'full'
+    hiddenTools: string[]
     showUsage: boolean
     showCost: boolean
     showHeatmap: boolean
@@ -64,6 +67,7 @@
   let showSettings = false
   let panelEl: HTMLDivElement
   let lastReportedHeight = 0
+  let lastReportedWidth = 0
   let installPhase: string | null = null
   let installError: string | null = null
   let isSetup = false
@@ -116,11 +120,15 @@
   function reportWindowHeight() {
     if (!panelEl) return
 
-    const height = Math.ceil(panelEl.getBoundingClientRect().height)
-    if (height <= 0 || Math.abs(height - lastReportedHeight) < 2) return
+    const box = panelEl.getBoundingClientRect()
+    const height = Math.ceil(box.height)
+    const width = Math.ceil(box.width)
+    if (height <= 0 || width <= 0) return
+    if (Math.abs(height - lastReportedHeight) < 2 && Math.abs(width - lastReportedWidth) < 2) return
 
     lastReportedHeight = height
-    ;(window as any).widget.resizeWindow(height)
+    lastReportedWidth = width
+    ;(window as any).widget.resizeWindow({ width, height })
   }
 
   onMount(() => {
@@ -205,6 +213,7 @@
     <SettingsPanel
       {settings}
       {exchangeRate}
+      knownTools={(data?.quota?.tools ?? []).map((t) => ({ id: t.tool, label: t.label }))}
       on:save={saveSettings}
       on:close={() => { showSettings = false }}
     />
@@ -218,7 +227,12 @@
       {#if data?.quota}
         <div class="section">
           <div class="section-title">{i18n.quotaTitle}</div>
-          <QuotaPanel quota={data.quota} {i18n} />
+          <QuotaPanel
+            quota={data.quota}
+            {i18n}
+            detail={settings?.quotaDetail ?? 'full'}
+            hiddenTools={settings?.hiddenTools ?? []}
+          />
         </div>
       {/if}
 
@@ -347,7 +361,21 @@
     border-radius: 10px;
     border: 1px solid var(--border);
     overflow: hidden;
-    width: 100vw;
+    /*
+     * Sized by its contents, not by the window.
+     *
+     * 100vw made the width whatever the window already was, so measuring it
+     * could only ever report back the current size - the window could grow
+     * but never shrink. max-content gives a width that does not depend on
+     * the container, which is what makes it measurable.
+     *
+     * The bounds only guard the degenerate cases. In practice the floor is
+     * the header - icon, name, time and three buttons come to about 224 -
+     * so the meter-only panel stops there rather than at this number.
+     */
+    width: max-content;
+    min-width: 200px;
+    max-width: 560px;
     box-shadow: var(--shadow);
     transition: opacity 0.15s;
   }

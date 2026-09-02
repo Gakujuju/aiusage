@@ -26,6 +26,12 @@
     hiddenTiers: string[]
   }
   export let i18n: Translations
+  /** 'meter' | 'percent' | 'full' - how much of each line to draw. */
+  export let detail: 'meter' | 'percent' | 'full' = 'full'
+  /** Tool ids the user has switched off. */
+  export let hiddenTools: string[] = []
+
+  $: visible = quota.tools.filter((t) => !hiddenTools.includes(t.tool))
 
   /** Ten cells, because a bar is read as a proportion and not counted. */
   const CELLS = 10
@@ -47,7 +53,10 @@
   }
 </script>
 
-<div class="quota">
+<div
+  class="quota"
+  style="--row-columns: {detail === 'meter' ? '3.5rem auto' : detail === 'percent' ? '3.5rem auto 2.5rem' : '3.5rem auto 2.5rem 1fr'}"
+>
   <!--
     Bad news above the numbers, for the same reason the tooltip does it: what
     a reader takes in first has to include the reason not to trust the rest.
@@ -59,7 +68,7 @@
     <div class="alert">{i18n.quotaStale(left(quota.staleForMs))}</div>
   {/if}
 
-  {#each quota.tools as tool (tool.tool)}
+  {#each visible as tool (tool.tool)}
     <div class="tool">
       <div class="tool-name">{tool.label}</div>
       {#each tool.lines as line (line.tier)}
@@ -68,21 +77,34 @@
           <span class="bar" aria-hidden="true">
             {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
           </span>
-          <span class="pct">{Math.round(line.utilization)}%</span>
-          <span class="left">
-            {line.resetsInMs === null ? i18n.resetsUnknown : i18n.resetsIn(left(line.resetsInMs))}
-          </span>
+          {#if detail !== 'meter'}
+            <span class="pct">{Math.round(line.utilization)}%</span>
+          {/if}
+          {#if detail === 'full'}
+            <span class="left">
+              {line.resetsInMs === null ? i18n.resetsUnknown : i18n.resetsIn(left(line.resetsInMs))}
+            </span>
+          {/if}
         </div>
       {/each}
     </div>
   {/each}
 
   <!--
+    An empty panel is not a state. If everything is switched off, the panel
+    says which situation this is rather than leaving a blank rectangle that
+    looks like a failure to load.
+  -->
+  {#if visible.length === 0}
+    <div class="note">{i18n.nothingToShow}</div>
+  {/if}
+
+  <!--
     Said, not dropped. A tier that exists in the data and is not on screen is
     otherwise indistinguishable from one that was never collected, and the
     person wondering where their third window went is the one reading this.
   -->
-  {#if quota.hiddenTiers.length > 0}
+  {#if quota.hiddenTiers.length > 0 && visible.length > 0}
     <div class="note">{i18n.tierHidden(quota.hiddenTiers.join(', '))}</div>
   {/if}
 </div>
@@ -101,7 +123,8 @@
 
   .row {
     display: grid;
-    grid-template-columns: 3.5rem auto 2.5rem 1fr;
+    /* Set from the detail level, so a hidden column takes no width. */
+    grid-template-columns: var(--row-columns);
     align-items: center;
     gap: 0.5rem;
     font-size: 0.6875rem;
@@ -130,6 +153,21 @@
   .left {
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * These two are sentences, and a sentence is not what the panel should be
+   * as wide as. width:0 with min-width:100% keeps them out of the intrinsic
+   * width calculation and then stretches them to whatever the rows settled
+   * on, so they wrap instead of deciding the size.
+   *
+   * Without it the footnote about nimbus_quill was the widest thing here and
+   * every detail level came out the same size.
+   */
+  .alert,
+  .note {
+    width: 0;
+    min-width: 100%;
   }
 
   .alert {

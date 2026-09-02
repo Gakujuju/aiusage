@@ -24,6 +24,16 @@ export interface Translations {
   quotaStale: (age: string) => string
   tierHidden: (tiers: string) => string
   notificationsToggle: string
+  zoomIn: string
+  zoomOut: string
+  zoomReset: string
+  /* One choice of three, not a switch per element. */
+  detail: string
+  detailMeter: string
+  detailPercent: string
+  detailFull: string
+  tools: string
+  nothingToShow: string
   showUsage: string
   /* ── What used to be the whole window ───────────────────────────── */
   today: string
@@ -82,6 +92,15 @@ const en: Translations = {
   quotaStale: (age: string) => `Last read ${age} ago — not updating`,
   tierHidden: (tiers: string) => `${tiers} is not shown: it reports no reset time`,
   notificationsToggle: 'Desktop notifications',
+  zoomIn: 'Larger',
+  zoomOut: 'Smaller',
+  zoomReset: 'Default size',
+  detail: 'Detail',
+  detailMeter: 'Meter',
+  detailPercent: '+ percent',
+  detailFull: '+ time left',
+  tools: 'Tools',
+  nothingToShow: 'Nothing selected to show.',
   showUsage: 'Tokens and cost',
   today: 'Today',
   lastNDays: (n) => `Last ${n} days`,
@@ -139,6 +158,15 @@ const ja: Translations = {
   quotaStale: (age: string) => `${age}前の値 — 更新が止まっています`,
   tierHidden: (tiers: string) => `${tiers} は表示していません（リセット時刻を返さないため）`,
   notificationsToggle: 'デスクトップ通知',
+  zoomIn: '大きく',
+  zoomOut: '小さく',
+  zoomReset: '既定の大きさ',
+  detail: '詳しさ',
+  detailMeter: 'メーターだけ',
+  detailPercent: '＋ 割合',
+  detailFull: '＋ リセットまで',
+  tools: 'ツール',
+  nothingToShow: '表示するものがありません。',
   showUsage: 'トークンと費用',
   today: '今日',
   lastNDays: (n) => `過去${n}日`,
@@ -196,6 +224,15 @@ const zh: Translations = {
   quotaStale: (age: string) => `${age} 前读取 — 已停止更新`,
   tierHidden: (tiers: string) => `${tiers} 未显示：它不返回重置时间`,
   notificationsToggle: '桌面通知',
+  zoomIn: '放大',
+  zoomOut: '缩小',
+  zoomReset: '默认大小',
+  detail: '详细程度',
+  detailMeter: '仅进度条',
+  detailPercent: '＋ 百分比',
+  detailFull: '＋ 剩余时间',
+  tools: '工具',
+  nothingToShow: '没有可显示的内容。',
   showUsage: '令牌与费用',
   today: '今日',
   lastNDays: (n) => `近 ${n} 天`,
