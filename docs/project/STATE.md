@@ -1159,3 +1159,43 @@ Cookie は**メモリのみ**。有効期限は7日で、パスワードから�
 ツールチップの文言は同じ `hubProblem` の分岐が設定しているが、
 **ホバーの吹き出しはこの環境では画面に取れない**（合成マウス移動では
 描画されない。既知）。パネル側のみ実測。
+
+### IPC の payload に型を付けた（現象ではなく形を直した）
+
+`webContents.send` の第2引数は `any` である。だから
+**半分だけのオブジェクトを送っても tsc は何も言わなかった。**
+今日それで2回同じ壊れ方をした ── 成功経路で1回、失敗経路で1回。
+
+**1回目に直したのは現象（パネルが再描画されない）で、
+形（不完全なものを送れてしまう）は残っていた。**
+だから次の経路を書いたときに同じことが起きた。
+
+    src/update.ts   WidgetUpdate = WidgetData & { quota, hubProblem, hubUrl }
+    main.ts         sendUpdate(update: WidgetUpdate) が唯一の送信口
+
+わざと今朝の形（`{ hubProblem, hubUrl }` だけ）に戻すと落ちる:
+
+    error TS2345: Argument of type '{ hubProblem: HubFailure; hubUrl: string; }'
+      is not assignable to parameter of type 'WidgetUpdate'.
+      ... is missing the following properties: quota, todayTokens,
+      todayCost, rangeTokens, and 7 more.
+
+**次に節を増やして失敗経路を書き忘れたら、ビルドが止まる。**
+
+### ★ preload はサンドボックスで、ローカルモジュールを require できない
+
+チャンネル名を1箇所にするつもりで preload から `./update` を import したら、
+**window.widget ごと消えた。**
+
+`contextIsolation: true` で `sandbox: false` を指定していない preload は
+サンドボックスで動き、**相対パスの require ができない**。
+preload が読み込み時に投げると `contextBridge` も実行されず、
+`window.widget` が未定義になる。レンダラの最初の呼び出しが投げ、
+`onMount` が中断し、ResizeObserver も張られない。
+
+見た目は**「ヘッダだけの窓」**で、今日3回目の同じ症状だった
+（1回目=不完全な payload・成功経路、2回目=同・失敗経路、3回目=これ）。
+**症状が同じでも原因は3つとも違う。**
+
+型だけの import は消えるので契約は保ったまま、
+**チャンネル名の文字列だけ preload に書き戻した**（理由をコメントに明記）。

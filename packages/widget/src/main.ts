@@ -13,6 +13,8 @@ import { resolveHubUrl } from './hub-url'
 import { HUB_PASSWORD_CREDENTIAL, resolveHubPassword, saveCredential } from './credentials'
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
 import { eventsFromApi, nextBatch, notificationsPath } from './notifications'
+import { WIDGET_UPDATE_CHANNEL } from './update'
+import type { WidgetUpdate } from './update'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
 import type { WidgetSettings } from './settings'
@@ -387,12 +389,23 @@ function toggleWindow(): void {
   }
 }
 
+/**
+ * The only way this process puts an update on that channel.
+ *
+ * webContents.send takes any, so nothing stopped a caller sending half of
+ * one - and nothing did stop them, twice. The type is the fix; the panel
+ * repainting again was only the symptom going away.
+ */
+function sendUpdate(update: WidgetUpdate): void {
+  win?.webContents.send(WIDGET_UPDATE_CHANNEL, update)
+}
+
 async function pushDataUpdate(): Promise<void> {
   if (!win || !hub) return
   try {
     const data = await buildPayload()
     hubProblem = null
-    win.webContents.send('widget:data-update', { ...data, hubProblem: null, hubUrl: hub.url })
+    sendUpdate({ ...data, hubProblem: null, hubUrl: hub.url })
   } catch (error) {
     /*
      * Said, not swallowed.
@@ -420,7 +433,7 @@ async function pushDataUpdate(): Promise<void> {
      * read stayed on screen with a stale timestamp beside them. Which is
      * precisely the thing this message exists to prevent.
      */
-    win.webContents.send('widget:data-update', {
+    sendUpdate({
       ...emptyWidgetData(settings.rangeDays),
       quota: null,
       hubProblem,
