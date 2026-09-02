@@ -31,6 +31,15 @@
    * here. Only three exist that can report a quota at all - see quota.ts.
    */
   export let knownTools: Array<{ id: string; label: string }> = []
+  /**
+   * Tiers in the data that the panel does not draw, and why.
+   *
+   * Here rather than in the panel itself. Saying it once did its job - the
+   * reader now knows nimbus_quill exists and cannot be shown - and a
+   * permanent sentence about something nobody can act on does not earn a
+   * line in the smallest thing on the screen. It stays reachable.
+   */
+  export let hiddenTiers: Array<{ tier: string; reason: 'no-reset-time' | 'unknown-tier' }> = []
 
   const DETAILS: Array<{ value: 'meter' | 'percent' | 'full'; key: 'detailMeter' | 'detailPercent' | 'detailFull' }> = [
     { value: 'meter', key: 'detailMeter' },
@@ -214,6 +223,20 @@
     </div>
   </div>
 
+  {#if hiddenTiers.length > 0}
+    <div class="section">
+      <div class="section-label">{i18n.notShown}</div>
+      <div class="hidden-tiers">
+        {#each hiddenTiers as entry (entry.tier)}
+          <div class="hidden-tier">
+            <span class="hidden-name">{entry.tier}</span>
+            <span class="hidden-why">{entry.reason === 'no-reset-time' ? i18n.noResetTime : i18n.unknownTier}</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   {#if knownTools.length > 0}
     <div class="section">
       <div class="section-label">{i18n.tools}</div>
@@ -370,6 +393,32 @@
   .option-btn:hover:not(.active) {
     background: var(--bg-hover);
   }
+  .hidden-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .hidden-tier {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.6875rem;
+  }
+
+  .hidden-name {
+    color: var(--text-primary);
+    /* A raw tier name, so it reads as an identifier rather than a word.
+       Spelled out because this package has no --mono; the shared css-vars
+       check caught the borrowed name from the web palette on the way in. */
+    font-family: ui-monospace, Consolas, monospace;
+  }
+
+  .hidden-why {
+    color: var(--text-muted);
+    text-align: right;
+  }
+
   .toggles {
     display: flex;
     flex-direction: column;

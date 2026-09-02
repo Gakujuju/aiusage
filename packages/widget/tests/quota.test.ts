@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import Database from 'better-sqlite3'
 import {
   buildTooltip,
+  quotaView,
   formatRemaining,
   queryQuota,
   severity,
@@ -75,6 +76,37 @@ describe('what the tray reads', () => {
     insert({ tier: 'nimbus_quill', resets_at: null })
 
     expect(shownRows(queryQuota(db))).toEqual([])
+  })
+})
+
+describe('what is left out, and why', () => {
+  beforeEach(() => { db = createTestDb() })
+
+  it('names the tier rather than assuming which one it is', () => {
+    // Derived from the data. Naming nimbus_quill here would mean the next
+    // tier that arrives in the same state is dropped in silence, which is
+    // the thing this exists to prevent.
+    insert({ tier: 'nimbus_quill', resets_at: null })
+
+    expect(quotaView(queryQuota(db), NOW).hiddenTiers).toEqual([
+      { tier: 'nimbus_quill', reason: 'no-reset-time' },
+    ])
+  })
+
+  it('separates having no reset time from having no label', () => {
+    insert({ tier: 'lunar_cycle', resets_at: null })
+    insert({ tier: 'fortnight', resets_at: NOW + 1000 })
+
+    const hidden = quotaView(queryQuota(db), NOW).hiddenTiers
+
+    expect(hidden.find((h) => h.tier === 'lunar_cycle')?.reason).toBe('no-reset-time')
+    expect(hidden.find((h) => h.tier === 'fortnight')?.reason).toBe('unknown-tier')
+  })
+
+  it('has nothing to say when nothing was left out', () => {
+    insert({ tier: 'five_hour' })
+
+    expect(quotaView(queryQuota(db), NOW).hiddenTiers).toEqual([])
   })
 })
 

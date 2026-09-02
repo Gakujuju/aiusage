@@ -118,6 +118,16 @@ export interface QuotaTool {
   lines: QuotaLine[]
 }
 
+export interface HiddenTier {
+  tier: string
+  /**
+   * 'no-reset-time' when every row for it came back without one, which is
+   * why it cannot be drawn: half of what this panel shows would be missing.
+   * 'unknown-tier' otherwise - a name this build has no label for.
+   */
+  reason: 'no-reset-time' | 'unknown-tier'
+}
+
 export interface QuotaView {
   tools: QuotaTool[]
   /** Tools whose credential is not valid, by label. */
@@ -125,14 +135,17 @@ export interface QuotaView {
   /** How old the oldest reading is, when that is worth saying; null otherwise. */
   staleForMs: number | null
   /**
-   * Tiers that exist in the data and are deliberately not drawn.
+   * Tiers that exist in the data and are deliberately not drawn, with why.
    *
-   * Carried through to the window so it can say so. A row dropped in silence
-   * is indistinguishable from a row that was never there, and the person
-   * looking at the panel is the one who would otherwise wonder where their
-   * third Claude window went.
+   * Derived, not a list of names. nimbus_quill is the one this exists for
+   * today, and naming it here would mean the next tier that arrives in the
+   * same state is dropped in silence - which is the thing this is for.
+   *
+   * It lives in the settings panel rather than the main one. Saying it once
+   * did its job; a permanent sentence about something nobody can act on does
+   * not earn a line in the smallest thing on the screen.
    */
-  hiddenTiers: string[]
+  hiddenTiers: HiddenTier[]
 }
 
 export function quotaView(rows: QuotaRow[], now: number): QuotaView {
@@ -157,8 +170,27 @@ export function quotaView(rows: QuotaRow[], now: number): QuotaView {
     tools,
     credInvalid: [...new Set(shown.filter((r) => r.credStatus !== 'valid').map((r) => TOOL_LABELS[r.tool] ?? r.tool))],
     staleForMs: oldest != null && now - oldest > STALE_AFTER_MS ? now - oldest : null,
-    hiddenTiers: [...new Set(rows.filter((r) => !TIER_ORDER.includes(r.tier)).map((r) => r.tier))],
+    hiddenTiers: hiddenTiers(rows),
   }
+}
+
+/**
+ * Which tiers were left out, and the reason each one was.
+ *
+ * The reason is read off the rows rather than assumed: a tier none of whose
+ * rows carries a reset time cannot show a countdown, and that is a different
+ * situation from a tier this build simply has no label for.
+ */
+function hiddenTiers(rows: QuotaRow[]): HiddenTier[] {
+  const out: HiddenTier[] = []
+  for (const tier of new Set(rows.filter((r) => !TIER_ORDER.includes(r.tier)).map((r) => r.tier))) {
+    const forTier = rows.filter((r) => r.tier === tier)
+    out.push({
+      tier,
+      reason: forTier.every((r) => r.resetsAt == null) ? 'no-reset-time' : 'unknown-tier',
+    })
+  }
+  return out
 }
 
 export type Severity = 'ok' | 'warn' | 'danger'

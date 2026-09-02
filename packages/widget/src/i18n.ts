@@ -32,6 +32,9 @@ export interface Translations {
   detailMeter: string
   detailPercent: string
   detailFull: string
+  notShown: string
+  noResetTime: string
+  unknownTier: string
   tools: string
   nothingToShow: string
   showUsage: string
@@ -99,6 +102,9 @@ const en: Translations = {
   detailMeter: 'Meter',
   detailPercent: '+ percent',
   detailFull: '+ time left',
+  notShown: 'Not shown',
+  noResetTime: 'reports no reset time',
+  unknownTier: 'not a window this build knows',
   tools: 'Tools',
   nothingToShow: 'Nothing selected to show.',
   showUsage: 'Tokens and cost',
@@ -165,6 +171,9 @@ const ja: Translations = {
   detailMeter: 'メーターだけ',
   detailPercent: '＋ 割合',
   detailFull: '＋ リセットまで',
+  notShown: '表示していないもの',
+  noResetTime: 'リセット時刻を返さないため',
+  unknownTier: 'この版が知らない枠のため',
   tools: 'ツール',
   nothingToShow: '表示するものがありません。',
   showUsage: 'トークンと費用',
@@ -231,6 +240,9 @@ const zh: Translations = {
   detailMeter: '仅进度条',
   detailPercent: '＋ 百分比',
   detailFull: '＋ 剩余时间',
+  notShown: '未显示的项目',
+  noResetTime: '不返回重置时间',
+  unknownTier: '此版本不认识的额度类型',
   tools: '工具',
   nothingToShow: '没有可显示的内容。',
   showUsage: '令牌与费用',

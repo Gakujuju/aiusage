@@ -23,7 +23,6 @@
     tools: QuotaTool[]
     credInvalid: string[]
     staleForMs: number | null
-    hiddenTiers: string[]
   }
   export let i18n: Translations
   /** 'meter' | 'percent' | 'full' - how much of each line to draw. */
@@ -99,14 +98,6 @@
     <div class="note">{i18n.nothingToShow}</div>
   {/if}
 
-  <!--
-    Said, not dropped. A tier that exists in the data and is not on screen is
-    otherwise indistinguishable from one that was never collected, and the
-    person wondering where their third window went is the one reading this.
-  -->
-  {#if quota.hiddenTiers.length > 0 && visible.length > 0}
-    <div class="note">{i18n.tierHidden(quota.hiddenTiers.join(', '))}</div>
-  {/if}
 </div>
 
 <style>

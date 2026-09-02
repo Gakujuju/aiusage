@@ -214,6 +214,7 @@
       {settings}
       {exchangeRate}
       knownTools={(data?.quota?.tools ?? []).map((t) => ({ id: t.tool, label: t.label }))}
+      hiddenTiers={data?.quota?.hiddenTiers ?? []}
       on:save={saveSettings}
       on:close={() => { showSettings = false }}
     />
