@@ -31,8 +31,29 @@ const PORT_FILE = join(homedir(), '.aiusage', '.serve-port')
 const FX_CACHE_FILE = join(homedir(), '.aiusage', 'widget-exchange-rate.json')
 const DASHBOARD_PORT = 3847
 const WINDOW_WIDTH = 380
-const DEFAULT_WINDOW_HEIGHT = 500
-const MIN_WINDOW_HEIGHT = 320
+/*
+ * Only what the panel is before it has measured itself.
+ *
+ * The renderer reports its real height within a frame or two of loading, so
+ * this is visible for that long and never again. Kept roomy rather than
+ * tight: too small for a moment reads as a broken window, too large as a
+ * window still settling.
+ */
+const DEFAULT_WINDOW_HEIGHT = 320
+
+/*
+ * A floor against the panel measuring itself mid-render.
+ *
+ * The first height this receives on a cold start is 51 - the header alone,
+ * before anything below it exists - and a 51-pixel window is a glitch
+ * someone would report. 120 is above that and below anything real: the
+ * quota-only panel measures 238.
+ *
+ * It was 320, chosen when the window held a trend chart and three stat rows.
+ * That number outlived its contents and became a floor the panel could not
+ * get under, which is most of why there was blank space below the text.
+ */
+const MIN_WINDOW_HEIGHT = 120
 const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 let tray: Tray | null = null
@@ -408,7 +429,20 @@ function checkNotifications(): void {
   for (const row of batch.show) {
     /* The hub's words, unchanged. The same event says the same thing here as
        it does on the phone, or they stop looking like one event. */
-    new Notification({ title: row.title, body: row.body }).show()
+    new Notification({
+      title: row.title,
+      body: row.body,
+      /*
+       * Seen, not heard.
+       *
+       * There is no moment in a working day where a chime about a finished
+       * task is worth the interruption, and the same event is already
+       * making a sound on the phone. This silences Windows' default
+       * notification sound; it does not affect whether the banner shows,
+       * which is a separate setting the user owns.
+       */
+      silent: true,
+    }).show()
   }
 }
 
@@ -688,7 +722,19 @@ ipcMain.on('widget:resize-window', (_event, height: number) => {
 
   if (Math.abs(bounds.height - nextHeight) < 2) return
 
+  /*
+   * Made resizable for the length of one call, because it is not.
+   *
+   * On Windows a window created with resizable: false refuses setSize as
+   * well as the drag handles, silently. That is why this whole path has
+   * never done anything: the renderer measured, the message arrived, the
+   * height was computed, and the window ignored it.
+   *
+   * The flag goes straight back, so the user still cannot drag an edge.
+   */
+  win.setResizable(true)
   win.setSize(WINDOW_WIDTH, nextHeight, false)
+  win.setResizable(false)
   if (win.isVisible()) {
     positionWindowNearTray()
   }

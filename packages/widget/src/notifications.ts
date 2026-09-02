@@ -17,6 +17,8 @@ export interface NotificationRow {
   createdAt: number
   title: string
   body: string
+  /** JSON as stored; never assumed to parse. */
+  payload: string
 }
 
 /**
@@ -53,12 +55,40 @@ export const MAX_PER_TICK = 5
  */
 export function notificationsSince(db: Database.Database, since: number): NotificationRow[] {
   return db.prepare(`
-    SELECT MIN(created_at) AS createdAt, title, body
+    SELECT MIN(created_at) AS createdAt, title, body, MAX(payload) AS payload
     FROM notifications
     WHERE created_at > ? AND state = 'sent'
     GROUP BY ${FOLD}
     ORDER BY MIN(created_at) ASC
   `).all(since) as NotificationRow[]
+}
+
+/**
+ * The one thing worth interrupting someone for: a task that just finished.
+ *
+ * Everything else the hub sends stays on the phone. A session merely ending,
+ * a permission prompt, a quota threshold, a stalled parse - each is real, and
+ * none of them is what someone is waiting at the screen for.
+ *
+ * Read from the payload, never from the title. The titles are written in the
+ * user's language and would take this with them the first time anyone
+ * translated one; the payload is the same two words in every locale.
+ *
+ * A payload that will not parse, or does not carry these fields, is not
+ * shown. Unknown is not "probably fine": the failure of guessing wrong here
+ * is a notification for something nobody asked to be told about, which is
+ * exactly what this filter exists to stop.
+ *
+ * `stop` and not `stop_failure` - both appear in the data, and only one of
+ * them means the work finished.
+ */
+export function isWorkFinished(payload: string): boolean {
+  try {
+    const parsed = JSON.parse(payload) as { status?: unknown; lastEventKind?: unknown }
+    return parsed.status === 'waiting_for_user' && parsed.lastEventKind === 'stop'
+  } catch {
+    return false
+  }
 }
 
 export interface Batch {
@@ -80,10 +110,16 @@ export interface Batch {
  */
 export function nextBatch(rows: NotificationRow[], fallbackSeenAt: number): Batch {
   if (rows.length === 0) return { show: [], skipped: 0, seenAt: fallbackSeenAt }
-  const show = rows.slice(-MAX_PER_TICK)
-  return {
-    show,
-    skipped: rows.length - show.length,
-    seenAt: rows[rows.length - 1].createdAt,
-  }
+
+  /*
+   * The marker passes everything that was read, not everything that was
+   * shown. A quota warning this decided not to raise has still been seen and
+   * dealt with; leaving it behind the marker would make every later read
+   * consider it again, for ever.
+   */
+  const seenAt = rows[rows.length - 1].createdAt
+
+  const worth = rows.filter((row) => isWorkFinished(row.payload))
+  const show = worth.slice(-MAX_PER_TICK)
+  return { show, skipped: worth.length - show.length, seenAt }
 }

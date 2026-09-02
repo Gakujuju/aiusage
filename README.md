@@ -160,15 +160,22 @@ Look for the green bar-chart icon. (Setting the AppUserModelID does not
 change this — only a packaged build with its own .exe would.) Notifications
 from it are filed under `com.juliantanx.aiusage-widget` for the same reason.
 
-It also raises a desktop notification for anything the hub sends elsewhere —
-the same words that reach your phone, once per event rather than once per
-channel. It never replays: on first run it starts from that moment, and what
-it has already shown is remembered per machine. Turn it off with "Desktop
-notifications" in the widget's settings.
+It also raises a silent desktop notification when a task finishes — the same
+words that reach your phone, once per event rather than once per channel.
+Only finished work: sessions merely ending, permission prompts and quota
+warnings stay on the phone. It never replays; on first run it starts from
+that moment, and what it has shown is remembered per machine. Turn it off
+with "Desktop notifications" in the widget's settings.
 
-**If nothing appears on screen, check Do Not Disturb first.** With it on,
-Windows delivers the notification to the notification centre but shows no
-banner — the panel says so at the top when you open it.
+**If nothing appears on screen, check Do Not Disturb first.** Silent and
+hidden are different settings: `silent` only stops the sound. With Do Not
+Disturb on, Windows files the notification in the notification centre and
+shows no banner — the panel says so at the top when you open it. To get
+banners through it, add `com.juliantanx.aiusage-widget` to the priority
+list under Settings → System → Notifications.
+
+The sound your phone makes is an Android notification setting, not something
+this project controls.
 
 ## Development
 

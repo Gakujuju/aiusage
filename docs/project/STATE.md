@@ -766,3 +766,72 @@ webpush のキーは discord のキーに `webpush:` を前置した別の値。
 **トーストは届いて通知センターに残るが、画面には出ない。**
 利用者の設定であって実装の問題ではないが、
 「出ない」と言われたときに最初に見る場所なので README に書いた。
+
+## 通知は「作業完了」だけ・無音に絞った
+
+    出す:     payload.status === 'waiting_for_user' && lastEventKind === 'stop'
+    出さない: 上記以外すべて
+
+**判定は payload で行う。title の文字列は見ない** ─ 題名は利用者の言語で
+書かれており、翻訳した瞬間に壊れる。payload はどの言語でも同じ2語。
+
+本番に実在する `session_status` の payload は7通りあり、
+そのうち1つだけが該当する:
+
+    waiting_for_user / stop            ← これだけ出す
+    waiting_for_user / stop_failure    出さない（止まったが完了していない）
+    waiting_for_user / session_start   出さない
+    waiting_for_permission / permission_request  出さない
+    completed / session_end            出さない
+    completed / stop                   出さない
+    completed / process_scan           出さない
+
+`quota_threshold` / `quota_credential` / `session_escalation` も出さない。
+
+**payload が読めない行は出さない。** 不明を「たぶん大丈夫」にすると、
+この絞り込みが防ぎたかったものがそのまま出る。
+
+`silent: true` で Windows の既定音は鳴らない。**表示は出る。**
+
+通し（隔離DB、実機）: 8種類16行を入れて**作業完了の1件だけ**が出た。
+
+### 種類ごとの設定は作っていない
+
+いま要るのは1種類だけで、使われない設定を先に作ると、
+次に増やすとき何が実際に使われているのか分からなくなる。
+
+## 窓の高さを中身に追随させた
+
+    利用枠のみ        500 → 238  （英語 227）
+    設定パネル              569
+    旧セクションを戻す      389
+
+下端は常に 1028 のまま ─ **縮んでも窓は動かない。**
+トレイの上端に貼り付ける計算なので、高さが変わると上端だけが動く。
+
+### 原因は「送っている箇所が無い」ではなかった
+
+指示は「送っている箇所は0件」だったが、**実際には全部揃っていた**:
+
+    renderer/App.svelte:116  reportWindowHeight()
+    renderer/App.svelte:150  ResizeObserver
+    preload.ts               resizeWindow
+    main.ts                  ipcMain.on('widget:resize-window')
+
+計測して送り、受け取り、正しい高さを計算していた。ログで確認した:
+
+    PROBE resize-window received 51
+    PROBE resize-window received 238
+
+**効かなかったのは `win.setSize()` のほう。**
+`resizable: false` で作られたウィンドウは、Windows では
+**setSize も黙って無視する**（ドラッグの取っ手だけでなく）。
+`setResizable(true)` → `setSize` → `setResizable(false)` で通した。
+利用者が縁をドラッグできる状態にはならない。
+
+`MIN_WINDOW_HEIGHT` は 320 → 120。320 はトレンドグラフと3行の統計が
+あった頃の値で、中身が変わっても残り、**下限として効いていた**。
+120 は実測に基づく: 起動直後に一度だけ 51（ヘッダのみ）が飛んでくるので
+その上、実際の中身 238 の下。
+
+余白と行間は詰めていない。**いま読めていることのほうが価値がある**と判断した。
