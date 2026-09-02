@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import Database from 'better-sqlite3'
-import { isWorkFinished, MAX_PER_TICK, nextBatch, notificationsSince } from '../src/notifications'
+import { isWorthShowing, MAX_PER_TICK, nextBatch, notificationsSince } from '../src/notifications'
 
 /**
  * The two ways a notifier is worse than none: saying the same thing twice,
@@ -118,58 +118,75 @@ describe('nothing already seen', () => {
   })
 })
 
-describe('only a finished task is worth interrupting for', () => {
+describe('three endings are worth interrupting for, and five are not', () => {
   beforeEach(() => { db = createTestDb(); seq = 0 })
 
-  /* Every shape that appears in the real table, read off production. */
+  /* The seven shapes that appear in the real table, plus the one that does not. */
   const REAL = {
     finished: { status: 'waiting_for_user', lastEventKind: 'stop' },
+    stopFailed: { status: 'waiting_for_user', lastEventKind: 'stop_failure' },
+    down: { status: 'failed', lastEventKind: 'stop' },
     sessionEnded: { status: 'completed', lastEventKind: 'session_end' },
     started: { status: 'waiting_for_user', lastEventKind: 'session_start' },
     permission: { status: 'waiting_for_permission', lastEventKind: 'permission_request' },
-    stopFailed: { status: 'waiting_for_user', lastEventKind: 'stop_failure' },
     completedOnStop: { status: 'completed', lastEventKind: 'stop' },
     processScan: { status: 'completed', lastEventKind: 'process_scan' },
   }
+  const SHOWN = ['finished', 'stopFailed', 'down']
 
-  it('recognises the one that means the work is done', () => {
-    expect(isWorkFinished(JSON.stringify(REAL.finished))).toBe(true)
-  })
-
-  it('leaves every other session shape alone', () => {
-    for (const [name, payload] of Object.entries(REAL)) {
-      if (name === 'finished') continue
-      expect(isWorkFinished(JSON.stringify(payload)), name).toBe(false)
+  it('shows the three the hub gives an ending label to', () => {
+    for (const name of SHOWN) {
+      expect(isWorthShowing(JSON.stringify(REAL[name as keyof typeof REAL])), name).toBe(true)
     }
   })
 
-  it('does not confuse stop_failure with stop', () => {
-    // Both are waiting_for_user, and only one of them finished anything.
-    expect(isWorkFinished(JSON.stringify(REAL.stopFailed))).toBe(false)
+  it('leaves the other five alone', () => {
+    for (const [name, payload] of Object.entries(REAL)) {
+      if (SHOWN.includes(name)) continue
+      expect(isWorthShowing(JSON.stringify(payload)), name).toBe(false)
+    }
+  })
+
+  it('catches stop_failure on the kind, since its status stays waiting_for_user', () => {
+    // The rules file makes the same check first and for the same reason: the
+    // status alone cannot tell this from an ordinary finish.
+    expect(REAL.stopFailed.status).toBe(REAL.finished.status)
+    expect(isWorthShowing(JSON.stringify(REAL.stopFailed))).toBe(true)
+  })
+
+  it('shows a failed session whatever the last event was', () => {
+    // Nothing in this database has ever been failed. The hub can produce it,
+    // and the first time it does is the wrong moment to find out this was
+    // not watching for it.
+    for (const kind of ['stop', 'session_end', 'process_scan', 'anything']) {
+      expect(isWorthShowing(JSON.stringify({ status: 'failed', lastEventKind: kind })), kind).toBe(true)
+    }
   })
 
   it('leaves the quota and parse events to the phone', () => {
     for (const payload of ['{"threshold":80,"utilization":80}', '{"lastSuccessAt":1788146162963}', '{"level":1}', '{}']) {
-      expect(isWorkFinished(payload), payload).toBe(false)
+      expect(isWorthShowing(payload), payload).toBe(false)
     }
   })
 
   it('says nothing when it cannot read the payload', () => {
     // Unknown is not "probably fine". Guessing wrong here produces exactly
     // the notification this filter exists to stop.
-    for (const payload of ['', 'not json', 'null', '[]', '"stop"']) {
-      expect(isWorkFinished(payload), JSON.stringify(payload)).toBe(false)
+    for (const payload of ['', 'not json', 'null', '[]', '"stop"', '5']) {
+      expect(isWorthShowing(payload), JSON.stringify(payload)).toBe(false)
     }
   })
 
-  it('shows the finished one and passes over the rest', () => {
+  it('shows the endings and passes over the rest', () => {
     event({ at: T + 1, subject: 'a', payload: JSON.stringify(REAL.permission) })
     event({ at: T + 2, subject: 'b', payload: JSON.stringify(REAL.finished), title: 'finished' })
     event({ at: T + 3, subject: 'c', payload: JSON.stringify(REAL.sessionEnded) })
+    event({ at: T + 4, subject: 'd', payload: JSON.stringify(REAL.stopFailed), title: 'error' })
+    event({ at: T + 5, subject: 'e', payload: JSON.stringify(REAL.down), title: 'down' })
 
     const batch = nextBatch(notificationsSince(db, T), 0)
 
-    expect(batch.show.map((r) => r.title)).toEqual(['finished'])
+    expect(batch.show.map((r) => r.title)).toEqual(['finished', 'error', 'down'])
   })
 
   it('still moves past the ones it passed over', () => {

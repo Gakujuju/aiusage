@@ -64,31 +64,48 @@ export function notificationsSince(db: Database.Database, since: number): Notifi
 }
 
 /**
- * The one thing worth interrupting someone for: a task that just finished.
+ * The three endings worth interrupting someone for.
  *
- * Everything else the hub sends stays on the phone. A session merely ending,
- * a permission prompt, a quota threshold, a stalled parse - each is real, and
- * none of them is what someone is waiting at the screen for.
+ * A task that finished, one that failed on its way out, and one that went
+ * down. Everything else the hub sends stays on the phone: a session merely
+ * ending, a permission prompt, a quota threshold, a stalled parse. Each is
+ * real, and none of them is what someone is waiting at the screen for.
+ *
+ * These are the three the hub already gives a label to, in
+ * packages/core/src/notification-rules.ts:
+ *
+ *   waiting_for_user + stop          green,  work finished
+ *   waiting_for_user + stop_failure  red,    finished with an error
+ *   failed                           red,    went down
+ *
+ * stop_failure is matched on the kind rather than the status because it
+ * deliberately leaves the status at waiting_for_user. The rules file makes
+ * the same check first, for the same reason.
+ *
+ * `failed` has never appeared in this database. It is here anyway: the hub
+ * knows how to produce it, and the moment it first does is the worst
+ * possible time to find out this was not watching for it.
  *
  * Read from the payload, never from the title. The titles are written in the
  * user's language and would take this with them the first time anyone
- * translated one; the payload is the same two words in every locale.
+ * translated one; the payload is the same words in every locale.
  *
  * A payload that will not parse, or does not carry these fields, is not
  * shown. Unknown is not "probably fine": the failure of guessing wrong here
  * is a notification for something nobody asked to be told about, which is
  * exactly what this filter exists to stop.
- *
- * `stop` and not `stop_failure` - both appear in the data, and only one of
- * them means the work finished.
  */
-export function isWorkFinished(payload: string): boolean {
+export function isWorthShowing(payload: string): boolean {
+  let parsed: { status?: unknown; lastEventKind?: unknown }
   try {
-    const parsed = JSON.parse(payload) as { status?: unknown; lastEventKind?: unknown }
-    return parsed.status === 'waiting_for_user' && parsed.lastEventKind === 'stop'
+    parsed = JSON.parse(payload) as { status?: unknown; lastEventKind?: unknown }
   } catch {
     return false
   }
+  if (parsed === null || typeof parsed !== 'object') return false
+  if (parsed.status === 'failed') return true
+  if (parsed.status !== 'waiting_for_user') return false
+  return parsed.lastEventKind === 'stop' || parsed.lastEventKind === 'stop_failure'
 }
 
 export interface Batch {
@@ -119,7 +136,7 @@ export function nextBatch(rows: NotificationRow[], fallbackSeenAt: number): Batc
    */
   const seenAt = rows[rows.length - 1].createdAt
 
-  const worth = rows.filter((row) => isWorkFinished(row.payload))
+  const worth = rows.filter((row) => isWorthShowing(row.payload))
   const show = worth.slice(-MAX_PER_TICK)
   return { show, skipped: worth.length - show.length, seenAt }
 }

@@ -769,17 +769,20 @@ webpush のキーは discord のキーに `webpush:` を前置した別の値。
 
 ## 通知は「作業完了」だけ・無音に絞った
 
-    出す:     payload.status === 'waiting_for_user' && lastEventKind === 'stop'
+    出す:     waiting_for_user + stop          🟢 作業完了
+              waiting_for_user + stop_failure  🔴 処理エラー終了
+              failed                           🔴 異常終了
     出さない: 上記以外すべて
 
 **判定は payload で行う。title の文字列は見ない** ─ 題名は利用者の言語で
 書かれており、翻訳した瞬間に壊れる。payload はどの言語でも同じ2語。
 
 本番に実在する `session_status` の payload は7通りあり、
-そのうち1つだけが該当する:
+そのうち2つが該当する（3つ目の `failed` は本番にまだ無い）:
 
-    waiting_for_user / stop            ← これだけ出す
-    waiting_for_user / stop_failure    出さない（止まったが完了していない）
+    waiting_for_user / stop            ← 出す（正常完了）
+    waiting_for_user / stop_failure    ← 出す（処理エラー終了）
+    failed / *                         ← 出す（異常終了。本番には未出現）
     waiting_for_user / session_start   出さない
     waiting_for_permission / permission_request  出さない
     completed / session_end            出さない
@@ -793,7 +796,22 @@ webpush のキーは discord のキーに `webpush:` を前置した別の値。
 
 `silent: true` で Windows の既定音は鳴らない。**表示は出る。**
 
-通し（隔離DB、実機）: 8種類16行を入れて**作業完了の1件だけ**が出た。
+判定の3つは、ハブ自身が使っている規則と同じものにした
+（`packages/core/src/notification-rules.ts`）。`stop_failure` を status ではなく
+kind で見るのも同じ理由 ── **stop_failure は status を waiting_for_user のまま残す**ので、
+status だけでは正常完了と区別できない。規則ファイルも同じ順で見ている。
+
+`failed` は本番の767行に1件も無いが**先に入れた**。ハブは作れる状態にあり、
+初めて起きた瞬間は「ウィジェットが見ていなかった」と分かるのに最悪の時機である。
+
+通し（隔離DB、実機）: 8種類16行を入れて**3件だけ**が出た。
+🔴 異常終了 / 🔴 処理エラー終了 / 🟢 作業完了 の3つで、
+出してはいけない5種類はどれも出ていない。
+
+**音は引き続き無し（`silent: true`）。エラーだけ鳴らす形にはしない** ──
+制約は「音を出せない場面がある」ことであって重要度ではなく、
+会議中に鳴るエラーは避けたかったものそのものだから。
+区別は絵文字が付けており、こちら側に足すものは無い。
 
 ### 種類ごとの設定は作っていない
 

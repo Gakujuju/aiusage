@@ -171,8 +171,9 @@ from it are filed under `com.juliantanx.aiusage-widget` for the same reason.
 
 It also raises a silent desktop notification when a task finishes — the same
 words that reach your phone, once per event rather than once per channel.
-Only finished work: sessions merely ending, permission prompts and quota
-warnings stay on the phone. It never replays; on first run it starts from
+Only how a task ended: finished, finished with an error, or went down.
+Sessions merely ending, permission prompts and quota warnings stay on the
+phone. All three are silent; the emoji in the title tells them apart. It never replays; on first run it starts from
 that moment, and what it has shown is remembered per machine. Turn it off
 with "Desktop notifications" in the widget's settings.
 
