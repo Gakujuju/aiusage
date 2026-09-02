@@ -1258,3 +1258,72 @@ A〜D は**該当なし**。E は上の2箇所のみ。
 corepack のプロンプトは `pnpm` という語の先にあり、
 資格情報のダイアログは `git pull` という語の先にある。
 **呼んでいる語ではなく、その先が何を持っているかで決まる。**
+
+## ウィジェットのビルドが CLI を止めた（2026-09-02、職場PC）
+
+**serve が落ち、データ収集が止まった。** 原因は
+`packages/widget/bin/prepare-native.js`。
+
+    1. @electron/rebuild が**共有の** better-sqlite3 を
+       Electron ABI に作り直す（in place）
+    2. CLI は同じファイルを Node ABI として読む → 起動不能
+    3. 戻す手順 execFileSync('npm', ['run','install']) は
+       **Windows で ENOENT**（npm は npm.cmd で、execFileSync は探しに行かない）
+    4. 戻らないまま残る
+
+**同じ問題に2つの解があり、片方だけが安全だった。**
+`bin/install-native.js`（postinstall）は最初から
+「使い捨てのコピーの中で prebuild-install を走らせ、共有物には触らない」
+と docstring に書いてある。`prepare-native.js` はその配慮を持っていなかった。
+
+### いま直っていること
+
+`prepare-native.js` を postinstall と同じ方式に変えた。
+**共有の better-sqlite3 には一切触らない**（一時ディレクトリに
+`package.json` だけ写して prebuild-install を走らせ、`.node` を1つ取り出す）。
+`@electron/rebuild` は `pnpm run rebuild:electron` として残してあるので、
+**明示的に呼んだときだけ**起きる。
+
+「新鮮さ」の判定も直した。旧実装は
+**共有の Node ABI 版と、ウィジェットの Electron ABI 版の mtime を比べていた** ──
+別々の成果物で、時刻は上流の tarball が持っていたものにすぎない。
+しかも一度 rebuild が走ると共有側が現在時刻になり、**以後は永久に false**
+になって毎回作り直す。いまは
+`dist/native/built-for.json` に electron のバージョンと platform/arch を書き、
+それが一致するかで判定する。
+
+**職場PCで false だった具体的な理由は特定できていない**（その端末の
+当時のファイルを見ていない）。上の2つの経路のどちらでも起こりうる。
+
+### 復旧手順（この症状が出たとき）
+
+serve が起動しない・`aiusage summary` が `dlopen` で落ちるとき:
+
+    cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3
+    npm run install          # PowerShell から。cmd の npm.cmd が要る
+    # そのあと serve を再起動
+
+新しい `prepare-native.js` は**起動時にこれを自動で確かめて直す**。
+ウィジェットをビルドすれば、壊れていたぶんも戻る。
+
+### 確かめたこと
+
+    ビルド前後で node packages/cli/dist/index.js summary が通ること   ✔
+    共有 better-sqlite3 の mtime とサイズが変わらないこと             ✔
+    2回目はスキップされること                                        ✔
+    --force でも CLI が壊れないこと                                  ✔
+    Electron ABI の .node を Node で開くと dlopen で落ちること        ✔（実測）
+    prebuild-install --runtime=node が Windows で走ること             ✔（実測）
+
+**受け入れ条件はウィジェットがビルドできることではなく、CLI が起動できること。**
+
+### ついでに分かったこと
+
+`require('better-sqlite3')` は**バイナリを読まない**。
+better-sqlite3 は最初の `new Database()` まで `.node` を遅延ロードするので、
+require が通っても ABI が合っているとは限らない。
+確認には `new D(':memory:').close()` まで要る。
+
+Windows は**実行中のプロセスが読み込んでいる `.node` を上書きできない**（EBUSY）。
+ウィジェットを起動したままビルドすると必ずここで止まるので、
+「トレイから終了してからビルドしてください」と出るようにした。
