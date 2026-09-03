@@ -29,6 +29,25 @@
   export let detail: 'meter' | 'percent' | 'full' = 'full'
   /** Tool ids the user has switched off. */
   export let hiddenTools: string[] = []
+  /**
+   * One line per tool: name, then the meters, and nothing else.
+   *
+   * For the folded strip. The tier words are dropped and the meaning carried
+   * by position instead - five-hour left, week right, in TIER_ORDER, the same
+   * order as when open. A legend costs most of the strip's width, and
+   * something read out of the corner of an eye does not get read twice.
+   */
+  export let compact = false
+
+  /*
+   * Ordered here rather than trusted from the caller, because in the strip
+   * the position is the label. A tool whose lines arrived in another order
+   * would silently mean the opposite thing.
+   */
+  const KIND_ORDER: Array<'five_hour' | 'week'> = ['five_hour', 'week']
+  function ordered(lines: QuotaLine[]): QuotaLine[] {
+    return [...lines].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind))
+  }
 
   $: visible = quota.tools.filter((t) => !hiddenTools.includes(t.tool))
 
@@ -54,6 +73,7 @@
 
 <div
   class="quota"
+  class:compact
   style="--row-columns: {detail === 'meter' ? '3.5rem auto' : detail === 'percent' ? '3.5rem auto 2.5rem' : '3.5rem auto 2.5rem 1fr'}"
 >
   <!--
@@ -68,6 +88,19 @@
   {/if}
 
   {#each visible as tool (tool.tool)}
+    {#if compact}
+      <div class="strip-row">
+        <span class="strip-name">{tool.label}</span>
+        {#each ordered(tool.lines) as line (line.tier)}
+          <span
+            class="bar"
+            aria-label="{tool.label} {line.kind === 'five_hour' ? i18n.tierFiveHour : i18n.tierWeek} {Math.round(line.utilization)}%"
+          >
+            {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
+          </span>
+        {/each}
+      </div>
+    {:else}
     <div class="tool">
       <div class="tool-name">{tool.label}</div>
       {#each tool.lines as line (line.tier)}
@@ -87,6 +120,7 @@
         </div>
       {/each}
     </div>
+    {/if}
   {/each}
 
   <!--
@@ -102,6 +136,23 @@
 
 <style>
   .quota { display: flex; flex-direction: column; gap: 0.75rem; }
+
+  /* Folded. Tighter than .tool by design: the gap is most of a strip. */
+  .strip-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    line-height: 1.4;
+  }
+
+  .strip-name {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    /* So two tools' meters line up under each other and can be compared. */
+    min-width: 3.5rem;
+  }
 
   .tool { display: flex; flex-direction: column; gap: 0.25rem; }
 
@@ -122,6 +173,8 @@
   }
 
   .tier { color: var(--text-secondary); }
+
+  .quota.compact { gap: 0.25rem; }
 
   .bar { display: inline-flex; gap: 2px; }
 

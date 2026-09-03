@@ -46,3 +46,24 @@ export interface WidgetUpdate extends WidgetData {
  * review rather than an ordinary-looking call.
  */
 export const WIDGET_UPDATE_CHANNEL = 'widget:data-update'
+
+/**
+ * What the panel measured, and the smallest it is allowed to become.
+ *
+ * The floor travels with the measurement on purpose. Main used to hold a
+ * single MIN_WINDOW_HEIGHT and apply it to whatever arrived, which worked
+ * while there was one kind of panel. There are two now, and their smallest
+ * legitimate shapes are nothing alike: an open panel under about 120px has
+ * been caught mid-render, while a folded strip is 30-odd pixels by design.
+ *
+ * Two constants in main would mean main deciding which state the renderer is
+ * in - a second copy of a fact the renderer already has. Today produced four
+ * failures of exactly that shape, so the number comes from the same message
+ * as the height it applies to, and they cannot disagree.
+ */
+export interface PanelSize {
+  width: number
+  height: number
+  /** Measured from the DOM, not guessed: the smallest legitimate height. */
+  minHeight: number
+}

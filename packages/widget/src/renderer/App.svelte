@@ -69,6 +69,67 @@
    * Reopening it every refresh would take the panel away from someone who
    * had closed it and gone back to looking at the numbers.
    */
+  /**
+   * Folded to a strip. Read from settings so it survives a restart.
+   *
+   * Kept as its own variable rather than read from `settings` inline because
+   * settings arrives asynchronously, and the panel has to draw something in
+   * the meantime; false is the right thing to draw before the answer lands.
+   */
+  let collapsed = false
+  $: collapsed = settings?.collapsed ?? false
+
+  async function setCollapsed(next: boolean) {
+    if (!settings) return
+    // Through the same save path as every other setting, so the persisted
+    // value and the drawn value cannot drift apart.
+    settings = (await window.widget?.saveSettings({ ...settings, collapsed: next })) ?? settings
+    void tick().then(reportWindowHeight)
+  }
+
+  /*
+   * The strip is both the handle and the way back, and those cannot be told
+   * apart until the mouse comes back up.
+   *
+   * With the header gone the strip has no -webkit-app-region: drag, and it
+   * could not have one: a drag region does not hand its clicks back to the
+   * page, so the strip would either be movable or clickable and not both.
+   * Watching the pointer here gives both from the same surface, with no small
+   * target to aim at - a press that goes nowhere unfolds, a press that
+   * travels moves the window.
+   *
+   * Four pixels because a click with a mouse is rarely perfectly still and a
+   * deliberate drag is never within four.
+   */
+  const DRAG_THRESHOLD_PX = 4
+  let dragFrom: { x: number; y: number } | null = null
+  let dragMoved = false
+
+  function stripPointerDown(event: MouseEvent) {
+    if (event.button !== 0) return
+    dragFrom = { x: event.screenX, y: event.screenY }
+    dragMoved = false
+  }
+
+  function stripPointerMove(event: MouseEvent) {
+    if (!dragFrom) return
+    const dx = event.screenX - dragFrom.x
+    const dy = event.screenY - dragFrom.y
+    if (!dragMoved && Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) return
+    dragMoved = true
+    // Deltas from the last position, not from the press: the window has
+    // already moved by everything reported so far.
+    dragFrom = { x: event.screenX, y: event.screenY }
+    ;window.widget?.moveWindowBy({ dx, dy })
+  }
+
+  function stripPointerUp() {
+    const wasClick = dragFrom !== null && !dragMoved
+    dragFrom = null
+    dragMoved = false
+    if (wasClick) void setCollapsed(false)
+  }
+
   let passwordPromptShown = false
   $: if (data?.hubProblem === 'unauthorized' && !passwordPromptShown) {
     passwordPromptShown = true
@@ -124,6 +185,29 @@
     refresh()
   }
 
+  /**
+   * The smallest this panel could legitimately be, in the state it is in.
+   *
+   * Measured, not chosen. Folded, that is one tool's strip row plus the
+   * strip's own padding - anything shorter than that has been caught
+   * mid-render. Open, it is the old 120: a number that came from watching a
+   * cold start report 51 for the header before the body existed.
+   *
+   * Sent with the height rather than kept in main, because main would then
+   * need its own copy of "which state is this", and a second copy of a fact
+   * is how four separate failures happened today.
+   */
+  function measuredFloor(): number {
+    if (!collapsed) return 120
+    const row = panelEl?.querySelector('.strip-row')
+    if (!row) return 24
+    const strip = panelEl!.querySelector('.strip') as HTMLElement | null
+    const padding = strip
+      ? parseFloat(getComputedStyle(strip).paddingTop) + parseFloat(getComputedStyle(strip).paddingBottom)
+      : 0
+    return Math.ceil(row.getBoundingClientRect().height + padding)
+  }
+
   function reportWindowHeight() {
     if (!panelEl) return
 
@@ -135,7 +219,7 @@
 
     lastReportedHeight = height
     lastReportedWidth = width
-    ;window.widget?.resizeWindow({ width, height })
+    ;window.widget?.resizeWindow({ width, height, minHeight: measuredFloor() })
   }
 
   onMount(() => {
@@ -234,17 +318,25 @@
       </div>
     </div>
   {/if}
-  <Header
-    onRefresh={refresh}
-    onClose={close}
-    onToggleSettings={() => { showSettings = !showSettings }}
-    refreshLabel={i18n.refresh}
-    settingsLabel={i18n.settings}
-    closeLabel={i18n.close}
-    statusText={updatedStr}
-  />
+  <!--
+    The header is the whole of what folding removes. Everything below it is
+    drawn in both states, from the same blocks - see the note on .content.
+  -->
+  {#if !collapsed}
+    <Header
+      onRefresh={refresh}
+      onClose={close}
+      onCollapse={() => setCollapsed(true)}
+      onToggleSettings={() => { showSettings = !showSettings }}
+      refreshLabel={i18n.refresh}
+      settingsLabel={i18n.settings}
+      closeLabel={i18n.close}
+      collapseLabel={i18n.collapse}
+      statusText={updatedStr}
+    />
+  {/if}
 
-  {#if showSettings && settings}
+  {#if showSettings && settings && !collapsed}
     <SettingsPanel
       {settings}
       {exchangeRate}
@@ -256,7 +348,23 @@
       on:close={() => { showSettings = false }}
     />
   {:else}
-    <div class="content">
+    <!--
+      One content block for both states.
+
+      Folding is a display mode for the quota section, not a second panel.
+      Every message below - a config that will not parse, a bridge that did
+      not load, a hub that will not answer, nothing received yet, numbers that
+      have stopped moving - is drawn by the same {#if} whether the window is
+      folded or open, and the window sizes itself to its contents, so a strip
+      that has something to say simply grows enough to say it.
+
+      Written this way on purpose. The alternative - a separate strip that
+      renders its own subset - is a second path, and today four failures came
+      from one thing having two paths and only one of them being fixed. There
+      is no place here to forget to draw a message, because there is only one
+      place that draws them.
+    -->
+    <div class="content" class:collapsed>
       <!--
         The quota first, and above everything, because it is the reason the
         window is open. What used to be here is still below it, behind the
@@ -305,19 +413,31 @@
       {/if}
 
       {#if data?.quota}
-        <div class="section">
-          <div class="section-title">{i18n.quotaTitle}</div>
+        <div
+          class="section"
+          role={collapsed ? 'button' : undefined}
+          tabindex={collapsed ? 0 : undefined}
+          title={collapsed ? i18n.expandHint : undefined}
+          on:mousedown={collapsed ? stripPointerDown : undefined}
+          on:mousemove={collapsed ? stripPointerMove : undefined}
+          on:mouseup={collapsed ? stripPointerUp : undefined}
+          on:keydown={collapsed ? (e) => { if (e.key === 'Enter' || e.key === ' ') setCollapsed(false) } : undefined}
+        >
+          {#if !collapsed}
+            <div class="section-title">{i18n.quotaTitle}</div>
+          {/if}
           <QuotaPanel
             quota={data.quota}
             {i18n}
-            detail={settings?.quotaDetail ?? 'full'}
+            detail={collapsed ? 'meter' : (settings?.quotaDetail ?? 'full')}
+            compact={collapsed}
             hiddenTools={settings?.hiddenTools ?? []}
           />
         </div>
       {/if}
 
       <!-- Primary metrics -->
-      {#if settings?.showUsage}
+      {#if settings?.showUsage && !collapsed}
       <div class="section">
         <div class="metric-grid">
           <div class="metric">
@@ -339,7 +459,7 @@
       {/if}
 
       <!-- Token breakdown -->
-      {#if settings?.showTokenBreakdown && data}
+      {#if settings?.showTokenBreakdown && data && !collapsed}
         <div class="section">
           <div class="section-title">{i18n.tokenBreakdownToday}</div>
           <TokenBreakdown
@@ -353,7 +473,7 @@
       {/if}
 
       <!-- Activity chart -->
-      {#if settings?.showHeatmap && data}
+      {#if settings?.showHeatmap && data && !collapsed}
         <div class="section">
           <div class="section-title">{i18n.trend}</div>
           <ActivityChart
@@ -367,7 +487,7 @@
       {/if}
 
       <!-- Details -->
-      {#if settings?.showUsage}
+      {#if settings?.showUsage && !collapsed}
       <div class="section details">
         <StatRow label={i18n.topModel} value={modelStr} sub={modelSubStr} />
         <StatRow label={i18n.topTool} value={toolStr} sub={toolSubStr} />
@@ -481,6 +601,20 @@
   }
   .content {
     padding: 0 14px 8px;
+  }
+
+  /*
+   * Folded: tight, and no rounded gap where the header used to be.
+   *
+   * The messages above the strip keep the ordinary padding, because a strip
+   * that has something to say is no longer only a strip.
+   */
+  .content.collapsed {
+    padding: 5px 10px;
+  }
+
+  .content.collapsed :global(.strip-row) {
+    cursor: grab;
   }
   .section {
     padding: 8px 0;

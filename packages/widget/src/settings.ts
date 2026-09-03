@@ -50,6 +50,14 @@ export interface WidgetSettings {
   quotaDetail: 'meter' | 'percent' | 'full'
   /** Tools the user has switched off, by their id in quota_current. */
   hiddenTools: string[]
+  /**
+   * Folded down to a strip: tool names and meters, nothing else.
+   *
+   * Persisted rather than held in the window, because a fold that forgets
+   * itself on every restart is a fold nobody keeps. The whole point is a
+   * thing that stays on screen without taking any of it.
+   */
+  collapsed: boolean
   /** The token/cost sections this widget used to be made of. */
   showUsage: boolean
   showCost: boolean
@@ -71,6 +79,7 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   zoomFactor: 1,
   quotaDetail: 'full',
   hiddenTools: [],
+  collapsed: false,
   /*
    * Off, because the window's subject changed.
    *

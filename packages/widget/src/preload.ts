@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { WidgetUpdate } from './update'
+import type { PanelSize, WidgetUpdate } from './update'
 
 /*
  * The channel name, written out rather than imported.
@@ -26,7 +26,15 @@ export interface WidgetAPI {
   getData: () => Promise<WidgetUpdate | null>
   openDashboard: () => Promise<void>
   hideWindow: () => void
-  resizeWindow: (size: { width: number; height: number }) => void
+  resizeWindow: (size: PanelSize) => void
+  /**
+   * Move the window by a screen-pixel delta.
+   *
+   * The strip has no header, so it has no -webkit-app-region: drag. That is
+   * deliberate: a drag region swallows clicks, and the strip has to be both
+   * the handle and the way back. See App.svelte.
+   */
+  moveWindowBy: (delta: { dx: number; dy: number }) => void
   onDataUpdate: (callback: (data: WidgetUpdate) => void) => void
   onInstallStatus: (callback: (status: InstallStatus) => void) => void
   onSetupStatus: (callback: (status: InstallStatus) => void) => void
@@ -42,7 +50,8 @@ contextBridge.exposeInMainWorld('widget', {
   getData: () => ipcRenderer.invoke('widget:get-data'),
   openDashboard: () => ipcRenderer.invoke('widget:open-dashboard'),
   hideWindow: () => ipcRenderer.send('widget:hide-window'),
-  resizeWindow: (size: { width: number; height: number }) => ipcRenderer.send('widget:resize-window', size),
+  resizeWindow: (size: PanelSize) => ipcRenderer.send('widget:resize-window', size),
+  moveWindowBy: (delta: { dx: number; dy: number }) => ipcRenderer.send('widget:move-window-by', delta),
   onDataUpdate: (callback: (data: WidgetUpdate) => void) => {
     ipcRenderer.removeAllListeners(WIDGET_UPDATE_CHANNEL)
     ipcRenderer.on(WIDGET_UPDATE_CHANNEL, (_event, data) => callback(data))

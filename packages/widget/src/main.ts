@@ -14,7 +14,7 @@ import { HUB_PASSWORD_CREDENTIAL, hubPasswordSource, resolveHubPassword, saveCre
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
 import { eventsFromApi, nextBatch, notificationsPath } from './notifications'
 import { WIDGET_UPDATE_CHANNEL } from './update'
-import type { WidgetUpdate } from './update'
+import type { PanelSize, WidgetUpdate } from './update'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
 import type { WidgetSettings } from './settings'
@@ -42,18 +42,23 @@ const WINDOW_WIDTH = 380
 const DEFAULT_WINDOW_HEIGHT = 320
 
 /*
- * A floor against the panel measuring itself mid-render.
+ * The range a panel-reported floor has to fall inside.
  *
- * The first height this receives on a cold start is 51 - the header alone,
- * before anything below it exists - and a 51-pixel window is a glitch
- * someone would report. 120 is above that and below anything real: the
- * quota-only panel measures 238.
+ * The floor itself now arrives with each measurement - see PanelSize - since
+ * an open panel and a folded strip have nothing like the same smallest
+ * legitimate shape, and the renderer is the only thing that knows which it
+ * just drew. These two are only a sanity range around that number, so a
+ * garbage value cannot produce a window of zero height or one that fills the
+ * screen. They are not the floor.
  *
- * It was 320, chosen when the window held a trend chart and three stat rows.
- * That number outlived its contents and became a floor the panel could not
- * get under, which is most of why there was blank space below the text.
+ * The old single constant was 120, and before that 320 - a number chosen when
+ * the window held a trend chart and three stat rows, which outlived its
+ * contents and became a floor the panel could not get under. That is most of
+ * why there used to be blank space below the text, and it is the argument
+ * against having one of these at all.
  */
-const MIN_WINDOW_HEIGHT = 120
+const MIN_REPORTED_FLOOR = 16
+const MAX_REPORTED_FLOOR = 400
 
 /*
  * How far the whole panel can be scaled, and in what steps.
@@ -391,7 +396,13 @@ function createWindow(): void {
   win.webContents.on('did-finish-load', () => applyZoom())
 
   if (shouldHideWindowOnBlur(app.isPackaged)) {
-    win.on('blur', () => win?.hide())
+    // Never while folded. A strip exists to sit there being glanced at, and
+    // one that vanishes the moment you click anything else is not resident -
+    // it is a popup with extra steps. (Today this only fires in a packaged
+    // build, so the three machines running from a checkout never hit it; the
+    // guard is here because that is a property of how it was launched, not a
+    // decision anybody made about folding.)
+    win.on('blur', () => { if (!settings.collapsed) win?.hide() })
   }
 }
 
@@ -969,12 +980,36 @@ ipcMain.on('widget:hide-window', () => {
  * without waiting for the renderer to notice and measure again - otherwise
  * the window keeps its old size until something else in the panel moves.
  */
-let lastPanelSize: { width: number; height: number } | null = null
+let lastPanelSize: PanelSize | null = null
 
-ipcMain.on('widget:resize-window', (_event, size: { width: number; height: number }) => {
-  if (!win || !size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) return
+ipcMain.on('widget:resize-window', (_event, size: PanelSize) => {
+  if (!win || !size) return
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height) || !Number.isFinite(size.minHeight)) return
   lastPanelSize = size
   resizeToPanel(size)
+})
+
+/**
+ * Moves the window by a delta the strip measured in screen pixels.
+ *
+ * The folded strip cannot use -webkit-app-region: drag, because a drag
+ * region does not hand its clicks back and the strip has to be both the
+ * handle and the way back out of folding. So it watches the pointer itself
+ * and sends what it sees. Deltas rather than positions: the renderer knows
+ * how far the pointer moved and nothing about where this window is, which is
+ * main's business and stays there.
+ */
+ipcMain.on('widget:move-window-by', (_event, delta: { dx: number; dy: number }) => {
+  if (!win || !delta || !Number.isFinite(delta.dx) || !Number.isFinite(delta.dy)) return
+  if (delta.dx === 0 && delta.dy === 0) return
+  const bounds = win.getBounds()
+  const area = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea
+  // Kept on a screen. A strip dragged off the edge is a strip nobody can
+  // reach again, and there is no taskbar entry to get it back from.
+  win.setPosition(
+    Math.max(area.x, Math.min(bounds.x + Math.round(delta.dx), area.x + area.width - bounds.width)),
+    Math.max(area.y, Math.min(bounds.y + Math.round(delta.dy), area.y + area.height - bounds.height)),
+  )
 })
 
 /**
@@ -989,7 +1024,7 @@ ipcMain.on('widget:resize-window', (_event, size: { width: number; height: numbe
  * and re-centring it on the tray - which is right when it first appears -
  * makes it jump sideways every time the contents change.
  */
-function resizeToPanel(css: { width: number; height: number }): void {
+function resizeToPanel(css: PanelSize): void {
   if (!win) return
 
   const zoom = clampZoom(settings.zoomFactor)
@@ -997,8 +1032,9 @@ function resizeToPanel(css: { width: number; height: number }): void {
   const displayBounds = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea
 
   const nextWidth = Math.round(css.width * zoom)
+  const floor = Math.min(MAX_REPORTED_FLOOR, Math.max(MIN_REPORTED_FLOOR, css.minHeight))
   const nextHeight = Math.min(
-    Math.max(Math.ceil(css.height * zoom), Math.round(MIN_WINDOW_HEIGHT * zoom)),
+    Math.max(Math.ceil(css.height * zoom), Math.round(floor * zoom)),
     displayBounds.height,
   )
 

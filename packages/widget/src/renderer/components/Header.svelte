@@ -1,10 +1,12 @@
 <script lang="ts">
   export let onRefresh: () => void
   export let onClose: () => void
+  export let onCollapse: () => void
   export let onToggleSettings: () => void
   export let refreshLabel: string
   export let settingsLabel: string
   export let closeLabel: string
+  export let collapseLabel: string
   export let statusText: string = ''
 </script>
 
@@ -36,7 +38,21 @@
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
     </button>
-    <button class="icon-btn" title={closeLabel} aria-label={closeLabel} on:click={onClose}>
+    <!--
+      Fold is here, in the group, and close is the last thing on the row with
+      a gap before it. The two do different things to the window - one leaves
+      it on screen as a strip, the other takes it away until the tray is
+      clicked - and they are next to each other, so they are separated by
+      position, by shape, and by what happens on hover: this one greys, close
+      goes red. A shared look would make the difference visible only after
+      pressing the wrong one.
+    -->
+    <button class="icon-btn" title={collapseLabel} aria-label={collapseLabel} on:click={onCollapse}>
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6.5L8 10.5L12 6.5"/>
+      </svg>
+    </button>
+    <button class="icon-btn danger" title={closeLabel} aria-label={closeLabel} on:click={onClose}>
       <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
         <path d="M2 2l8 8M10 2l-8 8"/>
       </svg>
@@ -94,4 +110,21 @@
     background: var(--bg-hover);
     color: var(--text-primary);
   }
+
+  /*
+   * Close, and only close, goes red under the pointer.
+   *
+   * It sits beside a control that also makes the window smaller, and the two
+   * outcomes are not interchangeable: fold leaves a strip on screen, close
+   * takes the window away until someone finds the tray. The colour arrives
+   * while the pointer is on it and before the click - which is the only
+   * moment the difference can still be acted on.
+   */
+  .icon-btn.danger:hover {
+    background: var(--bg-hover);
+    color: var(--danger);
+  }
+
+  /* A gap, so the last button is not simply the third of three. */
+  .icon-btn.danger { margin-left: 4px; }
 </style>
