@@ -413,6 +413,30 @@
       {/if}
 
       {#if data?.quota}
+        <!--
+          A11y: noninteractive element cannot have nonnegative tabIndex value
+
+          Silenced with the reason, not deleted, because the reason is that
+          the check is wrong here and someone should be able to see why
+          without re-deriving it.
+
+          role, tabindex and the key handler are all switched by the same
+          `collapsed`. Folded, this is a button and behaves like one: it has
+          role="button", it is in the tab order, and Enter and Space unfold it
+          exactly as a click does. Open, it is a plain div with none of the
+          three. The two states are never half-applied.
+
+          svelte-check evaluates attributes statically, so it sees a tabindex
+          it cannot prove is paired with a role and reports the pairing it
+          cannot see. That is a limit of the check, not a gap in the markup.
+
+          Left as a warning it would fire on every single build. A warning
+          that is always wrong is worse than no warning: it teaches everyone
+          to scroll past that colour, and the day a real one appears it
+          arrives in a colour people have learned to ignore. There is a
+          second one of these on the laptop - see STATE.md, "常に間違う警告".
+        -->
+        <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
         <div
           class="section"
           role={collapsed ? 'button' : undefined}
