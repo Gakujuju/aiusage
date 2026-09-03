@@ -28,6 +28,10 @@ export interface Translations {
   hubUrlLabel: string
   hubPasswordLabel: string
   hubPasswordSet: string
+  /** The hub is this machine, so its own password is being reused. */
+  hubPasswordInherited: string
+  /** Under an empty address box: what the blank actually resolves to. */
+  hubUrlAuto: (url: string) => string
   /** Shown in the settings panel that opens by itself after a 401. */
   hubPasswordNeeded: string
   /** config.json is there and unreadable; the address below it is a guess. */
@@ -114,6 +118,8 @@ const en: Translations = {
   hubUrlLabel: 'Address',
   hubPasswordLabel: 'Dashboard password',
   hubPasswordSet: 'saved',
+  hubPasswordInherited: "this machine's own",
+  hubUrlAuto: (url: string) => `Empty means automatic - currently ${url}`,
   hubPasswordNeeded: 'The hub needs its dashboard password before this can show anything.',
   configUnreadable: (detail: string) =>
     `config.json could not be read, so this may be showing the wrong machine. ${detail}`,
@@ -196,6 +202,8 @@ const ja: Translations = {
   hubUrlLabel: 'アドレス',
   hubPasswordLabel: 'ダッシュボードのパスワード',
   hubPasswordSet: '保存済み',
+  hubPasswordInherited: 'この端末のものを使用中',
+  hubUrlAuto: (url: string) => `空欄なら自動 ── いまは ${url}`,
   hubPasswordNeeded: '数字を出すには、ハブのダッシュボードのパスワードが要ります。',
   configUnreadable: (detail: string) =>
     `config.json が読めません。別の端末の数字を出している可能性があります。${detail}`,
@@ -278,6 +286,8 @@ const zh: Translations = {
   hubUrlLabel: '地址',
   hubPasswordLabel: '仪表盘密码',
   hubPasswordSet: '已保存',
+  hubPasswordInherited: '正在使用本机的密码',
+  hubUrlAuto: (url: string) => `留空即自动 ── 当前为 ${url}`,
   hubPasswordNeeded: '需要输入枢纽的仪表盘密码后才能显示数据。',
   configUnreadable: (detail: string) =>
     `无法读取 config.json，显示的可能是另一台机器的数据。${detail}`,

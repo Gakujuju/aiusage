@@ -8,10 +8,17 @@
   actually goes wrong, so it is read from where this script lives rather than
   typed.
 
-  Two files are written next to start-serve.cmd:
+  Four files are written next to start-serve.cmd:
 
-    aiusage-update.cmd      the whole update, in order
-    aiusage-stop-serve.ps1  the one step cmd.exe cannot express safely
+    aiusage-update.cmd         the whole update, in order
+    aiusage-stop-serve.ps1     the one step cmd.exe cannot express safely
+    aiusage-restart-serve.ps1  starts it again, and checks the port rather
+                               than believing schtasks
+    start-serve-hidden.vbs     runs start-serve.cmd with no console window
+
+  This script does not register the scheduled task. That needs an elevated
+  session and lives in SETUP-NEW-MACHINE.md; what this writes is the launcher
+  the task should be pointed at.
 
   The order inside the .cmd is the point of the file: pull, build, stop,
   start, read the log. Stopping first leaves the machine with no serve
@@ -339,10 +346,34 @@ Write-Host `$said
 exit 1
 "@
 
+# The watchdog's launcher, so it stops taking the screen every five minutes.
+#
+# The task ran cmd.exe directly. A scheduled task with LogonType Interactive
+# runs in the logged-on session, so every five minutes a console window
+# appeared over whatever was being typed - and it appeared whether or not
+# serve needed restarting, because the check is the thing that runs. serve
+# had died three times in fourteen hours; the window came up 168 times.
+#
+# wscript with WshShell.Run and intWindowStyle 0 starts the same .cmd with no
+# console at all. bWaitOnReturn is False: the watchdog must not sit waiting
+# for a serve that is meant to run for days.
+#
+# The path is derived from the script's own location rather than baked in, so
+# this one line is the same on every machine.
+#
+# ASCII, deliberately, and for a sharper reason than the .cmd files. The
+# Windows Script Host reads .vbs in the console code page, and a BOM at the
+# front is a syntax error on line 1. Set-Content -Encoding UTF8 writes one.
+# That is the failure that cost half a day in config.json on 2026-09-02, and
+# there is no reason to earn it a second time in a different file.
+$hidden = 'CreateObject("WScript.Shell").Run """" & CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName) & "\start-serve.cmd""", 0, False'
+
+Set-Content -Path (Join-Path $dest 'start-serve-hidden.vbs') -Value $hidden -Encoding ascii
 Set-Content -Path (Join-Path $dest 'aiusage-update.cmd') -Value $cmd -Encoding ascii
 Set-Content -Path (Join-Path $dest 'aiusage-stop-serve.ps1') -Value $stop -Encoding ascii
 Set-Content -Path (Join-Path $dest 'aiusage-restart-serve.ps1') -Value $restart -Encoding ascii
 
+Write-Host "wrote $dest\start-serve-hidden.vbs"
 Write-Host "wrote $dest\aiusage-update.cmd"
 Write-Host "wrote $dest\aiusage-stop-serve.ps1"
 Write-Host "wrote $dest\aiusage-restart-serve.ps1"

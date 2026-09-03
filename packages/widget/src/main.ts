@@ -10,7 +10,7 @@ import type { QuotaRow, Severity } from './quota'
 import { Hub, HubError } from './hub'
 import type { HubFailure } from './hub'
 import { DEFAULT_PORT, resolveHubUrl } from './hub-url'
-import { HUB_PASSWORD_CREDENTIAL, resolveHubPassword, saveCredential } from './credentials'
+import { HUB_PASSWORD_CREDENTIAL, hubPasswordSource, resolveHubPassword, saveCredential } from './credentials'
 import { SEVERITY_COLOURS, tintBitmap } from './tray-icon'
 import { eventsFromApi, nextBatch, notificationsPath } from './notifications'
 import { WIDGET_UPDATE_CHANNEL } from './update'
@@ -925,6 +925,9 @@ async function buildPayload(rows: QuotaRow[] | null) {
  * to the same place the CLI keeps its secrets - see credentials.ts, which
  * also records what this widens.
  */
+ipcMain.handle('widget:get-hub-password-source', () =>
+  hub ? hubPasswordSource(hub.url) : 'none')
+
 ipcMain.handle('widget:save-hub-password', async (_event, password: unknown) => {
   if (typeof password !== 'string' || password.length === 0) return false
   saveCredential(HUB_PASSWORD_CREDENTIAL, password)

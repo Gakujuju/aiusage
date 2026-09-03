@@ -33,6 +33,8 @@ export interface WidgetAPI {
   getSettings: () => Promise<WidgetSettings>
   saveSettings: (settings: WidgetSettings) => Promise<WidgetSettings>
   saveHubPassword: (password: string) => Promise<boolean>
+  /** Whether a password is in place, and where it came from. Never the value. */
+  getHubPasswordSource: () => Promise<'typed' | 'inherited' | 'none'>
   getExchangeRate: () => Promise<ExchangeRateState>
 }
 
@@ -56,5 +58,6 @@ contextBridge.exposeInMainWorld('widget', {
   getSettings: () => ipcRenderer.invoke('widget:get-settings'),
   saveSettings: (settings: WidgetSettings) => ipcRenderer.invoke('widget:save-settings', settings),
   saveHubPassword: (password: string) => ipcRenderer.invoke('widget:save-hub-password', password),
+  getHubPasswordSource: () => ipcRenderer.invoke('widget:get-hub-password-source'),
   getExchangeRate: () => ipcRenderer.invoke('widget:get-exchange-rate'),
 } satisfies WidgetAPI)

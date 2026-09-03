@@ -252,6 +252,10 @@ Set-Content -Path "$env:USERPROFILE\.aiusage\start-serve.cmd" -Value $cmd -Encod
 
 `AIUSAGE_CLI` のパスを実際のチェックアウト先に書き換えること。
 
+**そのあと `scripts\write-update-cmd.ps1` を実行すること。**
+更新スクリプト3本に加えて `start-serve-hidden.vbs` を書く。
+次の手順のタスクは、その VBS を指す。
+
 ### 8. タスク登録
 
 **登録には管理者権限が要るが、実行は通常権限で行われる。**
@@ -266,7 +270,7 @@ Set-Content -Path "$env:USERPROFILE\.aiusage\start-serve.cmd" -Value $cmd -Encod
 `$env:USERPROFILE` が別ユーザーを指す場合がある。
 
 ```powershell
-$action  = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c "C:\Users\<ユーザー名>\.aiusage\start-serve.cmd"'
+$action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument '"C:\Users\<ユーザー名>\.aiusage\start-serve-hidden.vbs"'
 $atLogon = New-ScheduledTaskTrigger -AtLogOn
 $watch   = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
 $watch.Repetition.StopAtDurationEnd = $false
@@ -274,6 +278,16 @@ $settings  = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -Executio
 $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\<ユーザー名>" -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName aiusage-serve -Action $action -Trigger $atLogon,$watch -Settings $settings -Principal $principal -Description "aiusage serve at logon, plus a 5-minute watchdog"
 ```
+
+**`cmd.exe` を直接指さないこと。**
+`LogonType Interactive` のタスクはログオン中のセッションで動くので、
+`cmd.exe` を指すと**5分ごとに黒い窓が画面に出る。**
+しかも serve が生きていても出る ── 生死を確かめる処理そのものが実行だからである。
+実測（職場PC）: serve が落ちたのは14時間で3回、窓が出たのは168回。
+
+`wscript.exe` ＋ `start-serve-hidden.vbs` は同じ .cmd を
+`intWindowStyle 0`（非表示）で起動する。**見張りは何も変わらない。**
+実測: .cmd の子プロセスは動いており、可視のコンソール窓は0。
 
 `-RunLevel Limited` なので、登録が管理者でも**タスク本体は通常権限で動く**。
 
@@ -299,6 +313,32 @@ UserId=<PC名>\<ユーザー名>  LogonType=Interactive  RunLevel=Limited
 `StopAtDurationEnd=True` は「繰り返し期間の終わりに実行中のタスクを止める」
 設定で、常駐タスクに付けてよいものではない。
 `New-ScheduledTaskTrigger -RepetitionInterval` は既定でこれを入れる。
+
+### 8-b. すでに登録済みの端末を差し替える（3台とも該当）
+
+**作り直さないこと。** `Unregister` → `Register` にすると、
+上の S4U で拒否された経緯をもう一度踏む。
+**アクションだけを差し替える。**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\write-update-cmd.ps1
+$new = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$env:USERPROFILE\.aiusage\start-serve-hidden.vbs`""
+Set-ScheduledTask -TaskName aiusage-serve -Action $new
+```
+
+**管理者権限は要らない**（実測。同じ利用者が所有するタスクなので）。
+`Set-ScheduledTask -Action` は**プリンシパルもトリガも保持する**
+── 実測で確認した: `LogonType` は `Interactive` のまま、トリガ数も変わらない。
+
+確認:
+
+```powershell
+(Get-ScheduledTask -TaskName aiusage-serve).Actions
+(Get-ScheduledTask -TaskName aiusage-serve).Triggers | ForEach-Object { "$($_.CimClass.CimClassName)  Interval=$($_.Repetition.Interval)" }
+```
+
+期待: `wscript.exe` と VBS のパス、`Interval=PT5M` が残っていること。
+**間隔は変えない。** serve が死んだときに戻す役目は要る。
 
 ### 9. 実地確認
 

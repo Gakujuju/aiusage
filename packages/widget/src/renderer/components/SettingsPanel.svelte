@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte'
+  import { createEventDispatcher, onMount } from 'svelte'
   import { t } from '../i18n'
   import type { Locale } from '../i18n'
   import { currencies } from '../../currency'
@@ -21,6 +21,17 @@
    */
   export let needPassword = false
   /**
+   * The address actually in use, from the update the panel is drawn beside.
+   *
+   * The placeholder used to be the literal string http://127.0.0.1:3847, on
+   * every machine, whatever it was really talking to. On a spoke reading the
+   * hub over the tailnet that is not a hint, it is a wrong answer with the
+   * authority of the settings screen - and it is the same wrong answer a
+   * genuinely misconfigured machine would show, which is exactly the
+   * confusion that cost half a day on 2026-09-02.
+   */
+  export let resolvedHubUrl: string | null = null
+  /**
    * The tools present in the data, not a fixed list.
    *
    * Whatever quota_current holds is what can be switched off, so a machine
@@ -29,10 +40,22 @@
    */
   let hubPassword = ''
   let hubSaved = false
+  /** What the main process says is in place. Asked, not assumed. */
+  let passwordSource: 'typed' | 'inherited' | 'none' = 'none'
+  // Built here rather than inline: an {#if} inside the label collapsed the
+  // whitespace around it and ran the dash into the word before it.
+  $: passwordStatus =
+    hubSaved || passwordSource === 'typed' ? ` — ${i18n.hubPasswordSet}`
+    : passwordSource === 'inherited' ? ` — ${i18n.hubPasswordInherited}`
+    : ''
+  onMount(async () => {
+    passwordSource = (await window.widget?.getHubPasswordSource()) ?? 'none'
+  })
 
   async function saveHubPassword(): Promise<void> {
     if (!hubPassword) return
     hubSaved = (await window.widget?.saveHubPassword(hubPassword)) ?? false
+    if (hubSaved) passwordSource = 'typed'
     /* Not kept in the field: it is stored, and leaving it on screen only
        gives it somewhere else to be read from. */
     hubPassword = ''
@@ -225,14 +248,17 @@
       <input
         class="field-input"
         type="text"
-        placeholder="http://127.0.0.1:3847"
+        placeholder={resolvedHubUrl ?? ''}
         bind:value={local.hubUrl}
         on:change={save}
       />
+      {#if !local.hubUrl && resolvedHubUrl}
+        <span class="field-hint">{i18n.hubUrlAuto(resolvedHubUrl)}</span>
+      {/if}
     </label>
     <label class="field">
-      <span class="field-label">{i18n.hubPasswordLabel}{hubSaved ? ` — ${i18n.hubPasswordSet}` : ''}</span>
-      {#if needPassword && !hubSaved}
+      <span class="field-label">{i18n.hubPasswordLabel}{passwordStatus}</span>
+      {#if needPassword && !hubSaved && passwordSource === 'none'}
         <!-- Why this panel opened on its own. Without it the panel looks
              like the user pressed the gear by accident. -->
         <span class="field-note">{i18n.hubPasswordNeeded}</span>
@@ -463,6 +489,12 @@
   .field-label {
     font-size: 0.6875rem;
     color: var(--text-muted);
+  }
+
+  .field-hint {
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    line-height: 1.5;
   }
 
   .field-note {

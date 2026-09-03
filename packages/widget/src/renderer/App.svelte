@@ -249,6 +249,7 @@
       {settings}
       {exchangeRate}
       needPassword={data?.hubProblem === 'unauthorized'}
+      resolvedHubUrl={data?.hubUrl ?? null}
       knownTools={(data?.quota?.tools ?? []).map((t) => ({ id: t.tool, label: t.label }))}
       hiddenTiers={data?.quota?.hiddenTiers ?? []}
       on:save={saveSettings}

@@ -79,6 +79,28 @@ export function saveCredential(key: string, value: string): void {
 }
 
 /**
+ * Which password is in play, without producing the password.
+ *
+ * The settings panel used to show an empty box either way, so a machine with
+ * a working saved password looked exactly like one that had never been set
+ * up - on the machine where it mattered, the box was empty while the panel
+ * behind it was showing live numbers that could only have come from a
+ * password. The screen was describing the default, not the state.
+ *
+ * 'inherited' is kept separate from 'typed' rather than folded into "saved":
+ * on the hub itself nothing was ever typed, and telling someone their
+ * password is saved when it is really their own machine's being reused would
+ * be the same kind of confident wrong answer in the other direction.
+ */
+export type HubPasswordSource = 'typed' | 'inherited' | 'none'
+
+export function hubPasswordSource(hubUrl: string): HubPasswordSource {
+  if (loadCredential(HUB_PASSWORD_CREDENTIAL)) return 'typed'
+  if (isThisMachine(hubUrl) && loadCredential(OWN_DASHBOARD_PASSWORD)) return 'inherited'
+  return 'none'
+}
+
+/**
  * The password to log in to a particular hub with.
  *
  * Two places, and the order matters. A password typed into the widget is for
