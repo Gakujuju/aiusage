@@ -17,6 +17,8 @@ import { WIDGET_UPDATE_CHANNEL } from './update'
 import type { PanelSize, WidgetUpdate } from './update'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
+import { SIZE_ORDER, SIZE_TIERS } from './size'
+import type { SizeName } from './size'
 import type { WidgetSettings } from './settings'
 import {
   getTrayIconNativeImage,
@@ -61,54 +63,31 @@ const MIN_REPORTED_FLOOR = 16
 const MAX_REPORTED_FLOOR = 400
 
 /*
- * The shortest a transparent window can be on Windows, in device pixels.
+ * The shortest a frameless window can be on Windows, in device pixels.
  *
- * Not a number anyone here chose. Asked for 33, the OS produced 64; asked for
- * 39 with transparency off, it produced 39 (2026-09-03, at 100% DPI). Width
- * has no such floor. It is written down because Electron does not know it:
- * getBounds() and getContentSize() report the height that was requested, so
- * the web contents are laid out 33 tall inside a 64-tall window, and the
- * bottom 31 pixels are neither drawn into nor clickable. Asking for 64 up
- * front makes the viewport the size the window actually is, which is what
- * lets the renderer centre a short strip and treat the whole window as the
- * target.
+ * Not a number anyone here chose. Asked for 12 and for 33, the OS produced
+ * 39 both times; with transparency on it was 64, and thickFrame:false made
+ * no difference (2026-09-03/04, 100% DPI). Width has no such floor.
  *
- * If this is ever measured to be wrong - another Windows build, another DPI -
- * the symptom is a strip with dead space under it, and this is the number to
- * re-measure.
+ * It is written down because Electron does not know it: getBounds() and
+ * getContentSize() report the height that was requested, so the web
+ * contents are laid out that tall inside a taller window and the difference
+ * is neither drawn into nor clickable. Asking for 39 up front keeps the
+ * viewport the size the window actually is, which is what lets the renderer
+ * centre a short strip and treat the whole window as the target.
+ *
+ * If this is ever wrong - another Windows build, another DPI - the symptom is
+ * a strip with dead space under it, and this is the number to re-measure.
  */
-const TRANSPARENT_MIN_HEIGHT_WIN = 64
+const FRAMELESS_MIN_HEIGHT_WIN = 39
 
 /*
- * How far the whole panel can be scaled, and in what steps.
+ * How big the window is drawn: one of four named sizes, in size.ts.
  *
- * Zoom rather than a draggable edge. The window already sizes itself to its
- * contents, so widening it by hand would only add the margin that was just
- * taken out, and the next content change would undo it. Scaling moves the
- * text, the bars and the window together and leaves that behaviour intact.
- *
- * The top, 1.5, is where the countdown wraps onto a second line, which is
- * the one thing a glanceable panel cannot do.
- *
- * The bottom was 0.7, on the grounds that below it the percentages stop
- * being readable at arm's length. The person using it then asked for
- * smaller and said the text could be small - which removes that reason,
- * and a limit whose reason is gone has no reason to stay. The floor is now
- * where the strip stops being usable as a thing to press and to grab. At
- * 0.5 it is 172 wide - and still 64 tall, because Windows will not make a
- * transparent window any shorter (see resizeToPanel). Below 0.5 the width
- * is what gets too small to hit reliably. Readable is the user's call;
- * grabbable is not.
- *
- * One number for both states, on purpose. A separate floor for the strip
- * would be a second value that has to agree with this one, and the next
- * change to either would be the next time only one of them is made.
- *
- * 0.1 steps, because 0.05 needs two presses to see any difference.
+ * This used to be a zoom factor in 0.1 steps with its own floor and its own
+ * reasons. The sizes carry those reasons now, next to the numbers they
+ * justify, and there is one thing to pick rather than a dial.
  */
-const ZOOM_MIN = 0.5
-const ZOOM_MAX = 1.5
-const ZOOM_STEP = 0.1
 const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 let tray: Tray | null = null
@@ -183,6 +162,14 @@ app.setName('AIUsage Widget')
  * one are one identity rather than two.
  */
 const AUMID = 'com.juliantanx.aiusage-widget'
+
+/** Which translation names each size. */
+const SIZE_LABEL_KEY = {
+  normal: 'sizeNormal',
+  small: 'sizeSmall',
+  tiny: 'sizeTiny',
+  micro: 'sizeMicro',
+} as const satisfies Record<SizeName, 'sizeNormal' | 'sizeSmall' | 'sizeTiny' | 'sizeMicro'>
 
 if (process.platform === 'win32') {
   app.setAppUserModelId(AUMID)
@@ -339,23 +326,17 @@ function say(message: string): void {
  */
 function applyZoom(): void {
   if (!win) return
-  const zoom = clampZoom(settings.zoomFactor)
+  const zoom = SIZE_TIERS[settings.size].zoom
   win.webContents.setZoomFactor(zoom)
   if (lastPanelSize) resizeToPanel(lastPanelSize)
 }
 
-function clampZoom(value: number): number {
-  if (!Number.isFinite(value)) return 1
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100))
-}
-
 /**
- * @param delta Steps to move by; 0 means back to 1.
+ * Picks one of the four sizes, remembers it, and redraws to it.
  */
-function changeZoom(delta: number): void {
-  const next = delta === 0 ? 1 : clampZoom(settings.zoomFactor + delta * ZOOM_STEP)
-  if (next === settings.zoomFactor) return
-  settings = { ...settings, zoomFactor: next }
+function setSize(next: SizeName): void {
+  if (next === settings.size) return
+  settings = { ...settings, size: next }
   saveSettings(settings)
   applyZoom()
 }
@@ -405,9 +386,14 @@ function createTray(): void {
         click: () => setAlwaysOnTop(!settings.alwaysOnTop),
       },
       { type: 'separator' },
-      { label: i18n.zoomIn, accelerator: 'CommandOrControl+Plus', click: () => changeZoom(1) },
-      { label: i18n.zoomOut, accelerator: 'CommandOrControl+-', click: () => changeZoom(-1) },
-      { label: i18n.zoomReset, accelerator: 'CommandOrControl+0', click: () => changeZoom(0) },
+      // Four radio items, one per size, largest first. The strip's own
+      // settings are behind the strip when it is folded; the tray is not.
+      ...SIZE_ORDER.map((name) => ({
+        label: i18n[SIZE_LABEL_KEY[name]],
+        type: 'radio' as const,
+        checked: settings.size === name,
+        click: () => setSize(name),
+      })),
       { type: 'separator' },
       { label: i18n.quit, click: () => { app.exit(0) } },
     ])
@@ -439,7 +425,21 @@ function createWindow(): void {
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: settings.alwaysOnTop,
-    transparent: true,
+    /*
+     * Opaque, on purpose, and without a switch.
+     *
+     * Transparency gave the panel its rounded corners and cost it the ability
+     * to be shorter than 64 device pixels on Windows (39 without). The two
+     * smallest sizes cannot exist under 64, and the person using this put
+     * transparency last, so it is off.
+     *
+     * Not a setting: transparent is decided when the window is created, so a
+     * toggle would mean tearing the window down and building another - a
+     * path that runs once in a blue moon and is exactly where a forgotten
+     * piece of state goes to live. If it is ever wanted, it costs a restart
+     * and it should say so.
+     */
+    transparent: false,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1031,6 +1031,9 @@ ipcMain.handle('widget:save-settings', (_event, newSettings: WidgetSettings) => 
   settings = newSettings
   saveSettings(settings)
   applyTheme(settings.theme)
+  // The size may have changed, and the panel does not re-measure for a zoom
+  // change on its own: its CSS pixels are the same, only the window differs.
+  applyZoom()
   startAutoRefresh()
   return settings
 })
@@ -1093,7 +1096,7 @@ ipcMain.on('widget:move-window-by', (_event, delta: { dx: number; dy: number }) 
 function resizeToPanel(css: PanelSize): void {
   if (!win) return
 
-  const zoom = clampZoom(settings.zoomFactor)
+  const zoom = SIZE_TIERS[settings.size].zoom
   const bounds = win.getBounds()
   const displayBounds = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea
 
@@ -1101,7 +1104,7 @@ function resizeToPanel(css: PanelSize): void {
   const floor = Math.min(MAX_REPORTED_FLOOR, Math.max(MIN_REPORTED_FLOOR, css.minHeight))
   // The OS will not go lower than this on Windows; asking for less only
   // makes Electron's idea of the window disagree with the window.
-  const osFloor = process.platform === 'win32' ? TRANSPARENT_MIN_HEIGHT_WIN : 0
+  const osFloor = process.platform === 'win32' ? FRAMELESS_MIN_HEIGHT_WIN : 0
   const nextHeight = Math.min(
     Math.max(Math.ceil(css.height * zoom), Math.round(floor * zoom), osFloor),
     displayBounds.height,

@@ -43,9 +43,14 @@ export interface Translations {
   widgetNoData: string
   hubUnreachable: (url: string) => string
   hubUnauthorized: (url: string) => string
-  zoomIn: string
-  zoomOut: string
-  zoomReset: string
+  /** The four sizes, in the words the user used for them. */
+  sizeSection: string
+  sizeNormal: string
+  sizeSmall: string
+  sizeTiny: string
+  sizeMicro: string
+  /** Under the detail buttons while the smallest size is fixing them. */
+  detailFixedAtMicro: string
   /* One choice of three, not a switch per element. */
   detail: string
   detailMeter: string
@@ -135,9 +140,12 @@ const en: Translations = {
   widgetNoData: 'No reading yet.',
   hubUnreachable: (url: string) => `Cannot reach the hub at ${url}.`,
   hubUnauthorized: (url: string) => `The hub at ${url} rejected the password.`,
-  zoomIn: 'Larger',
-  zoomOut: 'Smaller',
-  zoomReset: 'Default size',
+  sizeSection: 'Size',
+  sizeNormal: 'Normal',
+  sizeSmall: 'Small',
+  sizeTiny: 'Tiny',
+  sizeMicro: 'Micro',
+  detailFixedAtMicro: 'Micro shows numbers only.',
   detail: 'Detail',
   detailMeter: 'Meter',
   detailPercent: '+ percent',
@@ -222,9 +230,12 @@ const ja: Translations = {
   widgetNoData: 'まだ値を受け取っていません。',
   hubUnreachable: (url: string) => `ハブに繋がりません（${url}）。`,
   hubUnauthorized: (url: string) => `ハブがパスワードを受け付けません（${url}）。`,
-  zoomIn: '大きく',
-  zoomOut: '小さく',
-  zoomReset: '既定の大きさ',
+  sizeSection: '大きさ',
+  sizeNormal: '普通',
+  sizeSmall: '小',
+  sizeTiny: '極小',
+  sizeMicro: '最極小',
+  detailFixedAtMicro: '最極小では数字だけになります。',
   detail: '詳しさ',
   detailMeter: 'メーターだけ',
   detailPercent: '＋ 割合',
@@ -309,9 +320,12 @@ const zh: Translations = {
   widgetNoData: '尚未收到数据。',
   hubUnreachable: (url: string) => `无法连接到中枢（${url}）。`,
   hubUnauthorized: (url: string) => `中枢拒绝了密码（${url}）。`,
-  zoomIn: '放大',
-  zoomOut: '缩小',
-  zoomReset: '默认大小',
+  sizeSection: '大小',
+  sizeNormal: '普通',
+  sizeSmall: '小',
+  sizeTiny: '极小',
+  sizeMicro: '最小',
+  detailFixedAtMicro: '最小尺寸只显示数字。',
   detail: '详细程度',
   detailMeter: '仅进度条',
   detailPercent: '＋ 百分比',

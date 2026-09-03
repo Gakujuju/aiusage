@@ -85,7 +85,8 @@ describe('folding does not create a second display path', () => {
      * 'percent' is the level that draws a bar and a number and stops there,
      * so the strip is not a third rendering with its own idea of the middle.
      */
-    expect(app).toContain("detail={collapsed ? 'percent' : (settings?.quotaDetail ?? 'full')}")
+    // One function decides, for both states - see size.ts.
+    expect(app).toContain("detail={quotaDetailFor(settings?.size ?? 'normal', collapsed, settings?.quotaDetail ?? 'full')}")
     expect(app).toContain('compact={collapsed}')
   })
 

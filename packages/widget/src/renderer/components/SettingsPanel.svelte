@@ -10,6 +10,15 @@
    * was missing two fields, one of which this file already reads below.
    */
   import type { WidgetSettings } from '../../settings'
+  import { SIZE_ORDER } from '../../size'
+  import type { SizeName } from '../../size'
+
+  const SIZE_KEY: Record<SizeName, 'sizeNormal' | 'sizeSmall' | 'sizeTiny' | 'sizeMicro'> = {
+    normal: 'sizeNormal',
+    small: 'sizeSmall',
+    tiny: 'sizeTiny',
+    micro: 'sizeMicro',
+  }
 
   export let settings: WidgetSettings
   export let exchangeRate: ExchangeRateState | null = null
@@ -272,16 +281,38 @@
   </div>
 
   <div class="section">
+    <div class="section-label">{i18n.sizeSection}</div>
+    <div class="button-group">
+      {#each SIZE_ORDER as name (name)}
+        <button
+          class="option-btn"
+          class:active={local.size === name}
+          on:click={() => { local = { ...local, size: name }; save() }}
+        >{i18n[SIZE_KEY[name]]}</button>
+      {/each}
+    </div>
+  </div>
+
+  <div class="section">
     <div class="section-label">{i18n.detail}</div>
     <div class="button-group">
       {#each DETAILS as option (option.value)}
+        <!--
+          Greyed at the smallest size rather than hidden: a control that
+          disappears looks like one that was never there, and the reason it
+          does nothing is worth one line underneath.
+        -->
         <button
           class="option-btn"
           class:active={local.quotaDetail === option.value}
+          disabled={local.size === 'micro'}
           on:click={() => { local = { ...local, quotaDetail: option.value }; save() }}
         >{i18n[option.key]}</button>
       {/each}
     </div>
+    {#if local.size === 'micro'}
+      <span class="field-hint">{i18n.detailFixedAtMicro}</span>
+    {/if}
   </div>
 
   {#if hiddenTiers.length > 0}
@@ -509,6 +540,11 @@
   .field-label {
     font-size: 0.6875rem;
     color: var(--text-muted);
+  }
+
+  .option-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .field-hint {

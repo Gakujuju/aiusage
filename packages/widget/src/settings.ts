@@ -2,6 +2,8 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import type { CurrencyCode } from './currency'
+import { isSizeName, nearestSize } from './size'
+import type { SizeName } from './size'
 
 export interface WidgetSettings {
   theme: 'system' | 'light' | 'dark'
@@ -32,14 +34,15 @@ export interface WidgetSettings {
    */
   hubUrl: string
   /**
-   * How big everything is drawn, as a webContents zoom factor.
+   * Which of the four sizes the window is drawn at.
    *
-   * Zoom rather than a resizable window, because the window already follows
-   * its contents: dragging an edge would only add margin, and the next
-   * update would take it back. This scales the text, the bars and the window
-   * together, and the existing follow-the-contents behaviour keeps working.
+   * Replaces a free zoom factor in 0.1 steps. One choice, in the words the
+   * user used, each fixing a zoom and - for the smallest - a detail level;
+   * see size.ts for the values and why they are what they are. A settings
+   * file that still says zoomFactor is migrated once on load and never
+   * written back with it.
    */
-  zoomFactor: number
+  size: SizeName
   /**
    * How much of each quota line to draw.
    *
@@ -89,7 +92,7 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   notifications: true,
   notificationsSeenAt: null,
   hubUrl: '',
-  zoomFactor: 1,
+  size: 'normal',
   quotaDetail: 'full',
   hiddenTools: [],
   collapsed: false,
@@ -133,8 +136,19 @@ export function defaultLocale(osLocale: string | undefined): WidgetSettings['loc
 export function loadSettings(osLocale?: string): WidgetSettings {
   try {
     if (existsSync(SETTINGS_PATH)) {
-      const raw = JSON.parse(readFileSync(SETTINGS_PATH, 'utf-8'))
-      return { ...DEFAULT_SETTINGS, ...raw }
+      const raw = JSON.parse(readFileSync(SETTINGS_PATH, 'utf-8')) as Record<string, unknown>
+      const merged: WidgetSettings = { ...DEFAULT_SETTINGS, ...raw } as WidgetSettings
+      /*
+       * One-time migration from the zoom factor that sizes replaced. A file
+       * with a size keeps it; one with only the old number lands on the
+       * nearest tier; the old key is dropped either way so the next save
+       * does not carry it forward.
+       */
+      if (!isSizeName(raw.size)) {
+        merged.size = typeof raw.zoomFactor === 'number' ? nearestSize(raw.zoomFactor) : 'normal'
+      }
+      delete (merged as unknown as Record<string, unknown>).zoomFactor
+      return merged
     }
   } catch {
     // Fall through to defaults

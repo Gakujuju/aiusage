@@ -12,6 +12,7 @@
   import type { CurrencyCode, ExchangeRateState } from '../currency'
   import type { WidgetUpdate } from '../update'
   import type { WidgetSettings } from '../settings'
+  import { quotaDetailFor } from '../size'
 
   /*
    * Both imported, not restated.
@@ -513,7 +514,7 @@
           <QuotaPanel
             quota={data.quota}
             {i18n}
-            detail={collapsed ? 'percent' : (settings?.quotaDetail ?? 'full')}
+            detail={quotaDetailFor(settings?.size ?? 'normal', collapsed, settings?.quotaDetail ?? 'full')}
             compact={collapsed}
             hiddenTools={settings?.hiddenTools ?? []}
           />
@@ -602,8 +603,13 @@
     flex-direction: column;
     justify-content: center;
   }
+  /*
+   * Opaque, because the window is. With transparency off there is nothing
+   * behind the page to show through, and a transparent body over an opaque
+   * window is whatever colour the OS feels like - black, here.
+   */
   :global(body) {
-    background: transparent;
+    background: var(--bg);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -667,7 +673,9 @@
   .panel {
     position: relative;
     background: var(--bg);
-    border-radius: 10px;
+    /* Square: the window is opaque now, and a rounded panel in a square
+       window shows the window's corners around it. */
+    border-radius: 0;
     border: 1px solid var(--border);
     overflow: hidden;
     /*
@@ -765,7 +773,7 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
-    border-radius: 10px;
+    border-radius: 0;
   }
   .install-content {
     display: flex;

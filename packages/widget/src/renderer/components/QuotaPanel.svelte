@@ -11,6 +11,7 @@
    * thing to read before finding the number you came for.
    */
   import type { Translations } from '../i18n'
+  import type { QuotaDetail } from '../../size'
 
   interface QuotaLine {
     tier: string
@@ -25,8 +26,12 @@
     staleForMs: number | null
   }
   export let i18n: Translations
-  /** 'meter' | 'percent' | 'full' - how much of each line to draw. */
-  export let detail: 'meter' | 'percent' | 'full' = 'full'
+  /**
+   * How much of each line to draw. 'number' is the digits with no meter -
+   * the smallest size fixes it, since at that zoom the bar stops being
+   * readable before the digits do. See size.ts.
+   */
+  export let detail: QuotaDetail = 'full'
   /** Tool ids the user has switched off. */
   export let hiddenTools: string[] = []
   /**
@@ -74,7 +79,7 @@
 <div
   class="quota"
   class:compact
-  style="--row-columns: {detail === 'meter' ? '3.5rem auto' : detail === 'percent' ? '3.5rem auto 2.5rem' : '3.5rem auto 2.5rem 1fr'}"
+  style="--row-columns: {detail === 'number' ? '3.5rem 2.5rem' : detail === 'meter' ? '3.5rem auto' : detail === 'percent' ? '3.5rem auto 2.5rem' : '3.5rem auto 2.5rem 1fr'}"
 >
   <!--
     Bad news above the numbers, for the same reason the tooltip does it: what
@@ -96,9 +101,11 @@
             class="strip-meter"
             aria-label="{tool.label} {line.kind === 'five_hour' ? i18n.tierFiveHour : i18n.tierWeek} {Math.round(line.utilization)}%"
           >
-            <span class="bar" aria-hidden="true">
-              {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
-            </span>
+            {#if detail !== 'number'}
+              <span class="bar" aria-hidden="true">
+                {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
+              </span>
+            {/if}
             <!--
               The number, because a meter only ever says "roughly". Somebody
               watching a limit wants to know whether it is 62 or 68, and the
@@ -117,9 +124,11 @@
       {#each tool.lines as line (line.tier)}
         <div class="row">
           <span class="tier">{line.kind === 'five_hour' ? i18n.tierFiveHour : i18n.tierWeek}</span>
-          <span class="bar" aria-hidden="true">
-            {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
-          </span>
+          {#if detail !== 'number'}
+            <span class="bar" aria-hidden="true">
+              {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
+            </span>
+          {/if}
           {#if detail !== 'meter'}
             <span class="pct">{Math.round(line.utilization)}%</span>
           {/if}
