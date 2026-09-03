@@ -88,6 +88,8 @@ export interface Translations {
   refresh: string
   quit: string
   close: string
+  /** The switch for floating over other windows. */
+  alwaysOnTop: string
   /** The fold control, which is not the close control. */
   collapse: string
   /** Title on the folded strip: how to get back. */
@@ -176,6 +178,7 @@ const en: Translations = {
   refresh: 'Refresh',
   quit: 'Quit',
   close: 'Close',
+  alwaysOnTop: 'Keep on top',
   collapse: 'Fold to a strip',
   expandHint: 'Click to unfold - drag to move',
   installTitle: 'Dashboard Setup',
@@ -262,6 +265,7 @@ const ja: Translations = {
   refresh: '更新',
   quit: '終了',
   close: '閉じる',
+  alwaysOnTop: '常に最前面',
   collapse: '帯に折りたたむ',
   expandHint: 'クリックで戻す ── ドラッグで移動',
   installTitle: 'ダッシュボードの設定',
@@ -348,6 +352,7 @@ const zh: Translations = {
   refresh: '刷新',
   quit: '退出',
   close: '关闭',
+  alwaysOnTop: '总在最前',
   collapse: '折叠为细条',
   expandHint: '点击展开 ── 拖动移动',
   installTitle: '仪表盘配置',

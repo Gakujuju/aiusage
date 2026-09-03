@@ -35,6 +35,8 @@ export interface WidgetAPI {
    * the handle and the way back. See App.svelte.
    */
   moveWindowBy: (delta: { dx: number; dy: number }) => void
+  /** Float over other windows, or sit among them. */
+  setAlwaysOnTop: (onTop: boolean) => void
   onDataUpdate: (callback: (data: WidgetUpdate) => void) => void
   onInstallStatus: (callback: (status: InstallStatus) => void) => void
   onSetupStatus: (callback: (status: InstallStatus) => void) => void
@@ -52,6 +54,7 @@ contextBridge.exposeInMainWorld('widget', {
   hideWindow: () => ipcRenderer.send('widget:hide-window'),
   resizeWindow: (size: PanelSize) => ipcRenderer.send('widget:resize-window', size),
   moveWindowBy: (delta: { dx: number; dy: number }) => ipcRenderer.send('widget:move-window-by', delta),
+  setAlwaysOnTop: (onTop: boolean) => ipcRenderer.send('widget:set-always-on-top', onTop),
   onDataUpdate: (callback: (data: WidgetUpdate) => void) => {
     ipcRenderer.removeAllListeners(WIDGET_UPDATE_CHANNEL)
     ipcRenderer.on(WIDGET_UPDATE_CHANNEL, (_event, data) => callback(data))

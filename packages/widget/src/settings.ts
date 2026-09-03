@@ -58,6 +58,19 @@ export interface WidgetSettings {
    * thing that stays on screen without taking any of it.
    */
   collapsed: boolean
+  /**
+   * Whether the window floats over everything else.
+   *
+   * On, because a resident readout that other windows cover is not resident.
+   * Off is for the times that stops being true - it sits bottom-right, which
+   * is where other things also want to be, and "get out of the way" needs an
+   * answer that is not "close it".
+   *
+   * Not automatic. A window that decides for itself when to duck is a window
+   * whose position nobody can predict; this is a switch, and it stays where
+   * it was put.
+   */
+  alwaysOnTop: boolean
   /** The token/cost sections this widget used to be made of. */
   showUsage: boolean
   showCost: boolean
@@ -80,6 +93,7 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   quotaDetail: 'full',
   hiddenTools: [],
   collapsed: false,
+  alwaysOnTop: true,
   /*
    * Off, because the window's subject changed.
    *

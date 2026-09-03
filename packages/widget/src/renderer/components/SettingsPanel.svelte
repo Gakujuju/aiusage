@@ -318,6 +318,26 @@
     <div class="section-label">{i18n.display}</div>
     <div class="toggles">
       <label class="toggle-row">
+        <span>{i18n.alwaysOnTop}</span>
+        <!--
+          Told to the main process directly rather than through save().
+          The window has to change layer the moment this is pressed - the
+          point of pressing it is that something is in the way right now -
+          and main is what owns the window. It writes the setting from
+          there, so there is still one place that persists it.
+        -->
+        <button
+          class="toggle"
+          class:on={local.alwaysOnTop}
+          on:click={() => {
+            local = { ...local, alwaysOnTop: !local.alwaysOnTop }
+            window.widget?.setAlwaysOnTop(local.alwaysOnTop)
+          }}
+        >
+          <span class="toggle-thumb"></span>
+        </button>
+      </label>
+      <label class="toggle-row">
         <span>{i18n.notificationsToggle}</span>
         <button class="toggle" class:on={local.notifications} on:click={() => toggle('notifications')}>
           <span class="toggle-thumb"></span>

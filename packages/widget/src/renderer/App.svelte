@@ -105,10 +105,42 @@
   let dragFrom: { x: number; y: number } | null = null
   let dragMoved = false
 
-  function stripPointerDown(event: MouseEvent) {
-    if (event.button !== 0) return
+  /*
+   * Listened for on the window, not on the strip.
+   *
+   * They were on the strip, and a drag that outran the pointer left the grab
+   * stuck on: move fast enough and the cursor leaves a 342x64 window, the
+   * mouseup lands on whatever is underneath, and the strip never hears that
+   * the button came up. The window then follows the pointer around until
+   * something else is clicked - which is the report, and it is reproducible
+   * by dragging quickly and releasing outside.
+   *
+   * The window hears the release wherever it happens. Attached on mousedown
+   * and removed on release, rather than left permanently, so nothing is
+   * listening while nobody is dragging.
+   */
+  function beginDrag(event: MouseEvent) {
     dragFrom = { x: event.screenX, y: event.screenY }
     dragMoved = false
+    window.addEventListener('mousemove', stripPointerMove)
+    window.addEventListener('mouseup', stripPointerUp)
+    // A release the page never sees at all: alt-tab mid-drag, or the OS
+    // taking the button away. Ending the grab is always right here - there
+    // is no drag in progress that survives losing the window.
+    window.addEventListener('blur', releaseDrag)
+  }
+
+  function releaseDrag() {
+    window.removeEventListener('mousemove', stripPointerMove)
+    window.removeEventListener('mouseup', stripPointerUp)
+    window.removeEventListener('blur', releaseDrag)
+    dragFrom = null
+    dragMoved = false
+  }
+
+  function stripPointerDown(event: MouseEvent) {
+    if (event.button !== 0) return
+    beginDrag(event)
   }
 
   function stripPointerMove(event: MouseEvent) {
@@ -125,8 +157,7 @@
 
   function stripPointerUp() {
     const wasClick = dragFrom !== null && !dragMoved
-    dragFrom = null
-    dragMoved = false
+    releaseDrag()
     if (wasClick) void setCollapsed(false)
   }
 
@@ -278,7 +309,11 @@
     resizeObserver.observe(panelEl)
     void tick().then(reportWindowHeight)
 
-    return () => resizeObserver?.disconnect()
+    return () => {
+      resizeObserver?.disconnect()
+      // Nothing should outlive the component, listeners on window least of all.
+      releaseDrag()
+    }
   })
 
   afterUpdate(() => {
@@ -443,8 +478,6 @@
           tabindex={collapsed ? 0 : undefined}
           title={collapsed ? i18n.expandHint : undefined}
           on:mousedown={collapsed ? stripPointerDown : undefined}
-          on:mousemove={collapsed ? stripPointerMove : undefined}
-          on:mouseup={collapsed ? stripPointerUp : undefined}
           on:keydown={collapsed ? (e) => { if (e.key === 'Enter' || e.key === ' ') setCollapsed(false) } : undefined}
         >
           {#if !collapsed}

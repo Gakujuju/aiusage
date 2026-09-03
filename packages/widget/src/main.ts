@@ -359,6 +359,19 @@ function createTray(): void {
       { label: i18n.openDashboard, click: () => openDashboardAction() },
       { label: i18n.refresh, click: () => pushDataUpdate() },
       { type: 'separator' },
+      {
+        /*
+         * Here as well as in the settings panel, and this is the copy that
+         * matters: once the window is behind something, the settings panel
+         * is behind it too. The tray icon is the one part of this that is
+         * always reachable.
+         */
+        label: i18n.alwaysOnTop,
+        type: 'checkbox',
+        checked: settings.alwaysOnTop,
+        click: () => setAlwaysOnTop(!settings.alwaysOnTop),
+      },
+      { type: 'separator' },
       { label: i18n.zoomIn, accelerator: 'CommandOrControl+Plus', click: () => changeZoom(1) },
       { label: i18n.zoomOut, accelerator: 'CommandOrControl+-', click: () => changeZoom(-1) },
       { label: i18n.zoomReset, accelerator: 'CommandOrControl+0', click: () => changeZoom(0) },
@@ -369,6 +382,21 @@ function createTray(): void {
   })
 }
 
+/**
+   * Turns floating-over-everything on or off, and remembers which.
+   *
+   * Saved through the same path as every other setting so the window comes
+   * back the way it was left. Showing it from the tray still raises it
+   * either way - that is the way back when it is behind something and its
+   * own controls are behind it too.
+   */
+function setAlwaysOnTop(next: boolean): void {
+  settings = { ...settings, alwaysOnTop: next }
+  saveSettings(settings)
+  win?.setAlwaysOnTop(next)
+  void pushDataUpdate()
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: WINDOW_WIDTH,
@@ -377,7 +405,7 @@ function createWindow(): void {
     frame: false,
     resizable: false,
     skipTaskbar: true,
-    alwaysOnTop: true,
+    alwaysOnTop: settings.alwaysOnTop,
     transparent: true,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
@@ -936,6 +964,11 @@ async function buildPayload(rows: QuotaRow[] | null) {
  * to the same place the CLI keeps its secrets - see credentials.ts, which
  * also records what this widens.
  */
+ipcMain.on('widget:set-always-on-top', (_event, next: unknown) => {
+  if (typeof next !== 'boolean') return
+  setAlwaysOnTop(next)
+})
+
 ipcMain.handle('widget:get-hub-password-source', () =>
   hub ? hubPasswordSource(hub.url) : 'none')
 
