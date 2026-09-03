@@ -61,6 +61,25 @@ const MIN_REPORTED_FLOOR = 16
 const MAX_REPORTED_FLOOR = 400
 
 /*
+ * The shortest a transparent window can be on Windows, in device pixels.
+ *
+ * Not a number anyone here chose. Asked for 33, the OS produced 64; asked for
+ * 39 with transparency off, it produced 39 (2026-09-03, at 100% DPI). Width
+ * has no such floor. It is written down because Electron does not know it:
+ * getBounds() and getContentSize() report the height that was requested, so
+ * the web contents are laid out 33 tall inside a 64-tall window, and the
+ * bottom 31 pixels are neither drawn into nor clickable. Asking for 64 up
+ * front makes the viewport the size the window actually is, which is what
+ * lets the renderer centre a short strip and treat the whole window as the
+ * target.
+ *
+ * If this is ever measured to be wrong - another Windows build, another DPI -
+ * the symptom is a strip with dead space under it, and this is the number to
+ * re-measure.
+ */
+const TRANSPARENT_MIN_HEIGHT_WIN = 64
+
+/*
  * How far the whole panel can be scaled, and in what steps.
  *
  * Zoom rather than a draggable edge. The window already sizes itself to its
@@ -68,12 +87,26 @@ const MAX_REPORTED_FLOOR = 400
  * taken out, and the next content change would undo it. Scaling moves the
  * text, the bars and the window together and leaves that behaviour intact.
  *
- * 0.7 to 1.5 was chosen by looking at both ends: below 0.7 the percentages
- * stop being readable at arm's length, and above 1.5 the countdown wraps
- * onto a second line, which is the one thing a glanceable panel cannot do.
+ * The top, 1.5, is where the countdown wraps onto a second line, which is
+ * the one thing a glanceable panel cannot do.
+ *
+ * The bottom was 0.7, on the grounds that below it the percentages stop
+ * being readable at arm's length. The person using it then asked for
+ * smaller and said the text could be small - which removes that reason,
+ * and a limit whose reason is gone has no reason to stay. The floor is now
+ * where the strip stops being usable as a thing to press and to grab. At
+ * 0.5 it is 172 wide - and still 64 tall, because Windows will not make a
+ * transparent window any shorter (see resizeToPanel). Below 0.5 the width
+ * is what gets too small to hit reliably. Readable is the user's call;
+ * grabbable is not.
+ *
+ * One number for both states, on purpose. A separate floor for the strip
+ * would be a second value that has to agree with this one, and the next
+ * change to either would be the next time only one of them is made.
+ *
  * 0.1 steps, because 0.05 needs two presses to see any difference.
  */
-const ZOOM_MIN = 0.7
+const ZOOM_MIN = 0.5
 const ZOOM_MAX = 1.5
 const ZOOM_STEP = 0.1
 const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
@@ -1066,8 +1099,11 @@ function resizeToPanel(css: PanelSize): void {
 
   const nextWidth = Math.round(css.width * zoom)
   const floor = Math.min(MAX_REPORTED_FLOOR, Math.max(MIN_REPORTED_FLOOR, css.minHeight))
+  // The OS will not go lower than this on Windows; asking for less only
+  // makes Electron's idea of the window disagree with the window.
+  const osFloor = process.platform === 'win32' ? TRANSPARENT_MIN_HEIGHT_WIN : 0
   const nextHeight = Math.min(
-    Math.max(Math.ceil(css.height * zoom), Math.round(floor * zoom)),
+    Math.max(Math.ceil(css.height * zoom), Math.round(floor * zoom), osFloor),
     displayBounds.height,
   )
 
@@ -1089,6 +1125,22 @@ function resizeToPanel(css: PanelSize): void {
    * The flag goes straight back, so the user still cannot drag an edge.
    */
   win.setResizable(true)
+  /*
+   * What arrives here is not always what the OS gives back.
+   *
+   * On Windows a transparent (layered) window will not go under 64 device
+   * pixels tall. Electron does not know: getBounds() and getContentSize()
+   * both report the height that was asked for while GetWindowRect says 64.
+   * Measured on 2026-09-03 at zoom 0.5 - asked for 172x33, got 172x64 - and
+   * confirmed by flipping transparent to false, after which the same call
+   * produced 172x39 and the two agreed. Width has no such floor; 100 wide
+   * was honoured.
+   *
+   * The strip at zoom 1.0 is exactly 64 tall, which is why this was invisible
+   * for as long as 1.0 was the smallest it ever drew. Below that, the panel
+   * is shorter than its window and the renderer centres it - see App.svelte
+   * - so the whole window stays something you can press and grab.
+   */
   win.setBounds({ x, y, width: nextWidth, height: nextHeight }, false)
   win.setResizable(false)
 }

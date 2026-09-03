@@ -79,6 +79,31 @@
   let collapsed = false
   $: collapsed = settings?.collapsed ?? false
 
+  /*
+   * The window can be taller than the strip, and the gap has to count.
+   *
+   * Windows keeps a transparent window at least 64 device pixels tall, so
+   * below zoom 1.0 the strip sits in a window with empty space under it.
+   * Left alone, that space is dead: a press there hits nothing, and the
+   * middle of the window - the natural place to aim - is exactly there. So
+   * while folded the body carries the class that lets #app fill the window
+   * and centre the panel in it, and a press anywhere outside the panel is
+   * treated as a press on it. The panel itself still measures only itself,
+   * so a message can still grow the window and let it shrink back.
+   *
+   * The centring is pure CSS (#app:has(.content.collapsed)) rather than a
+   * class toggled from here: a toggle is a second copy of "is it folded"
+   * that has to be kept in step, and the first version of this had it
+   * silently not applied.
+   */
+  function bodyPointerDown(event: MouseEvent) {
+    if (!collapsed || event.button !== 0) return
+    // Inside the panel the section's own handler already ran; this is for
+    // the space around it.
+    if ((event.target as Element | null)?.closest('.section')) return
+    beginDrag(event)
+  }
+
   async function setCollapsed(next: boolean) {
     if (!settings) return
     // Through the same save path as every other setting, so the persisted
@@ -305,12 +330,14 @@
       loading = false
     }
 
+    document.body.addEventListener('mousedown', bodyPointerDown)
     resizeObserver = new ResizeObserver(() => reportWindowHeight())
     resizeObserver.observe(panelEl)
     void tick().then(reportWindowHeight)
 
     return () => {
       resizeObserver?.disconnect()
+      document.body.removeEventListener('mousedown', bodyPointerDown)
       // Nothing should outlive the component, listeners on window least of all.
       releaseDrag()
     }
@@ -566,6 +593,14 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
+  }
+  /* Folded: fill the window and centre the strip in whatever height the OS
+     insists on. #app, not .panel - the panel keeps measuring only itself. */
+  :global(#app:has(.content.collapsed)) {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
   :global(body) {
     background: transparent;
