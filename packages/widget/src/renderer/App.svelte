@@ -368,7 +368,7 @@
     : i18n.installPreparing
 </script>
 
-<div class="panel" class:loading bind:this={panelEl}>
+<div class="panel" class:loading class:collapsed bind:this={panelEl}>
   {#if installPhase}
     <div class="install-overlay" class:failed={installPhase === 'failed'} class:done={installPhase === 'done'}>
       <div class="install-content">
@@ -516,6 +516,7 @@
             {i18n}
             detail={quotaDetailFor(settings?.size ?? 'normal', collapsed, settings?.quotaDetail ?? 'full')}
             compact={collapsed}
+            hideNames={(settings?.size ?? 'normal') === 'micro'}
             hiddenTools={settings?.hiddenTools ?? []}
           />
         </div>
@@ -631,6 +632,16 @@
     --chart-cache-read: oklch(0.7 0.1 65);
     --chart-cache-write: oklch(0.65 0.12 310);
     --chart-thinking: oklch(0.6 0.16 300);
+    /*
+     * Tool marks. Same values as three chart colours today, but their own
+     * tokens: recolouring a chart series must not silently rename a tool.
+     * Each sits at least 3:1 against both backgrounds - measured from these
+     * values, see STATE.md 2026-09-04.
+     */
+    /* Darker than the dark theme value: 0.7 was 2.62:1 on this background. */
+    --mark-claude: oklch(0.66 0.12 65);
+    --mark-codex: oklch(0.6 0.15 250);
+    --mark-copilot: oklch(0.6 0.16 300);
     --shadow: none;
   }
   @media (prefers-color-scheme: dark) {
@@ -650,6 +661,9 @@
       --chart-cache-read: oklch(0.7 0.1 65);
       --chart-cache-write: oklch(0.65 0.12 310);
       --chart-thinking: oklch(0.6 0.16 300);
+      --mark-claude: oklch(0.7 0.1 65);
+      --mark-codex: oklch(0.6 0.15 250);
+      --mark-copilot: oklch(0.6 0.16 300);
       --shadow: none;
     }
   }
@@ -692,6 +706,15 @@
      */
     width: max-content;
     min-width: 200px;
+  }
+  /*
+   * Folded, the floor goes. 200px CSS is 100 device pixels at zoom 0.5, and
+   * that - not the name column - is what kept the smallest strip at 100 wide
+   * after the names were hidden. The open panel keeps it: its header is
+   * wider than that anyway.
+   */
+  .panel.collapsed {
+    min-width: 0;
     max-width: 560px;
     box-shadow: var(--shadow);
     transition: opacity 0.15s;

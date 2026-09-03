@@ -43,6 +43,16 @@
    * something read out of the corner of an eye does not get read twice.
    */
   export let compact = false
+  /**
+   * Draw the mark and hide the name text. For the smallest size, where the
+   * name column is about a third of the strip.
+   *
+   * The mark is drawn at every size, not only here: someone who sees "● Claude"
+   * all day at normal size knows what ● means when the text goes. A mark
+   * that only ever appears at the smallest size is a mark nobody has learned.
+   * Only the text disappears - the element, its position and its order stay.
+   */
+  export let hideNames = false
 
   /*
    * Ordered here rather than trusted from the caller, because in the strip
@@ -95,7 +105,10 @@
   {#each visible as tool (tool.tool)}
     {#if compact}
       <div class="strip-row">
-        <span class="strip-name">{tool.label}</span>
+        <span class="strip-name" class:marks-only={hideNames}>
+          <span class="mark mark-{tool.tool}" aria-hidden="true"></span>
+          <span class="name" class:sr-only={hideNames}>{tool.label}</span>
+        </span>
         {#each ordered(tool.lines) as line (line.tier)}
           <span
             class="strip-meter"
@@ -120,7 +133,10 @@
       </div>
     {:else}
     <div class="tool">
-      <div class="tool-name">{tool.label}</div>
+      <div class="tool-name">
+        <span class="mark mark-{tool.tool}" aria-hidden="true"></span>
+        <span class="name" class:sr-only={hideNames}>{tool.label}</span>
+      </div>
       {#each tool.lines as line (line.tier)}
         <div class="row">
           <span class="tier">{line.kind === 'five_hour' ? i18n.tierFiveHour : i18n.tierWeek}</span>
@@ -166,12 +182,59 @@
   }
 
   .strip-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
     font-size: 0.6875rem;
     font-weight: 700;
     color: var(--text-primary);
     white-space: nowrap;
     /* So two tools' meters line up under each other and can be compared. */
     min-width: 3.5rem;
+  }
+
+  /* Names hidden: the column is the mark and nothing else. */
+  .strip-name.marks-only { min-width: 0; }
+
+  /*
+   * The tool's mark: a shape and a colour, no logo.
+   *
+   * Not the official logos - this is a public repository and they are
+   * trademarks. A warm circle and a cool square are enough to tell two
+   * things apart, and the order (Claude above Codex) is fixed so position
+   * still says which is which where colour does not - monochrome displays,
+   * colour vision. Colours come from theme tokens with a value on both the
+   * light and the dark background (see App.svelte, --mark-*).
+   */
+  .mark {
+    display: inline-block;
+    flex: none;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+  .mark-claude-code { background: var(--mark-claude); border-radius: 50%; }
+  .mark-codex { background: var(--mark-codex); border-radius: 2px; }
+  .mark-copilot {
+    background: var(--mark-copilot);
+    border-radius: 1px;
+    width: 0.6rem;
+    height: 0.6rem;
+    transform: rotate(45deg);
+  }
+
+  /* Off screen, still in the accessibility tree: the name is read, not seen. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .strip-meter {
@@ -204,6 +267,9 @@
   .tool { display: flex; flex-direction: column; gap: 0.25rem; }
 
   .tool-name {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
     font-size: 0.75rem;
     font-weight: 700;
     color: var(--text-primary);
