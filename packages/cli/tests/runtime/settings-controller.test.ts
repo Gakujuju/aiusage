@@ -545,6 +545,24 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
         controller,
         onParseStalled,
         advanceClock: (ms: number) => { clock += ms },
+        /*
+         * Time during which the process was actually running.
+         *
+         * advanceClock jumps the clock and then lets the timers catch up,
+         * which is indistinguishable from a machine that was asleep: the
+         * health timer fires having missed the whole interval. That is a
+         * useful thing to be able to express - see the sleep test - but it
+         * is not what most of these cases mean, so they step the clock and
+         * the timers together, one health-check apart.
+         */
+        runFor: async (ms: number) => {
+          const step = 60_000
+          for (let left = ms; left > 0; left -= step) {
+            const slice = Math.min(step, left)
+            clock += slice
+            await vi.advanceTimersByTimeAsync(slice)
+          }
+        },
         get clock() { return clock },
       }
     }
@@ -569,13 +587,11 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
       const h = build({ runParse: vi.fn(hungParse) })
       h.controller.start()
 
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 3)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 3)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 3)
       // Exactly three intervals is not yet more than three.
       expect(h.onParseStalled).not.toHaveBeenCalled()
 
-      h.advanceClock(60_000)
-      await vi.advanceTimersByTimeAsync(60_000)
+      await h.runFor(60_000)
 
       expect(h.onParseStalled).toHaveBeenCalledTimes(1)
       expect(warn).toHaveBeenCalled()
@@ -588,8 +604,7 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
       h.controller.start()
 
       // Long past the threshold, and then a good while longer.
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 10)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 10)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 10)
 
       expect(h.onParseStalled).toHaveBeenCalledTimes(1)
       h.controller.stop()
@@ -611,22 +626,19 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
       })
       h.controller.start()
 
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 4)
       expect(h.onParseStalled).toHaveBeenCalledTimes(1)
       const firstStart = h.onParseStalled.mock.calls[0][0].stalledSince
 
       // It comes back.
       failing = false
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS)
       expect(h.controller.parseHealth().stalled).toBe(false)
 
       // And stops again. A different outage, so it is said again — and the
       // start time differs, which is what stops the dedupe key swallowing it.
       failing = true
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 4)
 
       expect(h.onParseStalled).toHaveBeenCalledTimes(2)
       expect(h.onParseStalled.mock.calls[1][0].stalledSince).not.toBe(firstStart)
@@ -647,8 +659,7 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
       const h = build({ runParse: vi.fn(hungParse) })
       h.controller.start()
 
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 4)
 
       expect(h.onParseStalled).toHaveBeenCalledTimes(1)
       h.controller.stop()
@@ -669,7 +680,7 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
 
       // Twelve minutes of silence: past 3x a one-minute interval, nowhere
       // near 3x five minutes.
-      h.advanceClock(12 * 60_000)
+      await h.runFor(12 * 60_000)
       expect(h.controller.parseHealth().stalled).toBe(false)
 
       refreshInterval = 60_000
@@ -687,8 +698,7 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
       h.controller.start()
       const startedAt = h.clock
 
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS)
 
       expect(h.controller.parseHealth().lastParseOkAt).toBe(startedAt + DEFAULT_PARSE_INTERVAL_MS)
       h.controller.stop()
@@ -702,11 +712,93 @@ describe('RuntimeSettingsController — parsing without a dashboard', () => {
       h.controller.start()
       const startedAt = h.clock
 
-      h.advanceClock(DEFAULT_PARSE_INTERVAL_MS * 4)
-      await vi.advanceTimersByTimeAsync(DEFAULT_PARSE_INTERVAL_MS * 4)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 4)
 
       expect(h.controller.parseHealth().lastParseOkAt).toBe(startedAt)
       expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      h.controller.stop()
+    })
+
+    /*
+     * The laptop case, which is why any of this changed.
+     *
+     * It logged "no parse has completed for 282 minute(s)" every time it was
+     * shut and reopened. Nothing was wrong: the parser cannot run while the
+     * machine is off, so those 282 minutes were not 282 minutes of failing
+     * to parse. A warning that is always wrong teaches people to stop
+     * reading warnings, which is what it costs.
+     *
+     * Expressed here as the clock jumping ahead of the timers - which is
+     * exactly what a wake looks like from inside the process.
+     */
+    it('does not count time the machine was not running', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      // Ten minutes awake: under the threshold, nothing said.
+      await h.runFor(10 * 60_000)
+      expect(h.controller.parseHealth().stalled).toBe(false)
+
+      // Asleep for four hours. The clock moves; the process does not run.
+      h.advanceClock(4 * 60 * 60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(h.controller.parseHealth().stalled).toBe(false)
+      expect(h.onParseStalled).not.toHaveBeenCalled()
+      expect(warn).not.toHaveBeenCalled()
+
+      // And the sleep did not leave a dent: one minute was added for the
+      // check that noticed the wake, not four hours.
+      expect(h.controller.parseHealth().runningMsSinceParse).toBe(11 * 60_000)
+      h.controller.stop()
+    })
+
+    it('still reports once enough running time has passed after a sleep', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      h.advanceClock(4 * 60 * 60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(h.onParseStalled).not.toHaveBeenCalled()
+
+      // Now actually awake and still not parsing. This is the real fault,
+      // and losing it would make the whole change pointless.
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 4)
+
+      expect(h.onParseStalled).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalled()
+      h.controller.stop()
+    })
+
+    it('counts running time at the same rate as the clock while awake', async () => {
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      await h.runFor(7 * 60_000)
+
+      // Wall clock and running time agree exactly when nothing sleeps, so
+      // the number in the message is unchanged for a machine that stays on.
+      expect(h.controller.parseHealth().runningMsSinceParse).toBe(7 * 60_000)
+      h.controller.stop()
+    })
+
+    it('says which clock the number is on', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const h = build({ runParse: vi.fn(hungParse) })
+      h.controller.start()
+
+      h.advanceClock(4 * 60 * 60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
+      await h.runFor(DEFAULT_PARSE_INTERVAL_MS * 4)
+
+      // A reader seeing "21 minutes" after a four-hour absence has to be
+      // able to tell that the small number is the right one.
+      const said = String(warn.mock.calls.at(-1)?.[0] ?? '')
+      expect(said).toContain('of running time')
+      expect(said).toContain('sleep is not counted')
+      expect(said).not.toContain('240')
       h.controller.stop()
     })
 

@@ -405,6 +405,8 @@ export interface ApiServerOptions {
   /** The parse-health verdict, decided in one place by the controller. */
   getParseHealth?: () => {
     lastParseOkAt: number | null
+    /** Running time, not elapsed: sleep is not counted. */
+    runningMsSinceParse: number
     intervalMs: number
     thresholdMs: number
     stalled: boolean

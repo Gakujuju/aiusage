@@ -38,6 +38,19 @@ const PARSE_STALL_INTERVALS = 3
 export interface ParseHealth {
   /** When a parse last finished without throwing. Null before the first. */
   lastParseOkAt: number | null
+  /**
+   * How long this process has been *running* since that parse.
+   *
+   * Not wall clock. A laptop that slept for three hours has three hours of
+   * elapsed time and almost none of this, which is the point: the parser
+   * cannot run while the machine is off, so time it was off is not time it
+   * failed to parse.
+   *
+   * Accumulated by the health timer itself - see checkParseHealth - so
+   * nothing here has to ask the operating system about sleep, and nothing
+   * has to decide how long a gap must be before it counts as one.
+   */
+  runningMsSinceParse: number
   /** The interval in force right now, not the one at startup. */
   intervalMs: number
   /** How long a silence has to last before it counts. */
@@ -102,6 +115,10 @@ export class RuntimeSettingsController {
    * exactly as stale as no run at all.
    */
   private lastParseOkAt: number | null = null
+  /** @see ParseHealth.runningMsSinceParse */
+  private runningMsSinceParse = 0
+  /** When the health timer last fired, so the next firing can see the gap. */
+  private lastHealthCheckAt: number | null = null
   private parseStalledSince: number | null = null
   private stallTimer: ReturnType<typeof setInterval> | null = null
   private cleanupInFlight = false
@@ -150,6 +167,8 @@ export class RuntimeSettingsController {
     // Silence only counts from when we started watching; before that there
     // was nothing to be silent about.
     this.lastParseOkAt = this.now()
+    this.runningMsSinceParse = 0
+    this.lastHealthCheckAt = this.now()
 
     this.applyConfig()
   }
@@ -262,6 +281,7 @@ export class RuntimeSettingsController {
       await this.runParseFn(this.db)
       // Only here: reached solely when the parse ran to completion.
       this.lastParseOkAt = this.now()
+      this.runningMsSinceParse = 0
       this.parseStalledSince = null
     } catch (err) {
       // Keep scheduling active after individual parse failures.
@@ -340,12 +360,21 @@ export class RuntimeSettingsController {
 
     // Parsing switched off on purpose is not a stall.
     if (intervalMs <= 0 || lastParseOkAt == null) {
-      return { lastParseOkAt, intervalMs, thresholdMs, stalled: false, stalledSince: null }
+      return {
+        lastParseOkAt,
+        runningMsSinceParse: this.runningMsSinceParse,
+        intervalMs,
+        thresholdMs,
+        stalled: false,
+        stalledSince: null,
+      }
     }
 
-    const stalled = this.now() - lastParseOkAt > thresholdMs
+    // Running time, not elapsed. See ParseHealth.runningMsSinceParse.
+    const stalled = this.runningMsSinceParse > thresholdMs
     return {
       lastParseOkAt,
+      runningMsSinceParse: this.runningMsSinceParse,
       intervalMs,
       thresholdMs,
       stalled,
@@ -363,6 +392,29 @@ export class RuntimeSettingsController {
    * it is written down in OPERATIONS.md next to the hub setup.
    */
   private checkParseHealth(): void {
+    /*
+     * Add the time this process was actually running, and nothing else.
+     *
+     * min(gap, interval) rather than "was the gap suspiciously large".
+     * A timer that fires on schedule adds its interval; one that fires late
+     * adds the interval anyway, so ordinary jitter is absorbed; one that
+     * fires after the machine woke from three hours of sleep also adds the
+     * interval, so those three hours are simply never added.
+     *
+     * There is no test for sleep here and no multiplier saying how big a gap
+     * has to be to count as one. That is the reason for this shape: today
+     * three numbers went into this project that were chosen by eye rather
+     * than measured (70%, 90%, fifteen minutes), and a fourth one guarding
+     * this would have been the least defensible of them. Sleep does not need
+     * to be detected - it falls out as time that was never added.
+     */
+    const now = this.now()
+    const since = this.lastHealthCheckAt
+    this.lastHealthCheckAt = now
+    if (since != null) {
+      this.runningMsSinceParse += Math.min(Math.max(0, now - since), PARSE_HEALTH_CHECK_INTERVAL_MS)
+    }
+
     const health = this.parseHealth()
 
     if (!health.stalled) {
@@ -374,9 +426,19 @@ export class RuntimeSettingsController {
     if (this.parseStalledSince != null) return
 
     this.parseStalledSince = health.stalledSince
+    /*
+     * "while running" is load-bearing, not padding.
+     *
+     * The number used to be wall clock and is not any more, so on a laptop
+     * left shut for three hours this says ten minutes - and a reader who
+     * takes it for elapsed time will conclude the message is broken. Saying
+     * which clock it is makes the small number read as the correct answer it
+     * is: the parser had ten minutes in which it could have run, and did not.
+     */
     console.warn(
-      `[settings-controller] no parse has completed for ${Math.round((this.now() - (health.lastParseOkAt ?? 0)) / 60000)} ` +
-      `minute(s); the interval is ${Math.round(health.intervalMs / 60000)} minute(s)`)
+      `[settings-controller] no parse has completed in ${Math.round(health.runningMsSinceParse / 60000)} ` +
+      `minute(s) of running time (sleep is not counted); the interval is ` +
+      `${Math.round(health.intervalMs / 60000)} minute(s)`)
     this.onParseStalledFn?.({ ...health, stalledSince: health.stalledSince! })
   }
 

@@ -314,7 +314,15 @@ export function notifyParseStalled(
 ): boolean {
   if (ctx.config?.enabled !== true) return false
 
-  const quietFor = Math.round((ctx.now - info.stalledSince) / 60000)
+  /*
+   * Running time, matching the log line rather than the wall clock.
+   *
+   * This is the same sentence delivered to a phone, so the two have to
+   * agree: a laptop shut for four hours reports the twenty minutes it was
+   * awake and not parsing, not the four hours it was off. Fixing only the
+   * console line would have left the other half saying the old thing.
+   */
+  const quietFor = Math.round(info.runningMsSinceParse / 60000)
   const every = Math.round(info.intervalMs / 60000)
   const prefix = ctx.config?.prefix ?? '[aiusage] '
 
@@ -325,7 +333,7 @@ export function notifyParseStalled(
     dedupeKey: `parsestalled:${info.stalledSince}`,
     title: `${prefix}⚠️ ${ctx.device}｜ログの取り込みが止まっています`,
     body: [
-      `${quietFor} 分間、解析が1度も完了していません。`,
+      `稼働中の ${quietFor} 分間、解析が1度も完了していません（スリープ時間は除く）。`,
       `本来は ${every} 分ごとに実行されます。`,
       'serve は動いていますが、新しい利用量が取り込まれていません。',
     ].join('\n'),
