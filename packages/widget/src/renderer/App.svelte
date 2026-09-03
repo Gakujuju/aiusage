@@ -453,7 +453,7 @@
           <QuotaPanel
             quota={data.quota}
             {i18n}
-            detail={collapsed ? 'meter' : (settings?.quotaDetail ?? 'full')}
+            detail={collapsed ? 'percent' : (settings?.quotaDetail ?? 'full')}
             compact={collapsed}
             hiddenTools={settings?.hiddenTools ?? []}
           />

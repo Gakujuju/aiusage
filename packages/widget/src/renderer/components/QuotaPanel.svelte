@@ -93,10 +93,21 @@
         <span class="strip-name">{tool.label}</span>
         {#each ordered(tool.lines) as line (line.tier)}
           <span
-            class="bar"
+            class="strip-meter"
             aria-label="{tool.label} {line.kind === 'five_hour' ? i18n.tierFiveHour : i18n.tierWeek} {Math.round(line.utilization)}%"
           >
-            {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
+            <span class="bar" aria-hidden="true">
+              {#each Array(CELLS) as _, i}<span class="cell" class:on={i < filled(line.utilization)}></span>{/each}
+            </span>
+            <!--
+              The number, because a meter only ever says "roughly". Somebody
+              watching a limit wants to know whether it is 62 or 68, and the
+              bar cannot tell them apart at ten cells.
+
+              What is deliberately not here is the countdown. It is long, and
+              it answers a different question from the one the strip is for.
+            -->
+            <span class="strip-pct">{Math.round(line.utilization)}%</span>
           </span>
         {/each}
       </div>
@@ -152,6 +163,33 @@
     white-space: nowrap;
     /* So two tools' meters line up under each other and can be compared. */
     min-width: 3.5rem;
+  }
+
+  .strip-meter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  /*
+   * Fixed width and fixed digits, so nothing moves as the numbers do.
+   *
+   * These change every minute, and the second meter sits after the first
+   * one's number: without a reserved width, 9% becoming 100% would shove the
+   * week meter sideways, and proportional digits would nudge it on almost
+   * every update. A thing meant to be read out of the corner of an eye
+   * cannot twitch - the movement is what catches the eye, and it would be
+   * catching it for no reason.
+   *
+   * 2.5rem is what "100%" needs at this size, which is the widest it goes.
+   */
+  .strip-pct {
+    min-width: 2.5rem;
+    text-align: right;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
   }
 
   .tool { display: flex; flex-direction: column; gap: 0.25rem; }

@@ -75,10 +75,17 @@ describe('folding does not create a second display path', () => {
     expect(before).not.toContain('collapsed}')
   })
 
-  it('asks QuotaPanel for meters only while folded', () => {
-    // The strip's whole point is being small; percentages and countdowns are
-    // what it exists not to show.
-    expect(app).toContain("detail={collapsed ? 'meter' : (settings?.quotaDetail ?? 'full')}")
+  it('asks QuotaPanel for percentages, not the countdown, while folded', () => {
+    /*
+     * Meters alone were the first decision and it was reversed: a bar says
+     * "roughly", and somebody watching a limit needs to know whether it is
+     * 62 or 68. The countdown stays out - it is long, and it answers a
+     * different question from the one the strip is for.
+     *
+     * 'percent' is the level that draws a bar and a number and stops there,
+     * so the strip is not a third rendering with its own idea of the middle.
+     */
+    expect(app).toContain("detail={collapsed ? 'percent' : (settings?.quotaDetail ?? 'full')}")
     expect(app).toContain('compact={collapsed}')
   })
 
