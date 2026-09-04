@@ -91,3 +91,24 @@
   --mark-copilot: oklch(0.70 0.140 300);
 }
 
+:root[data-theme="mono"] {
+  --bg: oklch(0.985 0 0);
+  --surface: oklch(0.995 0 0);
+  --bg-hover: oklch(0.93 0 0);
+  --border: oklch(0.86 0 0);
+  --border-medium: oklch(0.74 0 0);
+  --text-primary: oklch(0.15 0 0);
+  --text-secondary: oklch(0.36 0 0);
+  --text-muted: oklch(0.47 0 0);
+  --accent: oklch(0.25 0 0);
+  --danger: oklch(0.15 0 0);
+  --chart-input: oklch(0.2 0 0);
+  --chart-output: oklch(0.32 0 0);
+  --chart-cache-read: oklch(0.44 0 0);
+  --chart-cache-write: oklch(0.55 0 0);
+  --chart-thinking: oklch(0.65 0 0);
+  --mark-claude: oklch(0.15 0 0);
+  --mark-codex: oklch(0.15 0 0);
+  --mark-copilot: oklch(0.15 0 0);
+}
+

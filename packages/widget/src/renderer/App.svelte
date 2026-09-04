@@ -13,6 +13,7 @@
   import type { WidgetUpdate } from '../update'
   import type { WidgetSettings } from '../settings'
   import { quotaDetailFor } from '../size'
+  import './themes.generated.css'
 
   /*
    * Both imported, not restated.
@@ -279,6 +280,18 @@
     ;window.widget?.resizeWindow({ width, height, minHeight: measuredFloor() })
   }
 
+  /**
+   * Which theme block the stylesheet draws.
+   *
+   * Set from what main resolves - the setting, with 'system' turned into
+   * light or dark by the OS - and set again whenever main says it changed.
+   * Before the first answer arrives nothing is set and the :root block
+   * (light) applies, which is the same first frame as before.
+   */
+  function applyResolvedTheme(theme: string) {
+    document.documentElement.dataset.theme = theme
+  }
+
   onMount(() => {
     /*
      * Everything below used to run bare and in order, so the first thing to
@@ -300,6 +313,8 @@
       refresh()
       doLoadSettings()
       loadExchangeRate()
+      bridge.onTheme(applyResolvedTheme)
+      void bridge.getTheme().then(applyResolvedTheme)
       bridge.onDataUpdate((d: WidgetUpdate) => {
         data = d
         loading = false
@@ -615,58 +630,16 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  /*
+   * No palette here. The colours come from themes.generated.css, written from
+   * scripts/theme/palette.cjs for every theme the widget and the web share;
+   * the block for the theme in force is selected by data-theme on <html>,
+   * which the script above keeps in step with the setting and the OS.
+   */
   :global(:root) {
-    --bg: oklch(0.985 0.004 175);
-    --surface: oklch(0.995 0.003 175);
-    --bg-hover: oklch(0.955 0.008 175);
-    --border: oklch(0.92 0.008 175);
-    --border-medium: oklch(0.87 0.01 175);
-    --text-primary: oklch(0.18 0.012 175);
-    --text-secondary: oklch(0.42 0.015 175);
-    --text-muted: oklch(0.6 0.012 175);
-    --accent: oklch(0.55 0.12 175);
-    /* For the two lines that say the numbers above are not to be trusted. */
-    --danger: oklch(0.5 0.2 25);
-    --chart-input: oklch(0.65 0.14 175);
-    --chart-output: oklch(0.6 0.15 250);
-    --chart-cache-read: oklch(0.7 0.1 65);
-    --chart-cache-write: oklch(0.65 0.12 310);
-    --chart-thinking: oklch(0.6 0.16 300);
-    /*
-     * Tool marks. Same values as three chart colours today, but their own
-     * tokens: recolouring a chart series must not silently rename a tool.
-     * Each sits at least 3:1 against both backgrounds - measured from these
-     * values, see STATE.md 2026-09-04.
-     */
-    /* Darker than the dark theme value: 0.7 was 2.62:1 on this background. */
-    --mark-claude: oklch(0.66 0.12 65);
-    --mark-codex: oklch(0.6 0.15 250);
-    --mark-copilot: oklch(0.6 0.16 300);
     --shadow: none;
   }
-  @media (prefers-color-scheme: dark) {
-    :global(:root) {
-      --bg: oklch(0.18 0.008 175);
-      --surface: oklch(0.22 0.006 175);
-      --bg-hover: oklch(0.26 0.01 175);
-      --border: oklch(0.3 0.01 175);
-      --border-medium: oklch(0.35 0.012 175);
-      --text-primary: oklch(0.94 0.006 175);
-      --text-secondary: oklch(0.76 0.01 175);
-      --text-muted: oklch(0.58 0.008 175);
-      --accent: oklch(0.65 0.12 175);
-      --danger: oklch(0.75 0.17 25);
-      --chart-input: oklch(0.65 0.14 175);
-      --chart-output: oklch(0.6 0.15 250);
-      --chart-cache-read: oklch(0.7 0.1 65);
-      --chart-cache-write: oklch(0.65 0.12 310);
-      --chart-thinking: oklch(0.6 0.16 300);
-      --mark-claude: oklch(0.7 0.1 65);
-      --mark-codex: oklch(0.6 0.15 250);
-      --mark-copilot: oklch(0.6 0.16 300);
-      --shadow: none;
-    }
-  }
+
   /*
    * Deliberately louder than the hub message. That one is a fact about
    * another machine; this one means the thing you are looking at is broken.
@@ -676,6 +649,16 @@
     color: var(--danger);
     font-weight: 600;
     line-height: 1.5;
+  }
+
+  /*
+   * Mono says it without red: bold, and a rule beside the line. Same words.
+   */
+  :global(:root[data-theme="mono"]) .widget-fault,
+  :global(:root[data-theme="mono"]) .hub-problem {
+    font-weight: 700;
+    border-left: 3px solid var(--text-primary);
+    padding-left: 0.5rem;
   }
 
   .hub-problem {

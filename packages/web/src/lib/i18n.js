@@ -208,6 +208,7 @@ const translations = {
       light: 'Light',
       terminal: 'Terminal',
       kohaku: 'Amber',
+      mono: 'Mono',
     },
     status: {
       refresh: 'refresh'
@@ -906,6 +907,7 @@ const translations = {
       light: 'ライト',
       terminal: 'ターミナル',
       kohaku: '琥珀',
+      mono: '白黒',
     },
     status: {
       refresh: '更新'
@@ -1604,6 +1606,7 @@ const translations = {
       light: '浅色',
       terminal: '终端',
       kohaku: '琥珀',
+      mono: '黑白',
     },
     status: {
       refresh: '刷新'

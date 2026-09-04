@@ -26,7 +26,7 @@
 const BASE_THEME = 'light'
 
 /** Generation order, and the order the web toggle walks. system is not a theme. */
-const THEME_ORDER = ['light', 'dark', 'kohaku', 'terminal']
+const THEME_ORDER = ['light', 'dark', 'kohaku', 'terminal', 'mono']
 
 const PALETTE = {
   light: {
@@ -425,6 +425,91 @@ const PALETTE = {
     '--mark-copilot': 'oklch(0.70 0.140 300)',
   },
 
+  /*
+   * ── 白黒 (mono) ────────────────────────────────────────────────────────
+   *
+   * Greys only, light polarity: ink on paper. Everything colour used to say
+   * is said by lightness instead - ok, warn and danger are three darknesses
+   * of fill, and the danger percentage is inverted (ink behind white digits)
+   * by a rule in each stylesheet, so two axes carry it and losing one still
+   * leaves the other. The tool marks keep their shapes and go to ink.
+   *
+   * Every text value clears 4.5:1 and every shape 3:1 against this ground,
+   * computed from the L values when this block was written (2026-09-04);
+   * the script that wrote it refuses values that do not. The chart ramp is
+   * five greys about 0.11 L apart, and that is the cost of this theme: adjacent
+   * series are harder to tell apart than in colour, and the legend does the
+   * work. No number is claimed for that.
+   *
+   * The tray icon is not part of this. Its green/amber/red is the only
+   * severity signal that survives the window being folded or hidden, and it
+   * is not a theme.
+   */
+  mono: {
+    '--bg': 'oklch(0.985 0 0)',
+    '--surface': 'oklch(0.995 0 0)',
+    '--raised': 'oklch(0.955 0 0)',
+    '--hover': 'oklch(0.93 0 0)',
+    '--sidebar-bg': 'oklch(0.97 0 0)',
+    '--border-subtle': 'oklch(0.86 0 0)',
+    '--border-medium': 'oklch(0.74 0 0)',
+    '--text': 'oklch(0.15 0 0)',
+    '--text-secondary': 'oklch(0.36 0 0)',
+    '--text-muted': 'oklch(0.47 0 0)',
+    '--accent': 'oklch(0.25 0 0)',
+    '--accent-dim': 'oklch(0.25 0 0 / 0.12)',
+    '--accent-hover': 'oklch(0.15 0 0)',
+    '--green': 'oklch(0.5 0 0)',
+    '--green-dim': 'oklch(0.5 0 0 / 0.12)',
+    '--blue': 'oklch(0.42 0 0)',
+    '--blue-dim': 'oklch(0.42 0 0 / 0.12)',
+    '--purple': 'oklch(0.36 0 0)',
+    '--purple-dim': 'oklch(0.36 0 0 / 0.12)',
+    '--rose': 'oklch(0.15 0 0)',
+    '--rose-dim': 'oklch(0.15 0 0 / 0.1)',
+    '--badge-override-bg': 'oklch(0.25 0 0 / 0.14)',
+    '--badge-override-fg': 'oklch(0.25 0 0)',
+    '--badge-matched-bg': 'oklch(0.5 0 0 / 0.14)',
+    '--badge-matched-fg': 'oklch(0.33 0 0)',
+    '--badge-noprice-bg': 'oklch(0.15 0 0 / 0.12)',
+    '--badge-noprice-fg': 'oklch(0.15 0 0)',
+    '--shadow-sm': '0 1px 2px oklch(0 0 0 / 0.08)',
+    '--shadow-md': '0 1px 3px oklch(0 0 0 / 0.10), 0 4px 12px oklch(0 0 0 / 0.06)',
+    '--shadow-lg': '0 4px 8px oklch(0 0 0 / 0.10), 0 12px 32px oklch(0 0 0 / 0.08)',
+    '--overlay': 'oklch(0 0 0 / 0.3)',
+    '--chart-input': 'oklch(0.2 0 0)',
+    '--chart-output': 'oklch(0.32 0 0)',
+    '--chart-cache-read': 'oklch(0.44 0 0)',
+    '--chart-cache-write': 'oklch(0.55 0 0)',
+    '--chart-thinking': 'oklch(0.65 0 0)',
+    '--chart-total': 'oklch(0.15 0 0)',
+    '--on-accent': 'oklch(0.985 0 0)',
+    '--on-danger': 'oklch(0.985 0 0)',
+    '--warn-solid': 'oklch(0.38 0 0)',
+    '--warn-bg': 'oklch(0.93 0 0)',
+    '--warn-fg': 'oklch(0.3 0 0)',
+    '--notice-bg': 'oklch(0.95 0 0)',
+    '--notice-border': 'oklch(0.78 0 0)',
+    '--notice-fg': 'oklch(0.3 0 0)',
+    '--danger-fg': 'oklch(0.15 0 0)',
+    '--danger-bg': 'oklch(0.15 0 0 / 0.1)',
+    '--danger-solid': 'oklch(0.15 0 0)',
+    '--danger-border': 'oklch(0.15 0 0)',
+    '--danger-soft-bg': 'oklch(0.15 0 0 / 0.06)',
+    '--danger-soft-fg': 'oklch(0.15 0 0)',
+    '--danger-plain': 'oklch(0.15 0 0)',
+    '--info-bg': 'oklch(0.42 0 0 / 0.12)',
+    '--info-fg': 'oklch(0.3 0 0)',
+    '--info-solid': 'oklch(0.42 0 0)',
+    '--success-fg': 'oklch(0.3 0 0)',
+    '--amber': 'oklch(0.42 0 0)',
+    '--shadow-dropdown': '0 1px 3px oklch(0 0 0 / 0.10), 0 4px 12px oklch(0 0 0 / 0.06)',
+    '--shadow-modal': '0 4px 8px oklch(0 0 0 / 0.10), 0 12px 32px oklch(0 0 0 / 0.08)',
+    '--overlay-strong': 'oklch(0 0 0 / 0.5)',
+    '--mark-claude': 'oklch(0.15 0 0)',
+    '--mark-codex': 'oklch(0.15 0 0)',
+    '--mark-copilot': 'oklch(0.15 0 0)',
+  },
 }
 
 module.exports = { PALETTE, BASE_THEME, THEME_ORDER }

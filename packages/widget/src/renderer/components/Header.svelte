@@ -13,7 +13,8 @@
 <div class="header">
   <div class="brand">
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 64 64" style="display:block;border-radius:3px">
-      <rect width="64" height="64" rx="14" fill="oklch(0.55 0.12 175)"/>
+      <!-- The theme's accent, not a fixed green: in mono the one coloured thing on the window would otherwise be the logo. -->
+      <rect width="64" height="64" rx="14" fill="var(--accent)"/>
       <rect x="10" y="38" width="12" height="16" rx="3" fill="white"/>
       <rect x="26" y="26" width="12" height="28" rx="3" fill="white"/>
       <rect x="42" y="14" width="12" height="40" rx="3" fill="white"/>

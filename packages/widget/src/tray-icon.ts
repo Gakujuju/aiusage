@@ -27,6 +27,12 @@ export interface Bgr { b: number; g: number; r: number }
  * has to survive being 16 pixels wide at the edge of vision. The normal
  * state is not listed: it is not painted at all.
  */
+/*
+ * Not themed, on purpose. The window's theme - including mono - changes the
+ * window. This icon's amber and red are the one severity signal that is still
+ * there when the window is folded, hidden, or behind something, and a theme
+ * that removed colour from it would remove the signal.
+ */
 export const SEVERITY_COLOURS: Record<Exclude<Severity, 'ok'>, Bgr> = {
   warn: { b: 0x0b, g: 0x9e, r: 0xf5 },   // amber
   danger: { b: 0x3b, g: 0x3b, r: 0xef }, // red

@@ -45,6 +45,10 @@ export interface WidgetAPI {
   saveHubPassword: (password: string) => Promise<boolean>
   /** Whether a password is in place, and where it came from. Never the value. */
   getHubPasswordSource: () => Promise<'typed' | 'inherited' | 'none'>
+  /** The theme block to draw right now ('system' already resolved). */
+  getTheme: () => Promise<'light' | 'dark' | 'kohaku' | 'mono'>
+  /** Fires when that changes - a setting, or the OS flipping under 'system'. */
+  onTheme: (callback: (theme: 'light' | 'dark' | 'kohaku' | 'mono') => void) => void
   getExchangeRate: () => Promise<ExchangeRateState>
 }
 
@@ -71,5 +75,10 @@ contextBridge.exposeInMainWorld('widget', {
   saveSettings: (settings: WidgetSettings) => ipcRenderer.invoke('widget:save-settings', settings),
   saveHubPassword: (password: string) => ipcRenderer.invoke('widget:save-hub-password', password),
   getHubPasswordSource: () => ipcRenderer.invoke('widget:get-hub-password-source'),
+  getTheme: () => ipcRenderer.invoke('widget:get-theme'),
+  onTheme: (callback) => {
+    ipcRenderer.removeAllListeners('widget:theme')
+    ipcRenderer.on('widget:theme', (_event, theme) => callback(theme))
+  },
   getExchangeRate: () => ipcRenderer.invoke('widget:get-exchange-rate'),
 } satisfies WidgetAPI)

@@ -18,6 +18,8 @@ import type { PanelSize, WidgetUpdate } from './update'
 import { t } from './i18n'
 import { loadSettings, saveSettings } from './settings'
 import { SIZE_ORDER, SIZE_TIERS } from './size'
+import { polarityOf, resolveTheme } from './theme'
+import type { ResolvedTheme } from './theme'
 import type { SizeName } from './size'
 import type { WidgetSettings } from './settings'
 import {
@@ -337,9 +339,33 @@ function setSize(next: SizeName): void {
   applyZoom()
 }
 
+/**
+ * The OS gets the polarity; the window gets the name.
+ *
+ * nativeTheme.themeSource only knows light, dark and system - it is what the
+ * OS uses for scrollbars and form controls. The stylesheet keys on a
+ * data-theme attribute the renderer sets from what pushTheme sends, and for
+ * 'system' that has to be sent again whenever the OS flips, which is what the
+ * 'updated' listener below is for. The media query used to do this for free.
+ */
 function applyTheme(theme: WidgetSettings['theme']): void {
-  nativeTheme.themeSource = theme
+  nativeTheme.themeSource = polarityOf(theme)
+  pushTheme()
 }
+
+function currentResolvedTheme(): ResolvedTheme {
+  return resolveTheme(settings.theme, nativeTheme.shouldUseDarkColors)
+}
+
+function pushTheme(): void {
+  win?.webContents.send('widget:theme', currentResolvedTheme())
+}
+
+nativeTheme.on('updated', () => {
+  // Only 'system' can change from here; the others pin themeSource and
+  // the OS has nothing to say. Pushing regardless is harmless and simpler.
+  pushTheme()
+})
 
 function createTray(): void {
   const { buffer, scaleFactor } = getTrayIconNativeImage()
@@ -997,6 +1023,8 @@ ipcMain.on('widget:set-always-on-top', (_event, next: unknown) => {
   if (typeof next !== 'boolean') return
   setAlwaysOnTop(next)
 })
+
+ipcMain.handle('widget:get-theme', () => currentResolvedTheme())
 
 ipcMain.handle('widget:get-hub-password-source', () =>
   hub ? hubPasswordSource(hub.url) : 'none')

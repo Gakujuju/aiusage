@@ -18,10 +18,12 @@ export const THEMES = {
   terminal: { polarity: 'dark' },
   /* Warm, low blue light, and still a light surface: paper, not ink. */
   kohaku: { polarity: 'light' },
+  /* Greys only. Ink on paper, so light. */
+  mono: { polarity: 'light' },
 }
 
 /** The order the toggle walks through. system first, so it stays the default. */
-export const THEME_ORDER = ['system', 'dark', 'light', 'kohaku', 'terminal']
+export const THEME_ORDER = ['system', 'dark', 'light', 'kohaku', 'terminal', 'mono']
 
 /** @param {string} value */
 function isKnown(value) {

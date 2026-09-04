@@ -144,6 +144,8 @@
     { label: i18n.themeSystem, value: 'system' as const },
     { label: i18n.themeLight, value: 'light' as const },
     { label: i18n.themeDark, value: 'dark' as const },
+    { label: i18n.themeKohaku, value: 'kohaku' as const },
+    { label: i18n.themeMono, value: 'mono' as const },
   ]
 
   const locales: Array<{ label: string; value: Locale }> = [

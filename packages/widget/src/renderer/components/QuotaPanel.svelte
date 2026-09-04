@@ -66,6 +66,14 @@
 
   $: visible = quota.tools.filter((t) => !hiddenTools.includes(t.tool))
 
+  /*
+   * The threshold band, named so a theme without colour can mark it. 70 and
+   * 90 are the tray's numbers (quota.ts), chosen by eye there as here.
+   */
+  function levelOf(utilization: number): 'ok' | 'warn' | 'danger' {
+    return utilization >= 90 ? 'danger' : utilization >= 70 ? 'warn' : 'ok'
+  }
+
   /** Ten cells, because a bar is read as a proportion and not counted. */
   const CELLS = 10
 
@@ -127,7 +135,7 @@
               What is deliberately not here is the countdown. It is long, and
               it answers a different question from the one the strip is for.
             -->
-            <span class="strip-pct">{Math.round(line.utilization)}%</span>
+            <span class="strip-pct level-{levelOf(line.utilization)}">{Math.round(line.utilization)}%</span>
           </span>
         {/each}
       </div>
@@ -146,7 +154,7 @@
             </span>
           {/if}
           {#if detail !== 'meter'}
-            <span class="pct">{Math.round(line.utilization)}%</span>
+            <span class="pct level-{levelOf(line.utilization)}">{Math.round(line.utilization)}%</span>
           {/if}
           {#if detail === 'full'}
             <span class="left">
@@ -288,6 +296,19 @@
   .tier { color: var(--text-secondary); }
 
   .quota.compact { gap: 0.25rem; }
+
+  /*
+   * Mono: past 90, the number is ink behind white digits. The fill is already
+   * the darkest grey there; this is the second axis, for when one is enough
+   * to lose - a tiny strip, a glance, a bad screen.
+   */
+  :global(:root[data-theme="mono"]) .strip-pct.level-danger,
+  :global(:root[data-theme="mono"]) .pct.level-danger {
+    background: var(--text-primary);
+    color: var(--bg);
+    padding: 0 0.3em;
+    border-radius: 2px;
+  }
 
   .bar { display: inline-flex; gap: 2px; }
 

@@ -15,6 +15,7 @@
     tierLabel as tierLabelWith,
     toolLabel as toolLabelWith,
     utilizationBarColor,
+    utilizationColor,
     countdownStr,
     formatQueryTime as formatQueryTimeWith,
     isTrusted,
@@ -133,7 +134,9 @@
                 style="width: {pct}%; background: {utilizationBarColor(tier.utilization)}"
               ></div>
             </div>
-            <span class="tier-pct" style="color: {utilizationBarColor(tier.utilization)}">{pct}%</span>
+            <!-- level-* names the threshold band so a theme without colour
+                 can mark it another way (see the mono rules in the layout). -->
+            <span class="tier-pct level-{utilizationColor(tier.utilization)}">{pct}%</span>
           </div>
 
           {#if charts}
@@ -287,6 +290,17 @@
     border-radius: 99px;
     transition: width 0.4s ease;
   }
+
+  /*
+   * Coloured by class, not inline. An inline colour beats every stylesheet
+   * rule, which is how the mono theme first drew its inverted 95% as ink on
+   * ink: the white digits were set by a rule, the ink by the attribute, and the
+   * attribute won. The three tokens are the ones utilizationBarColor gives the
+   * bar, so the number and the bar still agree.
+   */
+  .tier-pct.level-green { color: var(--green); }
+  .tier-pct.level-orange { color: var(--warn-solid); }
+  .tier-pct.level-red { color: var(--rose); }
 
   .tier-pct {
     font-family: var(--mono);

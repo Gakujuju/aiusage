@@ -1382,6 +1382,27 @@
   }
   :global(.state-msg.error) { color: var(--rose); }
 
+  /*
+   * Mono: what colour used to carry, said another way.
+   *
+   * A percentage past 90 is drawn as ink behind white digits, on top of the
+   * fill already being the darkest grey - two axes, so losing one leaves the
+   * other. An error line goes bold with a rule beside it instead of red. The
+   * level-* class comes from utilizationColor in $lib/quota.js, so the
+   * threshold is the one the colour themes use.
+   */
+  :global(:root[data-theme="mono"] .tier-pct.level-red) {
+    background: var(--danger-solid);
+    color: var(--on-danger);
+    padding: 0 0.35em;
+    border-radius: var(--radius-badge);
+  }
+  :global(:root[data-theme="mono"] .state-msg.error) {
+    font-weight: 700;
+    border-left: 3px solid var(--text);
+    padding-left: 0.75rem;
+  }
+
   /* The way back on from a screen that was switched off. */
   .hidden-route-link {
     display: inline-block;

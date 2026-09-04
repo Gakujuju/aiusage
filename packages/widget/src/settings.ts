@@ -3,10 +3,11 @@ import { homedir } from 'node:os'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import type { CurrencyCode } from './currency'
 import { isSizeName, nearestSize } from './size'
+import type { WidgetTheme } from './theme'
 import type { SizeName } from './size'
 
 export interface WidgetSettings {
-  theme: 'system' | 'light' | 'dark'
+  theme: WidgetTheme
   refreshIntervalSec: number
   rangeDays: number
   /**

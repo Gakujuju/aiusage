@@ -88,6 +88,8 @@ export interface Translations {
   themeSystem: string
   themeLight: string
   themeDark: string
+  themeKohaku: string
+  themeMono: string
   showPanel: string
   openDashboard: string
   refresh: string
@@ -181,6 +183,8 @@ const en: Translations = {
   themeSystem: 'System',
   themeLight: 'Light',
   themeDark: 'Dark',
+  themeKohaku: 'Amber',
+  themeMono: 'Mono',
   showPanel: 'Show Panel',
   openDashboard: 'Open Dashboard',
   refresh: 'Refresh',
@@ -271,6 +275,8 @@ const ja: Translations = {
   themeSystem: 'システム',
   themeLight: 'ライト',
   themeDark: 'ダーク',
+  themeKohaku: '琥珀',
+  themeMono: '白黒',
   showPanel: 'パネルを表示',
   openDashboard: 'ダッシュボードを開く',
   refresh: '更新',
@@ -361,6 +367,8 @@ const zh: Translations = {
   themeSystem: '跟随系统',
   themeLight: '浅色',
   themeDark: '深色',
+  themeKohaku: '琥珀',
+  themeMono: '黑白',
   showPanel: '显示面板',
   openDashboard: '打开仪表盘',
   refresh: '刷新',
