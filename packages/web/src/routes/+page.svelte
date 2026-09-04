@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
 
   import { fetchSummary, refreshData as triggerRefresh, fetchConfig, fetchQuotas, SETTINGS_UPDATED_EVENT } from '$lib/api.js'
+  import QuotaCard from '$lib/components/QuotaCard.svelte'
   import CostCaveats from '$lib/components/CostCaveats.svelte'
   import { t } from '$lib/i18n.js'
   import { formatCost, displayCurrency, exchangeRate } from '$lib/stores.js'
@@ -142,12 +143,12 @@
     // Render whatever is already in the database first so the landing page is
     // never blocked on log parsing. Trae/large log sources can make /api/refresh
     // take tens of seconds; awaiting it here left the page stuck loading (issue #40).
-    await Promise.all([loadData(), loadQuotaWarnings()])
+    await Promise.all([loadData(), loadQuotas()])
     startRefreshCycle()
 
     // Kick off a fresh parse in the background, then quietly update once it lands.
     triggerRefresh()
-      .then(() => Promise.all([silentRefresh(), loadQuotaWarnings()]))
+      .then(() => Promise.all([silentRefresh(), loadQuotas()]))
       .catch(() => {})
 
     window.addEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdated)
@@ -200,26 +201,38 @@
       : '',
   ].filter(Boolean).join('\n')
 
-  // Quota warning: load once on mount, show banner when any tier >= 80%
-  let quotaWarnings = []
+  /*
+   * The quotas, fetched once, feeding two things: the cards at the top of
+   * the page and the warning banner. One fetch on purpose - the banner and
+   * the cards must never disagree, and two calls a minute apart can.
+   */
+  /** @type {any[]} */
+  let quotas = []
+  /** @type {string | null} Why the quotas could not be read; null while they can. */
+  let quotaError = null
 
-  async function loadQuotaWarnings() {
+  async function loadQuotas() {
     try {
       const result = await fetchQuotas()
-      const warnings = []
-      for (const quota of result?.quotas ?? []) {
-        if (!quota.success) continue
-        for (const tier of quota.tiers ?? []) {
-          if (tier.utilization >= 80) {
-            warnings.push({ tool: quota.tool, tier: tier.name, utilization: Math.round(tier.utilization) })
-          }
-        }
-      }
-      quotaWarnings = warnings
-    } catch {
-      // Quota warnings are non-critical — silently ignore errors
+      quotas = result?.quotas ?? []
+      quotaError = null
+    } catch (e) {
+      // Said on the page rather than swallowed: an empty space where the
+      // limits should be reads as "nothing to worry about", which is the one
+      // thing an unreachable hub does not mean.
+      quotaError = e instanceof Error ? e.message : 'Failed to load quota data'
     }
   }
+
+  /** The ones with credentials - the same filter the quotas page applies. */
+  $: activeQuotas = quotas.filter((q) => q.credentialStatus !== 'not_found')
+
+  // Banner for any tier at or past 80%, derived from the same result.
+  $: quotaWarnings = quotas.flatMap((quota) =>
+    !quota.success ? [] : (quota.tiers ?? [])
+      .filter((tier) => tier.utilization >= 80)
+      .map((tier) => ({ tool: quota.tool, tier: tier.name, utilization: Math.round(tier.utilization) })),
+  )
 
   const TOOL_SHORT = {
     'claude-code': 'Claude Code',
@@ -335,6 +348,22 @@
         </span>
         <a href="/quotas" class="warn-link">{$t('home.quotaWarningLink')} →</a>
       </div>
+    {/each}
+  </div>
+{/if}
+
+<!--
+  The limits, first. They are what the person opening this page is watching,
+  and they sit above the token figures on purpose. Same card as /quotas,
+  without the chart slot (no history is fetched here), from the one fetch
+  the banner above also reads.
+-->
+{#if quotaError}
+  <div class="home-quotas-error state-msg error"><p>{quotaError}</p></div>
+{:else if activeQuotas.length > 0}
+  <div class="home-quotas">
+    {#each activeQuotas as quota (quota.tool)}
+      <QuotaCard {quota} charts={false} />
     {/each}
   </div>
 {/if}
@@ -982,5 +1011,16 @@
       justify-self: end;
     }
     .cfg-btn { justify-self: end; }
+  }
+
+  .home-quotas {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .home-quotas-error {
+    margin-bottom: 1rem;
   }
 </style>
