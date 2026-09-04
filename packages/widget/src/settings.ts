@@ -96,7 +96,15 @@ const DEFAULT_SETTINGS: WidgetSettings = {
   quotaDetail: 'full',
   hiddenTools: [],
   collapsed: false,
-  alwaysOnTop: true,
+  /*
+   * Off by default, since 2026-09-04: the person using it asked for the box
+   * to start unticked. Note that this only reaches machines that have never
+   * saved their settings - every save writes the whole object, defaults
+   * included, so the three existing files carry true and keep it until it
+   * is unticked by hand. There is no migration on purpose: a true written
+   * as a default and a true someone chose look identical in the file.
+   */
+  alwaysOnTop: false,
   /*
    * Off, because the window's subject changed.
    *
