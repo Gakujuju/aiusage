@@ -1,0 +1,93 @@
+/*
+ * GENERATED FILE - DO NOT EDIT.
+ *
+ * Source: scripts/theme/palette.cjs   (regenerate: node scripts/theme/generate.cjs)
+ * The build and pretest fail if this file differs from what the table produces,
+ * so an edit made here is an edit that stops the build until it is made in the
+ * table instead. That is deliberate.
+ * Output: widget, the nineteen properties it uses, mapped by WIDGET_VARS
+ */
+:root {
+  --bg: oklch(0.985 0.004 175);
+  --surface: oklch(0.995 0.003 175);
+  --bg-hover: oklch(0.955 0.008 175);
+  --border: oklch(0.92 0.008 175);
+  --border-medium: oklch(0.87 0.01 175);
+  --text-primary: oklch(0.18 0.012 175);
+  --text-secondary: oklch(0.42 0.015 175);
+  --text-muted: oklch(0.6 0.012 175);
+  --accent: oklch(0.55 0.12 175);
+  --danger: oklch(0.48 0.2 25);
+  --chart-input: oklch(0.65 0.14 175);
+  --chart-output: oklch(0.6 0.15 250);
+  --chart-cache-read: oklch(0.7 0.1 65);
+  --chart-cache-write: oklch(0.65 0.12 310);
+  --chart-thinking: oklch(0.62 0.18 20);
+  --mark-claude: oklch(0.66 0.12 65);
+  --mark-codex: oklch(0.6 0.15 250);
+  --mark-copilot: oklch(0.6 0.16 300);
+}
+
+:root[data-theme="dark"] {
+  --bg: oklch(0.13 0.008 175);
+  --surface: oklch(0.19 0.01 175);
+  --bg-hover: oklch(0.28 0.014 175);
+  --border: oklch(0.30 0.012 175);
+  --border-medium: oklch(0.38 0.014 175);
+  --text-primary: oklch(0.95 0.005 175);
+  --text-secondary: oklch(0.78 0.01 175);
+  --text-muted: oklch(0.64 0.008 175);
+  --accent: oklch(0.72 0.12 175);
+  --danger: oklch(0.76 0.16 25);
+  --chart-input: oklch(0.74 0.13 175);
+  --chart-output: oklch(0.72 0.14 250);
+  --chart-cache-read: oklch(0.78 0.09 65);
+  --chart-cache-write: oklch(0.74 0.11 310);
+  --chart-thinking: oklch(0.73 0.17 20);
+  --mark-claude: oklch(0.7 0.1 65);
+  --mark-codex: oklch(0.6 0.15 250);
+  --mark-copilot: oklch(0.6 0.16 300);
+}
+
+:root[data-theme="kohaku"] {
+  --bg: oklch(0.962 0.018 82);
+  --surface: oklch(0.984 0.013 82);
+  --bg-hover: oklch(0.922 0.028 78);
+  --border: oklch(0.888 0.026 78);
+  --border-medium: oklch(0.818 0.034 76);
+  --text-primary: oklch(0.27 0.032 62);
+  --text-secondary: oklch(0.45 0.030 65);
+  --text-muted: oklch(0.60 0.026 68);
+  --accent: oklch(0.56 0.115 68);
+  --danger: oklch(0.45 0.160 28);
+  --chart-input: oklch(0.62 0.120 70);
+  --chart-output: oklch(0.55 0.090 235);
+  --chart-cache-read: oklch(0.60 0.100 130);
+  --chart-cache-write: oklch(0.55 0.120 330);
+  --chart-thinking: oklch(0.57 0.150 30);
+  --mark-claude: oklch(0.58 0.130 55);
+  --mark-codex: oklch(0.52 0.080 235);
+  --mark-copilot: oklch(0.52 0.110 330);
+}
+
+:root[data-theme="terminal"] {
+  --bg: oklch(0.21 0.028 195);
+  --surface: oklch(0.25 0.032 195);
+  --bg-hover: oklch(0.33 0.04 195);
+  --border: oklch(0.40 0.045 195);
+  --border-medium: oklch(0.55 0.07 195);
+  --text-primary: oklch(0.90 0.03 175);
+  --text-secondary: oklch(0.78 0.04 175);
+  --text-muted: oklch(0.62 0.04 190);
+  --accent: oklch(0.82 0.13 200);
+  --danger: oklch(0.76 0.20 25);
+  --chart-input: oklch(0.82 0.13 200);
+  --chart-output: oklch(0.74 0.19 330);
+  --chart-cache-read: oklch(0.80 0.15 75);
+  --chart-cache-write: oklch(0.74 0.12 110);
+  --chart-thinking: oklch(0.76 0.20 25);
+  --mark-claude: oklch(0.75 0.130 65);
+  --mark-codex: oklch(0.70 0.130 235);
+  --mark-copilot: oklch(0.70 0.140 300);
+}
+

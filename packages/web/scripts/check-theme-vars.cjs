@@ -21,7 +21,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = path.join(__dirname, '..')
-const LAYOUT = path.join(ROOT, 'src', 'routes', '+layout.svelte')
+/*
+ * The palettes live in scripts/theme/palette.cjs and are generated into this
+ * file (2026-09-04). The layout keeps only geometry now, so this is where the
+ * blocks are; generate.cjs --check separately holds the file to the table.
+ */
+const LAYOUT = path.join(ROOT, 'src', 'lib', 'themes.generated.css')
 const THEME_JS = path.join(ROOT, 'src', 'lib', 'theme.js')
 const I18N = path.join(ROOT, 'src', 'lib', 'i18n.js')
 
@@ -149,7 +154,7 @@ for (const b of blocks) {
 }
 
 if (base.size === 0) {
-  console.error('theme vars: found no :root palette in src/routes/+layout.svelte')
+  console.error('theme vars: found no :root palette in src/lib/themes.generated.css')
   process.exit(1)
 }
 

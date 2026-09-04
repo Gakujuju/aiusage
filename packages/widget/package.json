@@ -36,11 +36,11 @@
   },
   "scripts": {
     "dev": "concurrently --names \"vite,tsc,electron\" --kill-others --success command-electron \"vite build --watch\" \"tsc -p tsconfig.json --watch\" \"node -e \\\"require('wait-on')({resources:['dist/main.js']},()=>{const c=require('child_process').spawn(require('electron'),['.'],{stdio:'inherit'});c.on('exit',(code,signal)=>process.exit(code ?? (signal ? 1 : 0)))})\\\"\"",
-    "build": "node -e \"require('fs').rmSync('dist/renderer',{recursive:true,force:true})\" && vite build && tsc -p tsconfig.json",
+    "build": "node ../../scripts/theme/generate.cjs --check && node -e \"require('fs').rmSync('dist/renderer',{recursive:true,force:true})\" && vite build && tsc -p tsconfig.json",
     "pack": "pnpm build && electron-builder",
     "test": "vitest run",
     "check:css-vars": "node ../../scripts/check-css-vars.cjs .",
-    "pretest": "node ../../scripts/check-css-vars.cjs . && pnpm check:types",
+    "pretest": "node ../../scripts/theme/generate.cjs --check && node ../../scripts/check-css-vars.cjs . && pnpm check:types",
     "check:types": "svelte-check --tsconfig ./tsconfig.renderer.json --threshold error"
   },
   "dependencies": {

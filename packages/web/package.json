@@ -4,11 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "svelte-kit sync && vite build",
+    "build": "node ../../scripts/theme/generate.cjs --check && svelte-kit sync && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "check:css-vars": "node ../../scripts/check-css-vars.cjs .",
-    "pretest": "node ../../scripts/check-css-vars.cjs . && node scripts/check-theme-vars.cjs",
+    "pretest": "node ../../scripts/theme/generate.cjs --check && node ../../scripts/check-css-vars.cjs . && node scripts/check-theme-vars.cjs",
     "check:theme-vars": "node scripts/check-theme-vars.cjs"
   },
   "devDependencies": {
