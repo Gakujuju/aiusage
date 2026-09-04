@@ -81,13 +81,6 @@ const MAX_REPORTED_FLOOR = 400
  */
 const FRAMELESS_MIN_HEIGHT_WIN = 39
 
-/*
- * How big the window is drawn: one of four named sizes, in size.ts.
- *
- * This used to be a zoom factor in 0.1 steps with its own floor and its own
- * reasons. The sizes carry those reasons now, next to the numbers they
- * justify, and there is one thing to pick rather than a dial.
- */
 const FX_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
 let tray: Tray | null = null
@@ -246,32 +239,35 @@ app.whenReady().then(async () => {
    * answers. One that does not is worth saying out loud rather than sitting
    * in the tray with nothing behind it.
    */
+  /*
+   * Whatever the hub says at startup, this starts.
+   *
+   * It used to exit on "unreachable", on the theory that nothing typed into
+   * this window changes whether another machine is answering. True, and
+   * beside the point once the widget is launched at logon: it starts in the
+   * same second as serve, asks before serve is listening, and exits - every
+   * boot, silently. To the person at the keyboard that is "the widget does
+   * not come up", which is the third thing this week that failed by
+   * quietly not being there.
+   *
+   * So the answer here only decides what the window says first. The refresh
+   * timer keeps asking on its interval, and the moment the hub answers the
+   * message turns into numbers - with no restart, and with no second launch
+   * path for a special "started at logon" case. One path, wait until it
+   * answers, covers every case.
+   */
   let needsPassword = false
   try {
     await hub.get('/api/quotas')
   } catch (error) {
     const kind = error instanceof HubError ? error.kind : 'unexpected'
+    hubProblem = kind
     if (kind === 'unauthorized') {
-      /*
-       * Started anyway, on purpose.
-       *
-       * This used to exit with a message saying to open the widget settings
-       * and enter the password - and the widget settings are inside the
-       * window this was about to refuse to open. The message was true and
-       * there was no way to act on it.
-       *
-       * A 401 is the one failure here that is ours and fixable from this
-       * side, so the thing that fixes it has to stay open. Unreachable is
-       * different: nothing typed into this window changes whether another
-       * machine is answering, so that one still declines to start.
-       */
+      // Ours to fix, from this side: bring the settings up on the password.
       needsPassword = true
-      hubProblem = 'unauthorized'
       say(`the hub at ${url} refused the password - starting so it can be entered.`)
     } else {
-      say(`cannot reach the hub at ${url} (${kind}). Not starting.`)
-      app.exit(0)
-      return
+      say(`cannot reach the hub at ${url} (${kind}) - starting anyway and retrying every ${settings.refreshIntervalSec}s.`)
     }
   }
 

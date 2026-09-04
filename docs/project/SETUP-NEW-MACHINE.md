@@ -571,11 +571,48 @@ BOM 付きの config.json は `JSON.parse` が落ち、
 
 保存すると**再起動なしで**数字が出る。
 
+### 11-5b. ウィジェットの自動起動（ログオン時・1度きり）
+
+`scripts\write-update-cmd.ps1` が `start-widget.cmd` と `start-widget-hidden.vbs` を
+`~/.aiusage/` に書く。**serve のタスクとは別のタスク**にする ── serve は5分ごとの
+見張り付きで、ウィジェットは1度きり。性質が違うものを同じタスクに載せない。
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$env:USERPROFILE\.aiusage\start-widget-hidden.vbs`""
+$atLogon = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+Register-ScheduledTask -TaskName aiusage-widget -Action $action -Trigger $atLogon -Settings $settings -Description "aiusage widget at logon"
+```
+
+登録に管理者が要るかは手順8と同じ事情（アカウントによる）。
+**`-ExecutionTimeLimit` は2分でよい**: CLI は Electron を切り離して数秒で終わり、
+ウィジェットはタスクとは別に生き続ける。
+
+ログオン直後は serve がまだ listen していないことが多い。
+**ウィジェットは繋がらなくても起動し**、帯に「ハブに繋がりません」を出して
+更新間隔ごとに聞き直す。serve が上がった次の更新で数字に変わる。
+以前は unreachable で静かに終了していたので、自動起動が毎回「出ない」になっていた。
+
+差し替え（登録済みの端末）:
+
+```powershell
+$new = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$env:USERPROFILE\.aiusage\start-widget-hidden.vbs`""
+Set-ScheduledTask -TaskName aiusage-widget -Action $new
+```
+
+`Unregister` → `Register` にしないこと（手順 8-b と同じ理由）。
+起動の記録は `~/.aiusage/widget-launch.log`（どのチェックアウトから起動したか）。
+
 ### 11-6. 二重起動
 
 **2026-09-03 以降は起きない。** ウィジェット自身が
 `app.requestSingleInstanceLock()` を持ち、2つ目は即座に終了する。
 OS が持つロックなので、**どの起動経路でも効き、古くならない。**
+
+CLI 側の `widget.pid` による判定は **2026-09-04 に外した。**
+書く側がもう無く、再起動後は同じ pid を別のプロセスが持ちうるので、
+「既に動いている」と誤判定して自動起動が静かに何もしない ── 確かめられない
+pid ファイルは信じない。残っている `widget.pid` は無視されるだけで、消さなくてよい。
 
 以前は CLI 側の `~/.aiusage/widget.pid` だけが見張っていた。
 これには穴が2つあった:

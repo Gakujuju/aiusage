@@ -1,18 +1,26 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AIUSAGE_DIR } from '../config.js'
-
-const WIDGET_PID_PATH = join(AIUSAGE_DIR, 'widget.pid')
-
+/*
+ * No "is it already running" check here, on purpose.
+ *
+ * There was one, reading ~/.aiusage/widget.pid and asking the OS whether
+ * that pid was alive. Two things were wrong with it. Nothing writes that
+ * file any more, so whatever it says is history. And after a reboot the
+ * number in it can belong to any process at all - the OS hands pids out
+ * again - so "alive" could mean "some other program", and a launch at
+ * logon would then decide the widget was already up and do nothing,
+ * silently, on exactly the boot where it was needed.
+ *
+ * A pid the file cannot vouch for is not evidence, and the file cannot
+ * vouch for anything. The widget holds an OS single-instance lock (see
+ * main.ts); a second launch quits itself in the first few milliseconds and
+ * hands focus to the one that is running, which is the right answer here
+ * as well. So this launches, and lets the lock decide.
+ */
 export async function launchWidget(): Promise<void> {
-  if (isWidgetRunning()) {
-    console.log('aiusage widget is already running in the system tray.')
-    return
-  }
-
   const target = resolveWidget()
 
   if (target.kind === 'nothing') {
@@ -49,26 +57,6 @@ export async function launchWidget(): Promise<void> {
   console.log(target.kind === 'workspace'
     ? `aiusage widget started from this checkout: ${target.appDir}`
     : `aiusage widget started from the installed package: ${target.command}`)
-}
-
-function isWidgetRunning(): boolean {
-  if (!existsSync(WIDGET_PID_PATH)) return false
-
-  let pid: number
-  try {
-    pid = parseInt(readFileSync(WIDGET_PID_PATH, 'utf-8').trim(), 10)
-  } catch {
-    return false
-  }
-
-  if (isNaN(pid)) return false
-
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err: any) {
-    return err.code !== 'ESRCH'
-  }
 }
 
 type WidgetTarget =
