@@ -106,12 +106,51 @@
     beginDrag(event)
   }
 
+  /**
+   * When the strip last became the window, for the double-click guard below.
+   */
+  let unfoldedAt = 0
+
   async function setCollapsed(next: boolean) {
     if (!settings) return
+    /*
+     * Folding closes the settings. The strip is the small form of the panel,
+     * not of the settings, so what comes back when it is opened again is the
+     * panel - a strip that reopened onto the settings was reported as a
+     * fault, and it was one. Done here so every way of folding (the ▾, a
+     * double-click on the panel) behaves the same without each saying so.
+     */
+    if (next) showSettings = false
+    else unfoldedAt = Date.now()
     // Through the same save path as every other setting, so the persisted
     // value and the drawn value cannot drift apart.
     settings = (await window.widget?.saveSettings({ ...settings, collapsed: next })) ?? settings
     void tick().then(reportWindowHeight)
+  }
+
+  /*
+   * A double-click on the open panel folds it - the same setCollapsed the ▾
+   * uses, so the two cannot drift apart.
+   *
+   * The strip has no double-click: opening is one click, and waiting to see
+   * whether a second one is coming would put a delay on the one action the
+   * strip exists for. Which creates the case this guard is for: a quick
+   * double-click on the strip opens it on the first click and would fold it
+   * again on the second, landing on the panel that has just appeared. For
+   * 400ms after unfolding (the instruction's number, not measured) a
+   * double-click on the panel is ignored.
+   *
+   * Controls are left to themselves: a double-click on a button, or in a
+   * field where it selects a word, is that control's business.
+   */
+  const UNFOLD_GRACE_MS = 400
+
+  function panelDoubleClick(event: MouseEvent) {
+    if (collapsed) return
+    if (Date.now() - unfoldedAt < UNFOLD_GRACE_MS) return
+    const target = event.target as Element | null
+    if (target?.closest('button, input, select, textarea, a')) return
+    void setCollapsed(true)
   }
 
   /*
@@ -383,7 +422,8 @@
     : i18n.installPreparing
 </script>
 
-<div class="panel" class:loading class:collapsed bind:this={panelEl}>
+<!-- svelte-ignore a11y-no-static-element-interactions -->
+<div class="panel" class:loading class:collapsed bind:this={panelEl} on:dblclick={panelDoubleClick}>
   {#if installPhase}
     <div class="install-overlay" class:failed={installPhase === 'failed'} class:done={installPhase === 'done'}>
       <div class="install-content">
